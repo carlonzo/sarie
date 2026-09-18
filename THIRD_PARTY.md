@@ -31,3 +31,14 @@
   (both verified present on Google Maven), **JUnit 4.13.2**, **mockwebserver3 5.5.0**, **ASM 9.7.1**.
 - compileSdk 37 (platform dir `android-37.0` on disk), minSdk 24, targetSdk 37 (applies to the
   application module introduced in a later todo).
+
+<!-- golden-bytecode:start -->
+## Golden bytecode artifacts
+- `com.squareup.okhttp3:okhttp-android:5.5.0` AAR sha256: `6c7fd12f092e64ca2eae0b8a8023900c0d7ffec57888cf8abc8085c6f42e1dcc`
+  (source of stock/android golden).
+- `com.squareup.okhttp3:okhttp-jvm:5.5.0` JAR sha256: `234194a04aac54858df0a750d243af7b2e39df5e4eb86e9912043ad33a9f9a52`
+  (source of stock/jvm golden).
+- `okhttp3/internal/connection/ConnectInterceptor.class` sha256: android `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527`,
+  jvm `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527`.
+- Regenerate: `JAVA_HOME=<temurin-21> plugin-build/scripts/generate-fingerprints.sh`.
+<!-- golden-bytecode:end -->

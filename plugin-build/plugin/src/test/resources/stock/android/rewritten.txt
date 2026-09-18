@@ -1,0 +1,44 @@
+// class version 52.0 (52)
+// access flags 0x31
+public final class okhttp3/internal/connection/ConnectInterceptor implements okhttp3/Interceptor {
+
+  // compiled from: ConnectInterceptor.kt
+
+  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={"\u0000\u0018\n\u0002\u0018\u0002\n\u0002\u0018\u0002\n\u0002\u0008\u0003\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0000\u0008\u00c6\u0002\u0018\u00002\u00020\u0001B\u0009\u0008\u0002\u00a2\u0006\u0004\u0008\u0002\u0010\u0003J\u0010\u0010\u0004\u001a\u00020\u00052\u0006\u0010\u0006\u001a\u00020\u0007H\u0016\u00a8\u0006\u0008"}, d2={"Lokhttp3/internal/connection/ConnectInterceptor;", "Lokhttp3/Interceptor;", "<init>", "()V", "intercept", "Lokhttp3/Response;", "chain", "Lokhttp3/Interceptor$Chain;", "okhttp"})
+  // access flags 0x609
+  public static abstract INNERCLASS okhttp3/Interceptor$Chain okhttp3/Interceptor Chain
+
+  // access flags 0x19
+  public final static Lokhttp3/internal/connection/ConnectInterceptor; INSTANCE
+  @Lorg/jetbrains/annotations/NotNull;() // invisible
+
+  // access flags 0x2
+  private <init>()V
+   L0
+    LINENUMBER 28 L0
+    ALOAD 0
+    INVOKESPECIAL java/lang/Object.<init> ()V
+    RETURN
+   L1
+    LOCALVARIABLE this Lokhttp3/internal/connection/ConnectInterceptor; L0 L1 0
+    MAXSTACK = 1
+    MAXLOCALS = 1
+
+  // access flags 0x1
+  public intercept(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response; throws java/io/IOException
+    ALOAD 1
+    INVOKESTATIC dev/okhttpcronet/bridge/CronetBridge.intercept (Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;
+    ARETURN
+    MAXSTACK = 1
+    MAXLOCALS = 2
+
+  // access flags 0x8
+  static <clinit>()V
+    NEW okhttp3/internal/connection/ConnectInterceptor
+    DUP
+    INVOKESPECIAL okhttp3/internal/connection/ConnectInterceptor.<init> ()V
+    PUTSTATIC okhttp3/internal/connection/ConnectInterceptor.INSTANCE : Lokhttp3/internal/connection/ConnectInterceptor;
+    RETURN
+    MAXSTACK = 2
+    MAXLOCALS = 0
+}
