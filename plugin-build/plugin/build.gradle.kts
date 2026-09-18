@@ -20,6 +20,8 @@ dependencies {
     compileOnly("com.squareup.okhttp3:okhttp:5.5.0")
     testImplementation(gradleTestKit())
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.ow2.asm:asm:9.7.1")
+    testImplementation("com.squareup.okhttp3:okhttp:5.5.0")
 }
 
 kotlin {

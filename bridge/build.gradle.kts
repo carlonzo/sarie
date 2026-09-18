@@ -16,6 +16,13 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions {
+        unitTests {
+            // JVM tests touch android.jar stubs; return defaults instead of throwing.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 kotlin {
@@ -25,8 +32,10 @@ kotlin {
 }
 
 dependencies {
-    api(libs.okhttp)
+    implementation(libs.okhttp)
     compileOnly(libs.cronet.api)
+    testImplementation(libs.cronet.api)
+    testImplementation(libs.okhttp)
     testImplementation(libs.junit)
     testImplementation(libs.mockwebserver3)
 }
