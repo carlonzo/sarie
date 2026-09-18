@@ -15,9 +15,21 @@ import org.objectweb.asm.Opcodes
 object ConnectInterceptorRewriter {
 
     private const val TARGET_CLASS = "okhttp3/internal/connection/ConnectInterceptor"
-    private const val INTERCEPT_NAME = "intercept"
-    private const val INTERCEPT_DESC = "(Lokhttp3/Interceptor\$Chain;)Lokhttp3/Response;"
-    private const val BRIDGE_OWNER = "dev/okhttpcronet/bridge/CronetBridge"
+    internal const val INTERCEPT_NAME = "intercept"
+    internal const val INTERCEPT_DESC = "(Lokhttp3/Interceptor\$Chain;)Lokhttp3/Response;"
+    internal const val BRIDGE_OWNER = "dev/okhttpcronet/bridge/CronetBridge"
+
+    /**
+     * Emits the trampoline body into [delegate]. Single source of the rewritten bytecodes,
+     * shared with the AGP visitor in [ConnectInterceptorGuardVisitor].
+     */
+    internal fun emitTrampoline(delegate: MethodVisitor) {
+        delegate.visitCode()
+        delegate.visitVarInsn(Opcodes.ALOAD, 1)
+        delegate.visitMethodInsn(Opcodes.INVOKESTATIC, BRIDGE_OWNER, INTERCEPT_NAME, INTERCEPT_DESC, false)
+        delegate.visitInsn(Opcodes.ARETURN)
+        delegate.visitMaxs(1, 2)
+    }
 
     fun rewrite(classBytes: ByteArray): ByteArray {
         val reader = ClassReader(classBytes)
@@ -39,17 +51,7 @@ object ConnectInterceptorRewriter {
                 found = true
                 return object : MethodVisitor(Opcodes.ASM9) {
                     override fun visitCode() {
-                        delegate.visitCode()
-                        delegate.visitVarInsn(Opcodes.ALOAD, 1)
-                        delegate.visitMethodInsn(
-                            Opcodes.INVOKESTATIC,
-                            BRIDGE_OWNER,
-                            INTERCEPT_NAME,
-                            INTERCEPT_DESC,
-                            false,
-                        )
-                        delegate.visitInsn(Opcodes.ARETURN)
-                        delegate.visitMaxs(1, 2)
+                        emitTrampoline(delegate)
                     }
 
                     // Original body, frames, line numbers, locals and annotations are discarded.
