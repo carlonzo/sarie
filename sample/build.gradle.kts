@@ -1,5 +1,7 @@
 plugins {
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    id("dev.okhttpcronet.transport")
 }
 
 android {
@@ -8,7 +10,9 @@ android {
     compileSdkVersion = "android-37.0"
 
     defaultConfig {
+        applicationId = "dev.okhttpcronet.sample"
         minSdk = 24
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     compileOptions {
@@ -17,6 +21,25 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 dependencies {
-    testImplementation(libs.junit)
+    implementation(project(":bridge"))
+    implementation(libs.okhttp)
+    // Compile-only: main sources only build the engine; cronet-embedded supplies the
+    // implementation (API + natives) on the device at instrumentation time.
+    compileOnly(libs.cronet.api)
+    // Referenced by SampleAppRuntime to fetch a Context; only ever invoked from androidTest.
+    compileOnly(libs.androidx.test.core)
+
+    implementation(libs.cronet.embedded)
+
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.mockwebserver3)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core)
 }
