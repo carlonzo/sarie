@@ -38,11 +38,14 @@ import org.chromium.net.UrlRequest
  * itself, which would recurse into this bridge).
  *
  * Bounded differences on the Cronet path (compatibility contract):
- * - No Exchange is ever created, so OkHttp emits no connect/DNS/header/body events and NEVER
- *   fires callEnd/callFailed: the response returned from this method is the last OkHttp-internal
- *   event; body streaming happens outside OkHttp's event model.
- * - callTimeout is not enforced on this path (its expiry check runs in callDone); readTimeout
- *   bounds the header wait and every body read instead.
+ * - No Exchange is ever created, so OkHttp emits no connect/DNS/request-header/response-header
+ *   or body events. [okhttp3.EventListener.callEnd] still fires at header return: when the
+ *   response unwinds, RealCall.getResponseWithInterceptorChain's finally runs
+ *   noMoreExchanges -> callDone (bytecode-verified on 5.5.0), and callDone fires callEnd since
+ *   no stream flags were ever opened. callFailed fires only if the chain fails before that.
+ * - callTimeout is evaluated inside callDone, so it bounds the pre-return (header) phase only;
+ *   body streaming happens after callDone and is bounded by readTimeout (header wait and every
+ *   body read).
  * - Network interceptors never run (policy denies clients that have them).
  * - No fabricated metadata: handshake, networkResponse and sentRequestAtMillis stay unset.
  * - Redirects surface as 3xx with an empty body for OkHttp's follow-up logic to follow.
