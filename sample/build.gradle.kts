@@ -17,6 +17,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    buildTypes {
+        // R8-minified variant the critical instrumented suite runs against (todo 10).
+        // Keep rules live in proguard-rules.pro; each one names the exact linkage failure
+        // it fixes. Never disable minification to make the suite pass.
+        create("minifiedRelease") {
+            isMinifyEnabled = true
+            isShrinkResources = false
+            signingConfig = signingConfigs.getByName("debug")
+            // :bridge only has debug/release; consume its release variant here.
+            matchingFallbacks += "release"
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -26,6 +43,22 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+// AGP creates the androidTest component only for `testBuildType` (default "debug"); force-
+// enable it for minifiedRelease too so both connected*AndroidTest tasks coexist.
+androidComponents {
+    beforeVariants(selector().all()) { variantBuilder ->
+        if (variantBuilder.name == "minifiedRelease") {
+            variantBuilder.androidTestEnabled = true
+        }
+    }
+    onVariants(selector().all()) { variant ->
+        // AGP's androidTest R8 task (keepAllForTest) inherits only dependency consumer
+        // rules - NOT the build type's proguardFiles - so the -dontwarn rules for the
+        // androidx.test errorprone annotations must be fed to it explicitly.
+        variant.androidTest?.proguardFiles?.add(layout.projectDirectory.file("proguard-rules.pro"))
     }
 }
 
@@ -174,7 +207,7 @@ val verifyH3ServerEvidence = tasks.register("verifyH3ServerEvidence") {
     }
 }
 
-tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+tasks.matching { it.name.startsWith("connected") && it.name.endsWith("AndroidTest") }.configureEach {
     dependsOn(startTestOrigin)
     finalizedBy(verifyH3ServerEvidence, stopTestOrigin)
 }
