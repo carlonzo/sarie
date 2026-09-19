@@ -1,9 +1,18 @@
 # Third-party provenance
 
 1. **google/cronet-transport-for-okhttp**
-   - Upstream: https://github.com/google/cronet-transport-for-okhttp @ commit `eda650fbc9b5279b6219160c2a0b210b28303fd7`
+   - Upstream: https://github.com/cronet-transport-for-okhttp/cronet-transport-for-okhttp (Google) @ commit `eda650fbc9b5279b6219160c2a0b210b28303fd7`
    - License: Apache-2.0
-   - Use: request/response mapper ported in later todos.
+   - Use: request/response mapper ported into `bridge/src/main/kotlin/dev/okhttpcronet/bridge/mapping/`;
+     ported files keep their Apache-2.0 license headers:
+     - `RequestConverter.kt` <- upstream `java/com/google/net/cronet/okhttptransport/RequestResponseConverter.java`
+       (+ `RequestBodyConverterImpl.java` for the upload provider)
+     - `ResponseConverter.kt` <- upstream `ResponseConverter.java` (incl. the
+       `keepEncodingAffectedHeaders` logic)
+     - `OkHttpBridgeCallback.kt` <- upstream `OkHttpBridgeRequestCallback.java` (Guava futures
+       replaced with plain futures/queues)
+     - `UploadDataProviders.kt` <- upstream upload-provider adaptation
+   - Not ported: `RedirectStrategy.java` (the bridge never follows redirects inside Cronet).
 
 2. **square/okhttp**
    - Upstream: https://github.com/square/okhttp @ tag `parent-5.5.0`
@@ -15,9 +24,35 @@
    - License: BSD-3-style Chromium license
    - Use: engine runtime (consumed via Google Maven artifacts).
 
-## Per-todo upstream test provenance (appended during execution)
+## Per-todo upstream test provenance
 
-(to be appended as todos port upstream-derived tests)
+### Port test provenance (final)
+
+Which suite tests derive from upstream patterns, and from what:
+
+- **Google bridge testapp pattern (local CA + network security config).** The local
+  HTTP/3 origin's TLS setup follows the upstream testapp approach of trusting a locally
+  generated CA through Android's network security config rather than a custom OkHttp
+  SSL socket factory (a custom factory would itself trigger the trust fallback):
+  `scripts/gen-certs.sh` (deterministic CA + leaf, SANs `DNS:localhost, IP:127.0.0.1,
+  IP:10.0.2.2`), `sample/src/main/res/raw/caddy_root_ca`,
+  `sample/src/main/res/xml/network_security_config.xml`.
+- **h3-proof structure.** `CronetSuite.h3NegotiatedAgainstPublicOrigin` /
+  `MinifiedSuite.publicOriginH3ThroughTrampoline` follow the structure of Google's
+  `CronetHttp3Test` (assert negotiated h3 through the transport against an h3-only
+  origin; plan todo 9 reference, structure only) — adapted to the public h3-only origin
+  because local-anchor QUIC is engine-blocked (see `COMPATIBILITY.md` row 23).
+- **OkHttp semantics tests.** The JVM suite assertions (gzip/br decoding and
+  Content-Encoding/Content-Length stripping, 204/205/HEAD body rules, multi-value
+  headers, protocol mapping incl. `h3-29` -> `HTTP_3`, streaming reads and byteCount
+  limits, readTimeout stall abort, cancel semantics, redirect surfaces-as-3xx, 407
+  rejection) port the upstream transport's converter/callback test patterns and verify
+  OkHttp `parent-5.5.0` documented semantics against the pinned cronet-api doubles:
+  `ResponseConverterTest`, `OkHttpBridgeCallbackTest`, `UploadDataProvidersTest`,
+  `CronetBridgeTest`.
+- **Device suites (this project's own).** `BaselineSuite`, the remaining `CronetSuite`
+  cases, and `MinifiedSuite` are original to this project (policy routing, path metrics,
+  kill switch, R8 survival) — no upstream test source.
 
 ## Caddy HTTP/3 test origin
 
