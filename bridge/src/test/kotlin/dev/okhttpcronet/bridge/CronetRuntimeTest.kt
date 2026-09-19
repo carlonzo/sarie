@@ -64,6 +64,15 @@ class CronetRuntimeTest {
     }
 
     @Test
+    fun `verified set is exactly the supported okhttp versions`() {
+        assertEquals(setOf("5.4.0", "5.5.0"), VerifiedOkHttpVersions)
+        warnIfUnverified("5.5.0")
+        warnIfUnverified("5.4.0")
+        warnIfUnverified("5.5.1")
+        warnIfUnverified("4.12.0")
+    }
+
+    @Test
     fun `install stores snapshot`() {
         val engine = FakeCronetEngine()
         CronetRuntime.install(policy, engine, mapper)

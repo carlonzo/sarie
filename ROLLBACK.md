@@ -37,10 +37,12 @@ stock OkHttp): `CronetBridgeTest.fallback bytecode shape - initExchange and copy
 
 The plugin guards run on `preBuild` of every app module:
 
-- `verifyOkHttpPin` — fails if anything other than exactly `com.squareup.okhttp3:okhttp:5.5.0`
-  resolves on the runtime classpath.
+- `verifyOkHttpPin` — accepts the supported versions (currently 5.4.0 and 5.5.0), warns
+  if a newer untested okhttp is resolved, and fails on anything older (including OkHttp 4).
 - `verifyOkHttpFingerprint` — fails if the `ConnectInterceptor.class` inside the
-  `okhttp-android` AAR does not match the recorded SHA-256 fingerprint of stock 5.5.0.
+  `okhttp-android` AAR does not match the recorded SHA-256 fingerprint of that supported
+  version. Skipped (with the same untested warning) when the resolved version is newer
+  than the supported set.
 
 Recovery when OkHttp changes:
 
@@ -54,8 +56,9 @@ Recovery when OkHttp changes:
    the compatibility contract in `COMPATIBILITY.md` must be re-proven on the new bytecode,
    not assumed.
 
-Until step 2–4 are done, the build fails closed; it never silently rewrites an unverified
-OkHttp shape.
+Until step 2–4 are done, a newer okhttp is UNTESTED: the build warns and still applies
+the structural guard (which hard-fails on shape drift). Older okhttp, including every
+4.x release, is not supported and fails the pin task.
 
 ## 4. Engine ownership
 

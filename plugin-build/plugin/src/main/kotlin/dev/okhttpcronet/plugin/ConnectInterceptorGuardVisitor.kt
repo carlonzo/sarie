@@ -31,7 +31,9 @@ abstract class ConnectInterceptorVisitorFactory : AsmClassVisitorFactory<OkhttpC
         nextClassVisitor: ClassVisitor,
     ): ClassVisitor = ConnectInterceptorGuardVisitor(
         nextClassVisitor,
-        RecipeRegistry.forVersion(parameters.get().okhttpVersion.get()).guard,
+        // Every supported recipe shares this spec; UNTESTED (newer) versions use it as the
+        // structural net. Older/unsupported versions never reach instrumentation: the pin task fails first.
+        RecipeRegistry.familyGuard,
     )
 }
 

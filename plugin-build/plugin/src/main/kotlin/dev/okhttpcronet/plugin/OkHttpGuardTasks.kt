@@ -13,14 +13,56 @@ import java.util.zip.ZipInputStream
 
 private val OKHTTP_MODULES = setOf("okhttp", "okhttp-android", "okhttp-jvm")
 
+internal sealed class PinDecision {
+    data object Ok : PinDecision()
+    data class Warn(val message: String) : PinDecision()
+    data class Fail(val message: String) : PinDecision()
+}
+
+internal fun collectOkHttpVersions(classpaths: List<Configuration>): Set<String> {
+    val versions = sortedSetOf<String>()
+    for (configuration in classpaths) {
+        for (component in configuration.incoming.resolutionResult.allComponents) {
+            val module = component.moduleVersion ?: continue
+            if (module.group == "com.squareup.okhttp3" && module.name in OKHTTP_MODULES) {
+                versions += module.version
+            }
+        }
+    }
+    return versions
+}
+
 /**
- * Fails unless the okhttp version resolved on every runtimeClasspath matches
- * [expectedVersion] exactly. Resolution is deferred to task execution.
+ * Allowlist check against the resolved okhttp version: supported = ok, newer = warn,
+ * older / missing / mixed = fail.
+ */
+internal fun pinDecision(versions: Set<String>): PinDecision {
+    val supported = RecipeRegistry.recipes.keys.sorted()
+    if (versions.isEmpty()) {
+        return PinDecision.Fail(
+            "okhttp-cronet: no com.squareup.okhttp3:okhttp resolved on any runtimeClasspath; " +
+                "the trampoline rewrite has nothing to apply to. Add a supported okhttp version ($supported).",
+        )
+    }
+    if (versions.size != 1) {
+        return PinDecision.Fail(
+            "okhttp-cronet: multiple okhttp versions resolved (${versions.joinToString()}); " +
+                "supported: $supported",
+        )
+    }
+    val version = versions.first()
+    return when (RecipeRegistry.decide(version)) {
+        is VersionDecision.Verified -> PinDecision.Ok
+        is VersionDecision.Untested -> PinDecision.Warn(RecipeRegistry.untestedWarning(version))
+        is VersionDecision.Unsupported -> PinDecision.Fail(RecipeRegistry.unsupportedMessage(version))
+    }
+}
+
+/**
+ * Fails on unsupported/older/missing okhttp, warns on untested (newer) versions, and
+ * accepts any version in the supported allowlist. Resolution is deferred to task execution.
  */
 abstract class VerifyOkHttpPinTask : DefaultTask() {
-
-    @get:Input
-    abstract val expectedVersion: Property<String>
 
     // Configuration handles are wiring, not input state; their contents are read lazily below.
     @get:Internal
@@ -28,27 +70,10 @@ abstract class VerifyOkHttpPinTask : DefaultTask() {
 
     @TaskAction
     fun verify() {
-        val expected = expectedVersion.get()
-        val versions = sortedSetOf<String>()
-        for (configuration in runtimeClasspaths.get()) {
-            for (component in configuration.incoming.resolutionResult.allComponents) {
-                val module = component.moduleVersion ?: continue
-                if (module.group == "com.squareup.okhttp3" && module.name in OKHTTP_MODULES) {
-                    versions += module.version
-                }
-            }
-        }
-        if (versions.isEmpty()) {
-            throw GradleException(
-                "okhttp-cronet: no com.squareup.okhttp3:okhttp resolved on any runtimeClasspath; " +
-                    "the trampoline rewrite has nothing to apply to. Add okhttp $expected as an app dependency.",
-            )
-        }
-        if (versions.size != 1 || versions.first() != expected) {
-            throw GradleException(
-                "okhttp-cronet pins okhttp exactly $expected, resolved ${versions.joinToString(", ")}; " +
-                    "align your okhttp version",
-            )
+        when (val decision = pinDecision(collectOkHttpVersions(runtimeClasspaths.get()))) {
+            PinDecision.Ok -> Unit
+            is PinDecision.Warn -> logger.warn("[okhttp-cronet] ${decision.message}")
+            is PinDecision.Fail -> throw GradleException(decision.message)
         }
     }
 }
@@ -64,14 +89,23 @@ private const val CONNECT_INTERCEPTOR_ENTRY = "okhttp3/internal/connection/Conne
 abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
 
     @get:Input
-    abstract val okhttpVersion: Property<String>
-
-    @get:Input
     abstract val allowUnfingerprinted: Property<Boolean>
+
+    @get:Internal
+    abstract val runtimeClasspaths: ListProperty<Configuration>
 
     @TaskAction
     fun verify() {
-        val recipe = RecipeRegistry.forVersion(okhttpVersion.get())
+        val versions = collectOkHttpVersions(runtimeClasspaths.get())
+        when (val decision = pinDecision(versions)) {
+            is PinDecision.Fail -> throw GradleException(decision.message)
+            is PinDecision.Warn -> {
+                logger.warn("[okhttp-cronet] ${decision.message}")
+                return
+            }
+            PinDecision.Ok -> Unit
+        }
+        val recipe = RecipeRegistry.forVersion(versions.first())
         val allow = allowUnfingerprinted.get()
         for (variant in Variant.entries) {
             val coordinates = recipe.fingerprintArtifacts.getValue(variant)

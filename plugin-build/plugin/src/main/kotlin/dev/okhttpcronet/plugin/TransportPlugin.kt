@@ -17,7 +17,7 @@ abstract class OkhttpCronetExtension {
 
     init {
         enabled.convention(true)
-        okhttpVersion.convention("5.5.0")
+        // okhttpVersion is optional: the pin/fingerprint tasks read the resolved classpath.
         allowUnfingerprinted.convention(false)
     }
 }
@@ -49,14 +49,11 @@ class TransportPlugin : Plugin<Project> {
     private fun registerInstrumentation(project: Project, extension: OkhttpCronetExtension) {
         val androidComponents = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
         androidComponents.onVariants(androidComponents.selector().all()) { variant ->
-            // Fail the build at configuration time (with the known-version list) when the
-            // extension carries an okhttp version no recipe covers.
-            val recipe = RecipeRegistry.forVersion(extension.okhttpVersion.get())
             if (extension.enabled.get()) {
                 variant.instrumentation.transformClassesWith(
                     ConnectInterceptorVisitorFactory::class.java,
                     InstrumentationScope.ALL,
-                ) { params -> params.okhttpVersion.set(recipe.okhttpVersion) }
+                ) { params -> params.okhttpVersion.set("family") }
                 variant.instrumentation.setAsmFramesComputationMode(
                     FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
                 )
@@ -65,18 +62,17 @@ class TransportPlugin : Plugin<Project> {
     }
 
     private fun registerGuards(project: Project, extension: OkhttpCronetExtension) {
+        val classpaths = project.provider {
+            project.configurations.matching { config ->
+                config.isCanBeResolved &&
+                    (config.name == "runtimeClasspath" || config.name.endsWith("RuntimeClasspath"))
+            }.toList()
+        }
         val pin = project.tasks.register("verifyOkHttpPin", VerifyOkHttpPinTask::class.java) { task ->
             task.group = "verification"
-            task.description = "Fails unless the resolved okhttp version matches the pinned one."
-            task.expectedVersion.set(extension.okhttpVersion)
-            task.runtimeClasspaths.set(
-                project.provider {
-                    project.configurations.matching { config ->
-                        config.isCanBeResolved &&
-                            (config.name == "runtimeClasspath" || config.name.endsWith("RuntimeClasspath"))
-                    }.toList()
-                },
-            )
+            task.description = "Accepts supported okhttp versions, warns on untested (newer) ones, " +
+                "fails on older/unsupported ones (including okhttp 4)."
+            task.runtimeClasspaths.set(classpaths)
         }
         val fingerprint = project.tasks.register(
             "verifyOkHttpFingerprint",
@@ -84,8 +80,8 @@ class TransportPlugin : Plugin<Project> {
         ) { task ->
             task.group = "verification"
             task.description = "SHA-256-checks ConnectInterceptor.class inside the recipe's okhttp " +
-                "artifacts (android AAR + jvm jar)."
-            task.okhttpVersion.set(extension.okhttpVersion)
+                "artifacts (android AAR + jvm jar); skipped with a warning for untested versions."
+            task.runtimeClasspaths.set(classpaths)
             task.allowUnfingerprinted.set(extension.allowUnfingerprinted)
         }
         // AGP's project-level preBuild is the earliest hook every variant assembly depends on.

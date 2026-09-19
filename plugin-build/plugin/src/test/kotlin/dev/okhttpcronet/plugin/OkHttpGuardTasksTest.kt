@@ -93,6 +93,35 @@ class OkHttpGuardTasksTest {
         assertTrue(message.contains("allowUnfingerprinted=true tolerates the fingerprint mismatch"))
         assertTrue(message.contains("structural bytecode guard still hard-fails any shape drift"))
     }
+
+    @Test
+    fun `pinDecision accepts every supported version`() {
+        for (v in RecipeRegistry.recipes.keys) {
+            assertEquals(v, PinDecision.Ok, pinDecision(setOf(v)))
+        }
+    }
+
+    @Test
+    fun `pinDecision warns on newer untested versions`() {
+        val decision = pinDecision(setOf("5.5.1"))
+        assertTrue(decision is PinDecision.Warn)
+        assertTrue((decision as PinDecision.Warn).message.contains("UNTESTED"))
+    }
+
+    @Test
+    fun `pinDecision fails on older and okhttp 4`() {
+        for (v in listOf("4.12.0", "5.3.2")) {
+            val decision = pinDecision(setOf(v))
+            assertTrue(v, decision is PinDecision.Fail)
+            assertTrue(v, (decision as PinDecision.Fail).message.contains("not supported"))
+        }
+    }
+
+    @Test
+    fun `pinDecision fails when okhttp is missing or mixed`() {
+        assertTrue(pinDecision(emptySet()) is PinDecision.Fail)
+        assertTrue(pinDecision(setOf("5.4.0", "5.5.0")) is PinDecision.Fail)
+    }
 }
 
 private const val CONNECT_INTERCEPTOR_TEST_ENTRY = "okhttp3/internal/connection/ConnectInterceptor.class"

@@ -1,6 +1,6 @@
 # okhttp-cronet-transport
 
-A standalone Android project that lets any OkHttp 5.5.0 app speak HTTP/3 through Cronet
+A standalone Android project that lets any OkHttp 5.4 / 5.5 app speak HTTP/3 through Cronet
 without an OkHttp fork and without a user-visible interceptor: a host-app Gradle plugin
 rewrites exactly one OkHttp method at build time so requests first pass through a bridge
 that routes allowlisted origins over Cronet and everything else over stock OkHttp.
@@ -13,8 +13,8 @@ opt-out/rollback story.
 
 ## 60-second integration
 
-Requirements: an Android **application** module, OkHttp **5.5.0** (pinned and enforced —
-see "Toolchain requirements" below), minSdk 24.
+Requirements: an Android **application** module, a **supported OkHttp version** (5.4.0 or
+5.5.0; see "Toolchain requirements" below), minSdk 24.
 
 ### 1. Apply the plugin to your application module
 
@@ -37,7 +37,7 @@ with a warning there.
 ```kotlin
 // app/build.gradle.kts (dependencies block)
 dependencies {
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")   // exact pin, enforced by the plugin guards
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")   // 5.4.0 or 5.5.0 supported; newer warns, older fails
     implementation(project(":bridge"))                    // published-coordinate placeholder: dev.okhttpcronet.bridge
     implementation("org.chromium.net:cronet-embedded:143.7445.0") // supplies the engine (API + native libs)
 }
@@ -96,10 +96,12 @@ never run on the Cronet path. Full row-by-row contract with test citations:
 - **JDK 21** for building (`JAVA_HOME` must point at a Temurin 21 install; this repo pins
   `/home/carlo/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS`).
 - **minSdk 24** (bridge and sample), compileSdk 37.
-- **OkHttp pinned exactly 5.5.0** — the plugin enforces it at build time on every app
-  module: `verifyOkHttpPin` fails the build if a different okhttp resolves on the runtime
-  classpath, and `verifyOkHttpFingerprint` fails if the shipped `ConnectInterceptor.class`
-  does not match the recorded 5.5.0 bytecode fingerprint. Both run before `preBuild`.
+- **OkHttp 5.4.0 or 5.5.0** — the plugin reads the version resolved on the app runtime
+  classpath. `verifyOkHttpPin` accepts those supported versions, **warns** if a newer
+  untested version is resolved (the structural bytecode guard still runs; the fingerprint
+  identity check is skipped), and **fails** on anything older, including every OkHttp 4
+  release. `verifyOkHttpFingerprint` SHA-256-checks `ConnectInterceptor.class` against the
+  recorded golden for that supported version. Both run before `preBuild`.
 - AGP 8.13.0 / Gradle 8.14.3 / Kotlin 2.2.20 / cronet-api + cronet-embedded 143.7445.0
   (full pins and quirks in the table below and `THIRD_PARTY.md`).
 
