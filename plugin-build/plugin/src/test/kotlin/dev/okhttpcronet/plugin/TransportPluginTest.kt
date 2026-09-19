@@ -49,6 +49,23 @@ class TransportPluginTest {
                 result.output.contains("align your okhttp version"),
         )
     }
+
+    @Test(timeout = 1_800_000L)
+    fun `unknown okhttp version in the extension fails at configuration with the known list`() {
+        val dir = prepareFixture(PIN_OKHTTP_VERSION, extensionVersion = "9.9.9")
+        val result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(dir)
+            .withArguments("assembleDebug", "--console=plain")
+            .withEnvironment(System.getenv() + ("JAVA_HOME" to testJavaHome()))
+            .buildAndFail()
+        println(result.output) // evidence: configuration-time failure with the known-version list
+        assertTrue(
+            "expected the fail-closed recipe message, got:\n${result.output}",
+            result.output.contains("okhttp-cronet: no recipe for okhttp 9.9.9") &&
+                result.output.contains("known: [5.5.0]"),
+        )
+    }
 }
 
 private const val PIN_OKHTTP_VERSION = "5.5.0"
@@ -62,15 +79,19 @@ private fun testJavaHome(): String = System.getenv("JAVA_HOME") ?: TEST_JAVA_HOM
 
 /**
  * Copies the fixture into a fresh temp dir (TestKit must never build in-place), points it at the
- * Android SDK and optionally swaps the pinned okhttp version for a mismatch scenario.
+ * Android SDK, optionally swaps the pinned okhttp version for a mismatch scenario and optionally
+ * injects an okhttpCronet extension block (unknown-version configuration failure scenario).
  */
-private fun prepareFixture(okhttpVersion: String): File {
+private fun prepareFixture(okhttpVersion: String, extensionVersion: String? = null): File {
     val source = File("src/test/fixtures/sample-app")
     check(source.isDirectory) { "fixture not found at ${source.absolutePath}" }
     val dir = Files.createTempDirectory("okhttp-cronet-fixture-").toFile()
     source.copyRecursively(dir)
     val buildScript = File(dir, "build.gradle.kts")
     buildScript.writeText(buildScript.readText().replace("okhttp:5.5.0", "okhttp:$okhttpVersion"))
+    if (extensionVersion != null) {
+        buildScript.appendText("\nokhttpCronet { okhttpVersion.set(\"$extensionVersion\") }\n")
+    }
     val sdk = System.getenv("ANDROID_HOME") ?: ANDROID_SDK_DEFAULT
     File(dir, "local.properties").writeText("sdk.dir=${sdk.replace("\\", "\\\\")}\n")
     return dir

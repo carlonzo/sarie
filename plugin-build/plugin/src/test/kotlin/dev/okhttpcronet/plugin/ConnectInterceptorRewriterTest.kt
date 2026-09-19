@@ -10,28 +10,27 @@ import org.objectweb.asm.Opcodes
 
 class ConnectInterceptorRewriterTest {
 
-    private val variants = listOf("android", "jvm")
-
     @Test
-    fun `rewritten intercept is exactly the trampoline for both variants`() {
-        for (variant in variants) {
-            val rewritten = ConnectInterceptorRewriter.rewrite(stock(variant))
-            assertEquals(variant, expectedTrampoline, interceptInstructions(rewritten))
+    fun `rewritten intercept is exactly the trampoline for every recipe variant`() {
+        for ((version, variant) in allRecipeVariants()) {
+            val rewritten = ConnectInterceptorRewriter.rewrite(stock(version, variant))
+            assertEquals("$version/$variant", expectedTrampoline, interceptInstructions(rewritten))
         }
     }
 
     @Test
-    fun `all other members identical to stock for both variants`() {
-        for (variant in variants) {
-            val rewritten = ConnectInterceptorRewriter.rewrite(stock(variant))
-            assertEquals(variant, memberDump(stock(variant)), memberDump(rewritten))
+    fun `all other members identical to stock for every recipe variant`() {
+        for ((version, variant) in allRecipeVariants()) {
+            val golden = stock(version, variant)
+            val rewritten = ConnectInterceptorRewriter.rewrite(golden)
+            assertEquals("$version/$variant", memberDump(golden), memberDump(rewritten))
         }
     }
 
     @Test
-    fun `rewritten output re-parses cleanly for both variants`() {
-        for (variant in variants) {
-            val rewritten = ConnectInterceptorRewriter.rewrite(stock(variant))
+    fun `rewritten output re-parses cleanly for every recipe variant`() {
+        for ((version, variant) in allRecipeVariants()) {
+            val rewritten = ConnectInterceptorRewriter.rewrite(stock(version, variant))
             // EXPAND_FRAMES forces full parsing of the recomputed StackMapTable.
             ClassReader(rewritten).accept(EmptyVisitor, ClassReader.EXPAND_FRAMES)
             assertEquals("okhttp3/internal/connection/ConnectInterceptor", ClassReader(rewritten).className)

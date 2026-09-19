@@ -15,22 +15,31 @@ class FingerprintTest {
 
     @Test
     fun `baked constants equal sha256 of the stock goldens`() {
-        assertEquals(Fingerprint.OKHTTP_ANDROID_CLASS_SHA256, Fingerprint.sha256Hex(stock("android")))
-        assertEquals(Fingerprint.OKHTTP_JVM_CLASS_SHA256, Fingerprint.sha256Hex(stock("jvm")))
+        for ((version, variant) in allRecipeVariants()) {
+            val recipe = RecipeRegistry.forVersion(version)
+            assertEquals(
+                "$version/$variant",
+                recipe.fingerprints.getValue(variant),
+                Fingerprint.sha256Hex(stock(version, variant)),
+            )
+        }
     }
 
     @Test
     fun `mutated intercept body is detected with expected and actual hashes in the message`() {
-        val mutated = mutateInterceptBody(stock("jvm"))
-        val mutatedHash = Fingerprint.sha256Hex(mutated)
-        assertNotEquals(Fingerprint.OKHTTP_JVM_CLASS_SHA256, mutatedHash)
+        for ((version, variant) in allRecipeVariants()) {
+            val expected = RecipeRegistry.forVersion(version).fingerprints.getValue(variant)
+            val mutated = mutateInterceptBody(stock(version, variant))
+            val mutatedHash = Fingerprint.sha256Hex(mutated)
+            assertNotEquals("$version/$variant", expected, mutatedHash)
 
-        // The fingerprint check (as todo 7's guard will use it) must fail with BOTH hashes visible.
-        val error = assertThrows(AssertionError::class.java) {
-            assertEquals(Fingerprint.OKHTTP_JVM_CLASS_SHA256, Fingerprint.sha256Hex(mutated))
+            // The fingerprint check (as the guard task uses it) must fail with BOTH hashes visible.
+            val error = assertThrows(AssertionError::class.java) {
+                assertEquals(expected, Fingerprint.sha256Hex(mutated))
+            }
+            assertTrue(error.message, error.message!!.contains(expected))
+            assertTrue(error.message, error.message!!.contains(mutatedHash))
         }
-        assertTrue(error.message!!.contains(Fingerprint.OKHTTP_JVM_CLASS_SHA256))
-        assertTrue(error.message!!.contains(mutatedHash))
     }
 }
 

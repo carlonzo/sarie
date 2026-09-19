@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Generate golden stock/rewritten ConnectInterceptor artifacts for okhttp 5.5.0.
+# Generate golden stock/rewritten ConnectInterceptor artifacts for every okhttp version in
+# the recipe list (default: 5.5.0), plus the generated GoldenFingerprints.kt consumed by
+# RecipeRegistry.
 #
 # Deterministic + re-runnable: pinned Maven Central URLs, pinned ASM 9.7.1 for the
-# Textifier dump tool. Writes into plugin/src/test/resources/stock/ and refreshes the
-# "Golden bytecode artifacts" section of THIRD_PARTY.md (between the marker comments).
+# Textifier dump tool. Writes into plugin/src/test/resources/stock/<version>/{android,jvm}/
+# and refreshes the "Golden bytecode artifacts" section of THIRD_PARTY.md (between the
+# marker comments).
 #
 # rewritten.txt mirrors dev.okhttpcronet.plugin.ConnectInterceptorRewriter's algorithm
 # (discard intercept body, emit ALOAD 1 / INVOKESTATIC CronetBridge.intercept / ARETURN,
 # COMPUTE_FRAMES); the unit tests assert the instruction list independently.
 #
-# Usage: JAVA_HOME=<temurin-21> ./generate-fingerprints.sh
+# Usage: JAVA_HOME=<temurin-21> ./generate-fingerprints.sh [okhttp-version ...]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,28 +20,21 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/../plugin" && pwd)"   # plugin-build/plugin
 ROOT_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)"         # repo root
 RES="$PLUGIN_DIR/src/test/resources/stock"
 CACHE="$PLUGIN_DIR/build/golden-cache"
+GOLDEN_KT="$PLUGIN_DIR/src/main/kotlin/dev/okhttpcronet/plugin/GoldenFingerprints.kt"
 
-AAR_URL="https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp-android/5.5.0/okhttp-android-5.5.0.aar"
-JAR_URL="https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp-jvm/5.5.0/okhttp-jvm-5.5.0.jar"
+VERSIONS=("$@")
+if [ ${#VERSIONS[@]} -eq 0 ]; then
+  VERSIONS=(5.5.0)
+fi
+
 ASM_BASE="https://repo1.maven.org/maven2/org/ow2/asm"
 ASM_VER="9.7.1"
 
-mkdir -p "$CACHE" "$RES/android" "$RES/jvm"
-
+mkdir -p "$CACHE"
 fetch() { [ -s "$2" ] || curl -fsSL -o "$2" "$1"; }
-fetch "$AAR_URL" "$CACHE/okhttp-android-5.5.0.aar"
-fetch "$JAR_URL" "$CACHE/okhttp-jvm-5.5.0.jar"
 for m in asm asm-util asm-tree; do
   fetch "$ASM_BASE/$m/$ASM_VER/$m-$ASM_VER.jar" "$CACHE/$m-$ASM_VER.jar"
 done
-
-rm -rf "$CACHE/aar-x" "$CACHE/android-x" "$CACHE/jvm-x"
-unzip -q -o "$CACHE/okhttp-android-5.5.0.aar" classes.jar -d "$CACHE/aar-x"
-unzip -q -o "$CACHE/aar-x/classes.jar" okhttp3/internal/connection/ConnectInterceptor.class -d "$CACHE/android-x"
-unzip -q -o "$CACHE/okhttp-jvm-5.5.0.jar" okhttp3/internal/connection/ConnectInterceptor.class -d "$CACHE/jvm-x"
-
-cp "$CACHE/android-x/okhttp3/internal/connection/ConnectInterceptor.class" "$RES/android/ConnectInterceptor.class"
-cp "$CACHE/jvm-x/okhttp3/internal/connection/ConnectInterceptor.class" "$RES/jvm/ConnectInterceptor.class"
 
 JAVAC="${JAVA_HOME:+$JAVA_HOME/bin/}javac"
 JAVA="${JAVA_HOME:+$JAVA_HOME/bin/}java"
@@ -104,30 +100,68 @@ EOF
 "$JAVAC" -cp "$CP" -d "$CACHE/classes" "$CACHE/Dump.java"
 DUMP_TOOL="$CACHE/classes:$CP"
 
-ANDROID_HASH="$("$JAVA" -cp "$DUMP_TOOL" Dump "$RES/android/ConnectInterceptor.class" "$RES/android/stock.txt" "$RES/android/rewritten.txt")"
-JVM_HASH="$("$JAVA" -cp "$DUMP_TOOL" Dump "$RES/jvm/ConnectInterceptor.class" "$RES/jvm/stock.txt" "$RES/jvm/rewritten.txt")"
-AAR_SHA="$(sha256sum "$CACHE/okhttp-android-5.5.0.aar" | cut -d' ' -f1)"
-JAR_SHA="$(sha256sum "$CACHE/okhttp-jvm-5.5.0.jar" | cut -d' ' -f1)"
+# Per version: download both artifacts, extract ConnectInterceptor.class, dump + hash.
+# THIRD_PARTY.md section lines accumulate here.
+TP_LINES=""
+KT_BODY=""
+
+for V in "${VERSIONS[@]}"; do
+  AAR_URL="https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp-android/$V/okhttp-android-$V.aar"
+  JAR_URL="https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp-jvm/$V/okhttp-jvm-$V.jar"
+  VRES="$RES/$V"
+  mkdir -p "$VRES/android" "$VRES/jvm"
+
+  fetch "$AAR_URL" "$CACHE/okhttp-android-$V.aar"
+  fetch "$JAR_URL" "$CACHE/okhttp-jvm-$V.jar"
+
+  rm -rf "$CACHE/aar-x-$V" "$CACHE/android-x-$V" "$CACHE/jvm-x-$V"
+  unzip -q -o "$CACHE/okhttp-android-$V.aar" classes.jar -d "$CACHE/aar-x-$V"
+  unzip -q -o "$CACHE/aar-x-$V/classes.jar" okhttp3/internal/connection/ConnectInterceptor.class -d "$CACHE/android-x-$V"
+  unzip -q -o "$CACHE/okhttp-jvm-$V.jar" okhttp3/internal/connection/ConnectInterceptor.class -d "$CACHE/jvm-x-$V"
+
+  cp "$CACHE/android-x-$V/okhttp3/internal/connection/ConnectInterceptor.class" "$VRES/android/ConnectInterceptor.class"
+  cp "$CACHE/jvm-x-$V/okhttp3/internal/connection/ConnectInterceptor.class" "$VRES/jvm/ConnectInterceptor.class"
+
+  ANDROID_HASH="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/android/ConnectInterceptor.class" "$VRES/android/stock.txt" "$VRES/android/rewritten.txt")"
+  JVM_HASH="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/jvm/ConnectInterceptor.class" "$VRES/jvm/stock.txt" "$VRES/jvm/rewritten.txt")"
+  AAR_SHA="$(sha256sum "$CACHE/okhttp-android-$V.aar" | cut -d' ' -f1)"
+  JAR_SHA="$(sha256sum "$CACHE/okhttp-jvm-$V.jar" | cut -d' ' -f1)"
+
+  TP_LINES+="- \`com.squareup.okhttp3:okhttp-android:$V\` AAR sha256: \`$AAR_SHA\`
+  (source of stock/$V/android golden).
+- \`com.squareup.okhttp3:okhttp-jvm:$V\` JAR sha256: \`$JAR_SHA\`
+  (source of stock/$V/jvm golden).
+- \`okhttp3/internal/connection/ConnectInterceptor.class\` sha256: android \`$ANDROID_HASH\`,
+  jvm \`$JVM_HASH\`.
+"
+  KT_BODY+="    val OKHTTP_ANDROID_$(echo "$V" | tr '.' '_') = \"$ANDROID_HASH\"
+    val OKHTTP_JVM_$(echo "$V" | tr '.' '_') = \"$JVM_HASH\"
+"
+
+  echo "okhttp-android-$V.aar sha256: $AAR_SHA"
+  echo "okhttp-jvm-$V.jar     sha256: $JAR_SHA"
+  echo "ConnectInterceptor.class (android) sha256: $ANDROID_HASH"
+  echo "ConnectInterceptor.class (jvm)     sha256: $JVM_HASH"
+done
+
+# Generated fingerprints consumed by RecipeRegistry (never hand-edit; rerun this script).
+cat > "$GOLDEN_KT" <<EOF
+package dev.okhttpcronet.plugin
+
+// Generated by plugin-build/scripts/generate-fingerprints.sh from the pinned okhttp
+// artifacts (see THIRD_PARTY.md "Golden bytecode artifacts"). Do not hand-edit.
+object GoldenFingerprints {
+$KT_BODY}
+EOF
 
 TP="$ROOT_DIR/THIRD_PARTY.md"
 if ! grep -q 'golden-bytecode:start' "$TP"; then
   printf '\n<!-- golden-bytecode:start -->\n<!-- golden-bytecode:end -->\n' >> "$TP"
 fi
 SECTION="## Golden bytecode artifacts
-- \`com.squareup.okhttp3:okhttp-android:5.5.0\` AAR sha256: \`$AAR_SHA\`
-  (source of stock/android golden).
-- \`com.squareup.okhttp3:okhttp-jvm:5.5.0\` JAR sha256: \`$JAR_SHA\`
-  (source of stock/jvm golden).
-- \`okhttp3/internal/connection/ConnectInterceptor.class\` sha256: android \`$ANDROID_HASH\`,
-  jvm \`$JVM_HASH\`.
-- Regenerate: \`JAVA_HOME=<temurin-21> plugin-build/scripts/generate-fingerprints.sh\`."
+$TP_LINES- Regenerate: \`JAVA_HOME=<temurin-21> plugin-build/scripts/generate-fingerprints.sh [version ...]\`."
 awk -v sec="$SECTION" '
   /<!-- golden-bytecode:start -->/ { print; print sec; skip = 1; next }
   /<!-- golden-bytecode:end -->/   { skip = 0; print; next }
   !skip { print }
 ' "$TP" > "$TP.tmp" && mv "$TP.tmp" "$TP"
-
-echo "okhttp-android-5.5.0.aar sha256: $AAR_SHA"
-echo "okhttp-jvm-5.5.0.jar     sha256: $JAR_SHA"
-echo "ConnectInterceptor.class (android) sha256: $ANDROID_HASH"
-echo "ConnectInterceptor.class (jvm)     sha256: $JVM_HASH"

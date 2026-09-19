@@ -3,6 +3,7 @@ package dev.okhttpcronet.plugin
 import java.util.IdentityHashMap
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.FieldVisitor
 import org.objectweb.asm.Label
 import org.objectweb.asm.MethodVisitor
@@ -10,10 +11,54 @@ import org.objectweb.asm.Opcodes
 
 internal const val TRAMPOLINE_DESC: String = "(Lokhttp3/Interceptor\$Chain;)Lokhttp3/Response;"
 
-internal fun stock(variant: String): ByteArray =
-    checkNotNull(ConnectInterceptorRewriterTest::class.java.getResourceAsStream("/stock/$variant/ConnectInterceptor.class")) {
-        "missing golden resource /stock/$variant/ConnectInterceptor.class"
+/** Every (version, variant) golden pair the registry covers; new registry lines gain coverage automatically. */
+internal fun allRecipeVariants(): List<Pair<String, Variant>> =
+    RecipeRegistry.recipes.keys.sorted().flatMap { version -> Variant.entries.map { version to it } }
+
+internal fun stock(version: String, variant: Variant): ByteArray =
+    checkNotNull(
+        ConnectInterceptorRewriterTest::class.java.getResourceAsStream(
+            "/stock/$version/${variant.name.lowercase()}/ConnectInterceptor.class",
+        ),
+    ) {
+        "missing golden resource /stock/$version/${variant.name.lowercase()}/ConnectInterceptor.class"
     }.readBytes()
+
+/** Captures the recorded javap-style instruction strings of the intercept method. */
+internal fun recordedInsns(classBytes: ByteArray): List<String> {
+    var captured: List<String> = emptyList()
+    ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9) {
+        override fun visitMethod(
+            access: Int,
+            name: String,
+            descriptor: String,
+            signature: String?,
+            exceptions: Array<out String>?,
+        ): MethodVisitor? {
+            if (name != "intercept" || descriptor != TRAMPOLINE_DESC) return null
+            return RecordingMethodVisitor(object : MethodVisitor(Opcodes.ASM9) {}) { insns -> captured = insns }
+        }
+    }, 0)
+    return captured
+}
+
+/** Rewrites the intercept method with [mutate] wrapping the passthrough visitor. */
+internal fun tamper(classBytes: ByteArray, mutate: (MethodVisitor) -> MethodVisitor): ByteArray {
+    val writer = ClassWriter(0)
+    ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9, writer) {
+        override fun visitMethod(
+            access: Int,
+            name: String,
+            descriptor: String,
+            signature: String?,
+            exceptions: Array<out String>?,
+        ): MethodVisitor {
+            val passthrough = super.visitMethod(access, name, descriptor, signature, exceptions)
+            return if (name == "intercept" && descriptor == TRAMPOLINE_DESC) mutate(passthrough) else passthrough
+        }
+    }, 0)
+    return writer.toByteArray()
+}
 
 internal val expectedTrampoline = listOf(
     "ALOAD 1",

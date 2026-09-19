@@ -56,60 +56,95 @@ abstract class VerifyOkHttpPinTask : DefaultTask() {
 private const val CONNECT_INTERCEPTOR_ENTRY = "okhttp3/internal/connection/ConnectInterceptor.class"
 
 /**
- * Re-hashes ConnectInterceptor.class inside the pinned okhttp-android AAR and compares it
- * against the todo-3 generated golden; any drift fails the build.
+ * Re-hashes ConnectInterceptor.class inside the recipe's okhttp artifacts (android AAR + jvm
+ * jar) and compares against the script-generated goldens; any drift fails the build unless
+ * [VerifyOkHttpFingerprintTask.allowUnfingerprinted] downgrades it to a warning (the structural
+ * bytecode guard still hard-fails shape drift).
  */
 abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
 
     @get:Input
     abstract val okhttpVersion: Property<String>
 
+    @get:Input
+    abstract val allowUnfingerprinted: Property<Boolean>
+
     @TaskAction
     fun verify() {
-        val version = okhttpVersion.get()
-        val expected = Fingerprint.OKHTTP_ANDROID_CLASS_SHA256
-        val actual = connectInterceptorSha256(resolveAar(version))
-        if (!actual.equals(expected, ignoreCase = true)) {
-            throw GradleException(
-                "okhttp-cronet: ConnectInterceptor.class fingerprint mismatch for okhttp-android " +
-                    "$version (expected=$expected actual=$actual); the pinned rewrite is not safe " +
-                    "for this okhttp build. Align your okhttp version with the pinned one.",
-            )
+        val recipe = RecipeRegistry.forVersion(okhttpVersion.get())
+        val allow = allowUnfingerprinted.get()
+        for (variant in Variant.entries) {
+            val coordinates = recipe.fingerprintArtifacts.getValue(variant)
+            val expected = recipe.fingerprints.getValue(variant)
+            val actual = connectInterceptorSha256(resolveArtifact(coordinates), coordinates, variant)
+            val failure = fingerprintFailure(coordinates, expected, actual, allow) ?: continue
+            if (allow) {
+                logger.warn("[okhttp-cronet] $failure")
+            } else {
+                throw GradleException(failure)
+            }
         }
     }
 
-    private fun resolveAar(version: String): File {
-        val dependency = project.dependencies.create("com.squareup.okhttp3:okhttp-android:$version")
+    private fun resolveArtifact(coordinates: String): File {
+        val dependency = project.dependencies.create(coordinates)
         return project.configurations
             .detachedConfiguration(dependency)
             .setTransitive(false)
             .singleFile
     }
+}
 
-    private fun connectInterceptorSha256(aar: File): String {
-        ZipInputStream(aar.inputStream().buffered()).use { aarZip ->
-            var entry = aarZip.nextEntry
-            while (entry != null) {
-                if (entry.name == "classes.jar") {
-                    ZipInputStream(aarZip.readBytes().inputStream().buffered()).use { jarZip ->
-                        var classEntry = jarZip.nextEntry
-                        while (classEntry != null) {
-                            if (classEntry.name == CONNECT_INTERCEPTOR_ENTRY) {
-                                return Fingerprint.sha256Hex(jarZip.readBytes())
-                            }
-                            classEntry = jarZip.nextEntry
-                        }
-                        throw GradleException(
-                            "okhttp-cronet: $CONNECT_INTERCEPTOR_ENTRY not found inside classes.jar " +
-                                "of okhttp-android ${okhttpVersion.get()}",
-                        )
-                    }
-                }
-                entry = aarZip.nextEntry
+/** Null on match; otherwise the failure message, with the escape-hatch note when tolerated. */
+internal fun fingerprintFailure(
+    coordinates: String,
+    expected: String,
+    actual: String,
+    allowUnfingerprinted: Boolean,
+): String? {
+    if (actual.equals(expected, ignoreCase = true)) return null
+    val message = "okhttp-cronet: ConnectInterceptor.class fingerprint mismatch for " +
+        "$coordinates (expected=$expected actual=$actual); the pinned rewrite is not safe " +
+        "for this okhttp build. Align your okhttp version with the pinned one."
+    return if (allowUnfingerprinted) {
+        "$message allowUnfingerprinted=true tolerates the fingerprint mismatch, but the " +
+            "structural bytecode guard still hard-fails any shape drift."
+    } else {
+        message
+    }
+}
+
+internal fun connectInterceptorSha256(artifact: File, coordinates: String, variant: Variant): String =
+    Fingerprint.sha256Hex(connectInterceptorBytes(artifact, coordinates, variant))
+
+/**
+ * Extracts ConnectInterceptor.class from the variant's artifact: ANDROID = AAR with the class
+ * nested inside classes.jar; JVM = flat jar with the class at the top level.
+ */
+internal fun connectInterceptorBytes(artifact: File, coordinates: String, variant: Variant): ByteArray {
+    ZipInputStream(artifact.inputStream().buffered()).use { zip ->
+        var entry = zip.nextEntry
+        while (entry != null) {
+            if (entry.name == CONNECT_INTERCEPTOR_ENTRY) return zip.readBytes()
+            if (variant == Variant.ANDROID && entry.name == "classes.jar") {
+                return connectInterceptorEntry(zip.readBytes())
+                    ?: throw GradleException(
+                        "okhttp-cronet: $CONNECT_INTERCEPTOR_ENTRY not found inside classes.jar of $coordinates",
+                    )
             }
-            throw GradleException(
-                "okhttp-cronet: classes.jar not found in okhttp-android ${okhttpVersion.get()} AAR",
-            )
+            entry = zip.nextEntry
+        }
+        throw GradleException("okhttp-cronet: $CONNECT_INTERCEPTOR_ENTRY not found in $coordinates")
+    }
+}
+
+private fun connectInterceptorEntry(jarBytes: ByteArray): ByteArray? {
+    ZipInputStream(jarBytes.inputStream().buffered()).use { jarZip ->
+        var entry = jarZip.nextEntry
+        while (entry != null) {
+            if (entry.name == CONNECT_INTERCEPTOR_ENTRY) return jarZip.readBytes()
+            entry = jarZip.nextEntry
         }
     }
+    return null
 }

@@ -8,15 +8,17 @@ import org.gradle.api.Project
 import org.gradle.api.provider.Property
 
 /**
- * Host-app extension: `okhttpCronet { enabled; okhttpVersion }`.
+ * Host-app extension: `okhttpCronet { enabled; okhttpVersion; allowUnfingerprinted }`.
  */
 abstract class OkhttpCronetExtension {
     abstract val enabled: Property<Boolean>
     abstract val okhttpVersion: Property<String>
+    abstract val allowUnfingerprinted: Property<Boolean>
 
     init {
         enabled.convention(true)
         okhttpVersion.convention("5.5.0")
+        allowUnfingerprinted.convention(false)
     }
 }
 
@@ -47,11 +49,14 @@ class TransportPlugin : Plugin<Project> {
     private fun registerInstrumentation(project: Project, extension: OkhttpCronetExtension) {
         val androidComponents = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
         androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+            // Fail the build at configuration time (with the known-version list) when the
+            // extension carries an okhttp version no recipe covers.
+            val recipe = RecipeRegistry.forVersion(extension.okhttpVersion.get())
             if (extension.enabled.get()) {
                 variant.instrumentation.transformClassesWith(
                     ConnectInterceptorVisitorFactory::class.java,
                     InstrumentationScope.ALL,
-                ) {}
+                ) { params -> params.okhttpVersion.set(recipe.okhttpVersion) }
                 variant.instrumentation.setAsmFramesComputationMode(
                     FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
                 )
@@ -78,8 +83,10 @@ class TransportPlugin : Plugin<Project> {
             VerifyOkHttpFingerprintTask::class.java,
         ) { task ->
             task.group = "verification"
-            task.description = "SHA-256-checks ConnectInterceptor.class inside the pinned okhttp-android AAR."
+            task.description = "SHA-256-checks ConnectInterceptor.class inside the recipe's okhttp " +
+                "artifacts (android AAR + jvm jar)."
             task.okhttpVersion.set(extension.okhttpVersion)
+            task.allowUnfingerprinted.set(extension.allowUnfingerprinted)
         }
         // AGP's project-level preBuild is the earliest hook every variant assembly depends on.
         project.tasks.matching { it.name == "preBuild" }.configureEach { preBuild ->

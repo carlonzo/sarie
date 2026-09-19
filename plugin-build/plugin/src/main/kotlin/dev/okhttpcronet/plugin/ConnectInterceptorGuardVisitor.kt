@@ -4,6 +4,8 @@ import com.android.build.api.instrumentation.AsmClassVisitorFactory
 import com.android.build.api.instrumentation.ClassContext
 import com.android.build.api.instrumentation.ClassData
 import com.android.build.api.instrumentation.InstrumentationParameters
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
@@ -11,27 +13,41 @@ import org.objectweb.asm.Opcodes
 /** Dot-notation class name of the only class this plugin may instrument. */
 private const val TARGET_CLASS_DOT = "okhttp3.internal.connection.ConnectInterceptor"
 
+/**
+ * Worker-serializable instrumentation parameters; only simple Property types cross the AGP
+ * instrumentation worker boundary.
+ */
+interface OkhttpCronetInstrumentationParams : InstrumentationParameters {
+    @get:Input
+    val okhttpVersion: Property<String>
+}
+
 /** The AGP instrumentation entry point; only ever installed on Android application variants. */
-abstract class ConnectInterceptorVisitorFactory : AsmClassVisitorFactory<InstrumentationParameters.None> {
+abstract class ConnectInterceptorVisitorFactory : AsmClassVisitorFactory<OkhttpCronetInstrumentationParams> {
     override fun isInstrumentable(classData: ClassData): Boolean = isTargetClass(classData.className)
 
     override fun createClassVisitor(
         classContext: ClassContext,
         nextClassVisitor: ClassVisitor,
-    ): ClassVisitor = ConnectInterceptorGuardVisitor(nextClassVisitor)
+    ): ClassVisitor = ConnectInterceptorGuardVisitor(
+        nextClassVisitor,
+        RecipeRegistry.forVersion(parameters.get().okhttpVersion.get()).guard,
+    )
 }
 
 internal fun isTargetClass(className: String): Boolean = className == TARGET_CLASS_DOT
 
 /**
- * Verifies that `ConnectInterceptor.intercept` still matches the pinned stock shape
+ * Verifies that `ConnectInterceptor.intercept` still matches the recipe's pinned stock shape
  * (Kotlin null-check preamble, CHECKCAST to RealInterceptorChain, initExchange/copy/proceed
  * pattern, ARETURN) BEFORE emitting the trampoline; on any mismatch it throws with a
  * javap-style dump of the captured instructions (fail closed). All other members, including
  * `<clinit>`, `INSTANCE` and the constructor, pass through untouched.
  */
-internal class ConnectInterceptorGuardVisitor(nextClassVisitor: ClassVisitor) :
-    ClassVisitor(Opcodes.ASM9, nextClassVisitor) {
+internal class ConnectInterceptorGuardVisitor(
+    nextClassVisitor: ClassVisitor,
+    private val guard: GuardSpec,
+) : ClassVisitor(Opcodes.ASM9, nextClassVisitor) {
 
     private var interceptSeen = false
 
@@ -46,7 +62,18 @@ internal class ConnectInterceptorGuardVisitor(nextClassVisitor: ClassVisitor) :
             return super.visitMethod(access, name, descriptor, signature, exceptions)
         }
         interceptSeen = true
-        return RecordingMethodVisitor(super.visitMethod(access, name, descriptor, signature, exceptions))
+        val delegate = super.visitMethod(access, name, descriptor, signature, exceptions)
+        return RecordingMethodVisitor(delegate) { insns ->
+            val problems = guard.verify(insns)
+            check(problems.isEmpty()) {
+                "okhttp-cronet: ConnectInterceptor.intercept does not match the pinned stock shape; " +
+                    "refusing to rewrite.\n" +
+                    problems.joinToString("\n") { "- $it" } +
+                    "\nCaptured instructions:\n" +
+                    insns.joinToString("\n") { "  $it" }
+            }
+            ConnectInterceptorRewriter.emitTrampoline(delegate)
+        }
     }
 
     override fun visitEnd() {
@@ -56,82 +83,86 @@ internal class ConnectInterceptorGuardVisitor(nextClassVisitor: ClassVisitor) :
         }
         super.visitEnd()
     }
+}
 
-    private class RecordingMethodVisitor(private val delegate: MethodVisitor) : MethodVisitor(Opcodes.ASM9) {
-        private val insns = mutableListOf<String>()
+/**
+ * Records the intercepted method's instruction stream as javap-style strings and hands it to
+ * [onEnd] right before the delegate's visitEnd. Labels, frames, line numbers, locals, try/catch
+ * blocks and annotations are recorded out (dropped) - the shape verification is
+ * instruction-based and the trampoline body regenerates nothing from them.
+ */
+internal class RecordingMethodVisitor(
+    private val delegate: MethodVisitor,
+    private val onEnd: (List<String>) -> Unit,
+) : MethodVisitor(Opcodes.ASM9) {
+    private val insns = mutableListOf<String>()
 
-        override fun visitInsn(opcode: Int) {
-            insns += OPCODE_NAMES[opcode] ?: "0x%02x".format(opcode)
-        }
+    override fun visitInsn(opcode: Int) {
+        insns += OPCODE_NAMES[opcode] ?: "0x%02x".format(opcode)
+    }
 
-        override fun visitIntInsn(opcode: Int, operand: Int) {
-            insns += "${OPCODE_NAMES[opcode]} $operand"
-        }
+    override fun visitIntInsn(opcode: Int, operand: Int) {
+        insns += "${OPCODE_NAMES[opcode]} $operand"
+    }
 
-        override fun visitVarInsn(opcode: Int, value: Int) {
-            insns += "${OPCODE_NAMES[opcode]} $value"
-        }
+    override fun visitVarInsn(opcode: Int, value: Int) {
+        insns += "${OPCODE_NAMES[opcode]} $value"
+    }
 
-        override fun visitTypeInsn(opcode: Int, type: String) {
-            insns += "${OPCODE_NAMES[opcode]} $type"
-        }
+    override fun visitTypeInsn(opcode: Int, type: String) {
+        insns += "${OPCODE_NAMES[opcode]} $type"
+    }
 
-        override fun visitFieldInsn(opcode: Int, owner: String, name: String, descriptor: String) {
-            insns += "${OPCODE_NAMES[opcode]} $owner.$name $descriptor"
-        }
+    override fun visitFieldInsn(opcode: Int, owner: String, name: String, descriptor: String) {
+        insns += "${OPCODE_NAMES[opcode]} $owner.$name $descriptor"
+    }
 
-        override fun visitMethodInsn(
-            opcode: Int,
-            owner: String,
-            name: String,
-            descriptor: String,
-            isInterface: Boolean,
-        ) {
-            insns += "${OPCODE_NAMES[opcode]} $owner.$name $descriptor"
-        }
+    override fun visitMethodInsn(
+        opcode: Int,
+        owner: String,
+        name: String,
+        descriptor: String,
+        isInterface: Boolean,
+    ) {
+        insns += "${OPCODE_NAMES[opcode]} $owner.$name $descriptor"
+    }
 
-        override fun visitJumpInsn(opcode: Int, label: org.objectweb.asm.Label) {
-            insns += "${OPCODE_NAMES[opcode]} L${System.identityHashCode(label)}"
-        }
+    override fun visitJumpInsn(opcode: Int, label: org.objectweb.asm.Label) {
+        insns += "${OPCODE_NAMES[opcode]} L${System.identityHashCode(label)}"
+    }
 
-        override fun visitLdcInsn(value: Any) {
-            insns += "LDC $value"
-        }
+    override fun visitLdcInsn(value: Any) {
+        insns += "LDC $value"
+    }
 
-        override fun visitIincInsn(value: Int, increment: Int) {
-            insns += "IINC $value $increment"
-        }
+    override fun visitIincInsn(value: Int, increment: Int) {
+        insns += "IINC $value $increment"
+    }
 
-        override fun visitInvokeDynamicInsn(
-            name: String,
-            descriptor: String,
-            bootstrapMethodHandle: org.objectweb.asm.Handle,
-            vararg bootstrapMethodArguments: Any,
-        ) {
-            insns += "INVOKEDYNAMIC $name $descriptor"
-        }
+    override fun visitInvokeDynamicInsn(
+        name: String,
+        descriptor: String,
+        bootstrapMethodHandle: org.objectweb.asm.Handle,
+        vararg bootstrapMethodArguments: Any,
+    ) {
+        insns += "INVOKEDYNAMIC $name $descriptor"
+    }
 
-        override fun visitMultiANewArrayInsn(descriptor: String, numDimensions: Int) {
-            insns += "MULTIANEWARRAY $descriptor $numDimensions"
-        }
+    override fun visitMultiANewArrayInsn(descriptor: String, numDimensions: Int) {
+        insns += "MULTIANEWARRAY $descriptor $numDimensions"
+    }
 
-        override fun visitTableSwitchInsn(min: Int, max: Int, dflt: org.objectweb.asm.Label, vararg labels: org.objectweb.asm.Label) {
-            insns += "TABLESWITCH $min $max"
-        }
+    override fun visitTableSwitchInsn(min: Int, max: Int, dflt: org.objectweb.asm.Label, vararg labels: org.objectweb.asm.Label) {
+        insns += "TABLESWITCH $min $max"
+    }
 
-        override fun visitLookupSwitchInsn(dflt: org.objectweb.asm.Label, keys: IntArray, labels: Array<out org.objectweb.asm.Label>) {
-            insns += "LOOKUPSWITCH ${keys.joinToString(",")}"
-        }
+    override fun visitLookupSwitchInsn(dflt: org.objectweb.asm.Label, keys: IntArray, labels: Array<out org.objectweb.asm.Label>) {
+        insns += "LOOKUPSWITCH ${keys.joinToString(",")}"
+    }
 
-        // Labels, frames, line numbers, locals, try/catch blocks and annotations are recorded
-        // out (dropped) - the shape verification is instruction-based and the trampoline body
-        // regenerates nothing from them.
-
-        override fun visitEnd() {
-            verifyStockShape(insns)
-            ConnectInterceptorRewriter.emitTrampoline(delegate)
-            delegate.visitEnd()
-        }
+    override fun visitEnd() {
+        onEnd(insns.toList())
+        delegate.visitEnd()
     }
 
     private companion object {
@@ -169,42 +200,6 @@ internal class ConnectInterceptorGuardVisitor(nextClassVisitor: ClassVisitor) :
             Opcodes.MONITOREXIT to "MONITOREXIT",
             Opcodes.IFNULL to "IFNULL",
             Opcodes.IFNONNULL to "IFNONNULL",
-        )
-    }
-}
-
-private const val REAL_CHAIN = "okhttp3/internal/http/RealInterceptorChain"
-
-/**
- * Structural requirements distilled from the pinned okhttp 5.5.0 bytecode (see the
- * per-variant stock.txt golden dumps in the test resources): Kotlin Intrinsics preamble,
- * exactly one RealInterceptorChain CHECKCAST within the first 5 instructions, exactly one
- * initExchange$okhttp call, exactly one copy$okhttp$default call, exactly one
- * RealInterceptorChain.proceed call, ending in ARETURN.
- */
-private fun verifyStockShape(insns: List<String>) {
-    val problems = mutableListOf<String>()
-    val checkcast = "CHECKCAST $REAL_CHAIN"
-    val castIndex = insns.indexOf(checkcast)
-    if (castIndex !in 0..4) problems += "expected $checkcast within the first 5 instructions"
-    if (insns.count { it == checkcast } != 1) problems += "expected exactly one $checkcast"
-    if (insns.count { it.startsWith("INVOKEVIRTUAL okhttp3/internal/connection/RealCall.initExchange\$okhttp") } != 1) {
-        problems += "expected exactly one RealCall.initExchange\$okhttp call"
-    }
-    if (insns.count { it.startsWith("INVOKESTATIC $REAL_CHAIN.copy\$okhttp\$default ") } != 1) {
-        problems += "expected exactly one RealInterceptorChain.copy\$okhttp\$default call"
-    }
-    if (insns.count { it.startsWith("INVOKEVIRTUAL $REAL_CHAIN.proceed (Lokhttp3/Request;)") } != 1) {
-        problems += "expected exactly one RealInterceptorChain.proceed call"
-    }
-    if (insns.lastOrNull() != "ARETURN") problems += "expected method to end with ARETURN"
-    if (problems.isNotEmpty()) {
-        throw IllegalStateException(
-            "okhttp-cronet: ConnectInterceptor.intercept does not match the pinned stock shape; " +
-                "refusing to rewrite.\n" +
-                problems.joinToString("\n") { "- $it" } +
-                "\nCaptured instructions:\n" +
-                insns.joinToString("\n") { "  $it" },
         )
     }
 }

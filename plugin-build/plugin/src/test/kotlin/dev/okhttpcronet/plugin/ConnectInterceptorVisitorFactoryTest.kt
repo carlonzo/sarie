@@ -33,7 +33,7 @@ class ConnectInterceptorVisitorFactoryTest {
 }
 
 private fun factory(): ConnectInterceptorVisitorFactory = object : ConnectInterceptorVisitorFactory() {
-    override val parameters: Property<InstrumentationParameters.None>
+    override val parameters: Property<OkhttpCronetInstrumentationParams>
         get() = throw UnsupportedOperationException("not needed for isInstrumentable")
     override val instrumentationContext: InstrumentationContext
         get() = throw UnsupportedOperationException("not needed for isInstrumentable")
