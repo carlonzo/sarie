@@ -140,7 +140,9 @@ and trusted via `sample/src/main/res/xml/network_security_config.xml`).
 | compileSdk / minSdk | 37 / 24 | module DSL (`compileSdkVersion = "android-37.0"` — see note below) |
 
 Note: `local.properties` is required (not committed); it points at `/home/carlo/Android/Sdk`.
-Every Gradle invocation needs `JAVA_HOME` set to the Temurin 21 path above.
+Plain `./gradlew` works from the project root: `gradle.properties` pins the daemon JVM to
+the Temurin 21 path above via `org.gradle.java.home` (machine-specific — on other machines,
+set `JAVA_HOME` to any Temurin 21 instead or adjust that property).
 
 Toolchain notes (recorded deviations/quirks):
 - The installed platform is the minor-release `android-37.0` (ApiLevel=37.0). Integer

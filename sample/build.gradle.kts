@@ -73,6 +73,7 @@ dependencies {
 
     implementation(libs.cronet.embedded)
 
+    testImplementation(libs.junit)
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.mockwebserver3)
     androidTestImplementation(libs.androidx.test.runner)
