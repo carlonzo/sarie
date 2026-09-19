@@ -2,6 +2,8 @@ package dev.okhttpcronet.bridge.mapping
 
 import java.nio.ByteBuffer
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import okhttp3.RequestBody
 import okio.BufferedSink
 import org.chromium.net.UploadDataProvider
@@ -177,5 +179,49 @@ class UploadDataProvidersTest {
 
         assertEquals(200, total.length)
         assertTrue(sink.readSucceeded.all { !it })
+    }
+
+    @Test(timeout = 10_000)
+    fun `cancel mid streaming upload unwinds the pump and frees the executor`() {
+        // Real single-thread executor: mirrors the process-wide CronetExecutor where a wedged
+        // pump starves every subsequent upload. DaemonExecutorService would just spawn another
+        // thread per task and hide the wedge.
+        val processExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable).apply { isDaemon = true }
+        }
+        try {
+            val provider = UploadDataProviders.create(
+                body(contentLength = -1, payload = "hello"),
+                processExecutor,
+                writeTimeoutMillis = 500,
+            )
+            val sink = sink()
+
+            // First read delivers the body; the pump then parks waiting to signal end-of-body.
+            assertTrue(bytes("hello").contentEquals(readOnce(provider, sink)))
+
+            // Simulated abandonment (call.cancel / redirect / header-timeout mid-upload): Cronet
+            // never calls the provider again. The pump must unwind instead of blocking forever.
+            val executorAlive = CountDownLatch(1)
+            processExecutor.execute { executorAlive.countDown() }
+            assertTrue(
+                "pump stayed blocked after abandonment; the shared executor starved",
+                executorAlive.await(5, TimeUnit.SECONDS),
+            )
+
+            // Late provider callback on the abandoned broker must be a safe no-op (failed read).
+            provider.read(sink, buffer())
+            assertEquals(1, sink.readErrors.size)
+
+            // The executor still serves uploads: a buffered provider materializes on it.
+            val buffered = UploadDataProviders.create(
+                body(contentLength = 5),
+                processExecutor,
+                writeTimeoutMillis = 5_000,
+            )
+            assertTrue(bytes("hello").contentEquals(readOnce(buffered, sink())))
+        } finally {
+            processExecutor.shutdownNow()
+        }
     }
 }
