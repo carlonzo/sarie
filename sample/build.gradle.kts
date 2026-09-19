@@ -65,16 +65,15 @@ val startTestOrigin = tasks.register("startTestOrigin") {
         if (!caddyHealthy()) {
             println("startTestOrigin: Caddy not healthy on :8443 - starting it")
             ProcessBuilder("./scripts/bin/caddy", "run", "--config", "scripts/Caddyfile")
-.directory(rootProject.projectDir)
+                .directory(rootProject.projectDir)
                 .redirectOutput(rootProject.file("scripts/bin/caddy.log"))
                 .redirectErrorStream(true)
                 .start()
             var up = false
             repeat(30) {
-                if (caddyHealthy()) {
-                    up = true
-                } else {
-                    Thread.sleep(500)
+                if (!up) {
+                    up = caddyHealthy()
+                    if (!up) Thread.sleep(500)
                 }
             }
             if (!up) {
@@ -108,17 +107,16 @@ val startTestOrigin = tasks.register("startTestOrigin") {
                 pidFile.delete()
             }
             val proc = ProcessBuilder("python3", "scripts/slow-backend.py")
-.directory(rootProject.projectDir)
+                .directory(rootProject.projectDir)
                 .redirectOutput(rootProject.file("scripts/bin/slow-backend.log"))
                 .redirectErrorStream(true)
                 .start()
             pidFile.writeText(proc.pid().toString())
             var up = false
             repeat(20) {
-                if (slowUp()) {
-                    up = true
-                } else {
-                    Thread.sleep(250)
+                if (!up) {
+                    up = slowUp()
+                    if (!up) Thread.sleep(250)
                 }
             }
             if (!up) {
