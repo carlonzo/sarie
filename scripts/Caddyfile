@@ -1,0 +1,101 @@
+# Caddy HTTP/3 test origin for the okhttp-cronet-transport instrumented suites.
+#
+# Start (from the repo ROOT - cert/log paths are relative to CWD):
+#   ./scripts/download-caddy.sh && ./scripts/gen-certs.sh
+#   python3 scripts/slow-backend.py &          # stalling backend for /slow (stop: pkill -f slow-backend.py)
+#   ./scripts/bin/caddy run --config scripts/Caddyfile &
+# Stop:
+#   pkill -f 'caddy run --config scripts/Caddyfile'; pkill -f slow-backend.py
+#
+# Access log: JSON at $CADDY_ACCESS_LOG (default scripts/bin/caddy-access.log).
+# HTTP/3 requests log request.proto as "HTTP/3.0"; grep the log for '"proto":"HTTP/3'.
+# Host-side check (10.0.2.2 is emulator-internal, use localhost from the host):
+#   curl -k --http3 https://localhost:8443/ok
+{
+	admin off
+	# Manual certs; without this Caddy also binds :80 for auto HTTP->HTTPS redirects.
+	auto_https disable_redirects
+	# Verbose quic-go handshake logging for h3 diagnostics from the emulator.
+	debug
+}
+
+:8443 {
+	tls scripts/certs/fullchain.pem scripts/certs/key.pem
+
+	log {
+		output file {$CADDY_ACCESS_LOG:scripts/bin/caddy-access.log} {
+			roll_disabled
+		}
+		format json
+	}
+
+	map {query.mb} {bigfile} {
+		1 1mib.bin
+		5 5mib.bin
+		default 5mib.bin
+	}
+
+	handle /ok {
+		respond "ok" 200
+	}
+
+	# Echoes the request body; request headers are observed via /headers instead.
+	handle /echo {
+		respond * "{http.request.body}" 200
+	}
+
+	# Streams N MiB (mb=1|5, default 5) from a static file via file_server.
+	handle /big {
+		rewrite * /{bigfile}
+		file_server {
+			root scripts/big
+		}
+	}
+
+	# Sends 200 + headers immediately, then stalls forever (readTimeout testing).
+	handle /slow {
+		reverse_proxy 127.0.0.1:8444 {
+			flush_interval -1
+		}
+	}
+
+	handle /compress/gzip {
+		encode {
+			gzip
+			minimum_length 1
+		}
+		respond "gzip-payload-ok" 200
+	}
+
+	# Standard Caddy has no brotli encoder: serve a pre-compressed body with an
+	# explicit Content-Encoding header instead (br.bin = brotli("br-payload-ok"),
+	# regenerate with: printf 'br-payload-ok' | brotli -c > scripts/www/br.bin).
+	handle /compress/br {
+		header Content-Type text/plain
+		header Content-Encoding br
+		rewrite * /br.bin
+		file_server {
+			root scripts/www
+		}
+	}
+
+	# Renders every request header (incl. duplicates and Host) into the body.
+	handle /headers* {
+		header Content-Type text/plain
+		templates {
+			template_extensions .tmpl
+		}
+		rewrite * /headers.tmpl
+		file_server {
+			root scripts/www
+		}
+	}
+
+	handle /auth {
+		respond "unauthorized" 401
+	}
+
+	handle /redirect {
+		redir * /ok 302
+	}
+}

@@ -19,6 +19,17 @@
 
 (to be appended as todos port upstream-derived tests)
 
+## Caddy HTTP/3 test origin
+
+- **Caddy 2.11.4** (`caddy_2.11.4_linux_amd64.tar.gz`)
+  - Upstream: https://github.com/caddyserver/caddy/releases/tag/v2.11.4
+  - License: Apache-2.0
+  - sha256 (tarball): `527fbf917c39189a1e3b31d34fa955601680b2d5c8055d2a87b8b9588dec7bb9`
+    (cross-checked against the release's official `caddy_2.11.4_checksums.txt`, which lists
+    SHA-512 `8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9`)
+  - Use: local HTTP/3 (QUIC) test origin for the instrumented suites; downloaded by
+    `scripts/download-caddy.sh`, configured by `scripts/Caddyfile`.
+
 ## Toolchain pins and verification (2026-09-19)
 
 - **AGP 8.13.0** — verified against Google Maven `com.android.tools.build/gradle` maven-metadata.xml

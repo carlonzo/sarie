@@ -1,3 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Pure androidTest host: no launcher activity, no components. -->
-<manifest />
+<!-- Loopback sockets (MockWebServer) and Cronet both need INTERNET, even on 127.0.0.1. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Trust anchor for the Caddy HTTP/3 test origin (see res/xml/network_security_config.xml). -->
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+</manifest>

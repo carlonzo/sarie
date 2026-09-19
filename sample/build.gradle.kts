@@ -43,3 +43,33 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.core)
 }
+
+// Server-side half of the HTTP/3 proof: the Caddy origin (started per scripts/Caddyfile
+// header) writes a JSON access log on the build machine; HTTP/3 requests log
+// request.proto as "HTTP/3.0". This task fails unless at least one HTTP/3 entry exists,
+// so the h3 test cannot pass on client-side protocol alone.
+val verifyH3ServerEvidence = tasks.register("verifyH3ServerEvidence") {
+    group = "verification"
+    description = "Fails unless the Caddy access log contains HTTP/3 entries (server-side h3 evidence)."
+    doLast {
+        val logFile = rootProject.file("scripts/bin/caddy-access.log")
+        if (!logFile.exists()) {
+            throw GradleException(
+                "Caddy access log missing at $logFile - start the origin per scripts/Caddyfile header " +
+                    "(python3 scripts/slow-backend.py & ; ./scripts/bin/caddy run --config scripts/Caddyfile &)",
+            )
+        }
+        val h3Entries = logFile.readLines().count { it.contains("\"proto\":\"HTTP/3") }
+        if (h3Entries == 0) {
+            throw GradleException(
+                "No HTTP/3 entries in $logFile - the device suite never negotiated HTTP/3 " +
+                    "against the origin (check UDP reachability emulator->host, quic hint, certs).",
+            )
+        }
+        println("verifyH3ServerEvidence: $h3Entries HTTP/3 entries in $logFile")
+    }
+}
+
+tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+    finalizedBy(verifyH3ServerEvidence)
+}

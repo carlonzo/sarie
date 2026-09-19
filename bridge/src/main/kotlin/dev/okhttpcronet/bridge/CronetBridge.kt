@@ -111,7 +111,10 @@ object CronetBridge {
 
         val converted = RequestConverter(
             cronetEngine = snapshot.engine,
-            uploadDataProviderExecutor = CronetExecutor,
+            // Distinct executors: Cronet posts UploadDataProvider callbacks onto the upload
+            // executor while the provider submits its body work to the reader executor -
+            // one shared single thread would self-deadlock until the write timeout.
+            uploadDataProviderExecutor = CronetUploadExecutor,
             bodyReaderExecutor = CronetExecutor,
             responseConverter = ResponseConverter(),
         ).convert(request, readTimeoutMillis, realChain.writeTimeoutMillis().toLong())

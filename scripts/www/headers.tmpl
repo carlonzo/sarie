@@ -1,0 +1,3 @@
+Host: [{{ .Req.Host }}]
+{{ range $k, $vs := .Req.Header }}{{ $k }}:{{ range $vs }} [{{ . }}]{{ end }}
+{{ end }}

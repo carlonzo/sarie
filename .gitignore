@@ -4,3 +4,6 @@ local.properties
 .idea/
 *.iml
 .kotlin/
+scripts/bin/
+scripts/certs/
+scripts/big/
