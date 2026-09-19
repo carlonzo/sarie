@@ -140,7 +140,7 @@ object CronetBridge {
                 response.body?.closeQuietly()
                 throw IOException(PROXY_AUTH_MESSAGE)
             }
-            val body = response.body ?: return response
+            val body = response.body ?: run { CallRegistry.unregister(call); return response }
             return response.newBuilder().body(UnregisteringResponseBody(body, call)).build()
         } catch (e: Throwable) {
             CallRegistry.unregister(call)

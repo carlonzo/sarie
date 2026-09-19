@@ -131,7 +131,7 @@ object UploadDataProviders {
         private val writeTimeoutMillis: Long =
             if (writeTimeoutMillis == 0L) Long.MAX_VALUE else writeTimeoutMillis
 
-        private val broker = UploadBodyDataBroker()
+        private val broker = UploadBodyDataBroker(writeTimeoutMillis)
         private var readTask: Future<*>? = null
         private var totalBytesReadFromOkHttp = 0L
 
@@ -251,7 +251,12 @@ object UploadDataProviders {
      * At most one read is in flight for a single request body provider, hence the capacity-1
      * handoff queue.
      */
-    internal class UploadBodyDataBroker : Sink {
+    internal class UploadBodyDataBroker(
+        writeTimeoutMillis: Long,
+    ) : Sink {
+
+        private val writeTimeoutMillis: Long =
+            if (writeTimeoutMillis == 0L) Long.MAX_VALUE else writeTimeoutMillis
 
         private data class PendingRead(
             val buffer: ByteBuffer,
@@ -309,8 +314,19 @@ object UploadDataProviders {
             }
         }
 
+        /**
+         * Bounded wait for Cronet's next read. Cronet may abandon an upload (cancel, redirect,
+         * failure) without ever notifying the provider again, so an unbounded wait here would
+         * wedge the shared upload executor forever. On timeout the exception propagates to the
+         * pump task, which reports it as the background read error (unwinding any racing
+         * provider-side future) and releases the executor thread.
+         */
         private fun getPendingCronetRead(): PendingRead = try {
-            pendingRead.take()
+            pendingRead.poll(writeTimeoutMillis, TimeUnit.MILLISECONDS)
+                ?: throw IOException(
+                    "Timed out writing the request body",
+                    TimeoutException("Cronet stopped reading the request body"),
+                )
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             throw IOException("Interrupted while waiting for a read to finish!")
