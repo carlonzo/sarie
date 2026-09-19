@@ -61,8 +61,12 @@ object SampleAppRuntime {
         }
         val engine = builder.build()
         if (netLog) {
+            // Unique per engine: several suite engines may capture netlogs in one run.
             @Suppress("DEPRECATION")
-            engine.startNetLogToFile(File(context.cacheDir, "cronet-netlog.json").absolutePath, false)
+            engine.startNetLogToFile(
+                File(context.cacheDir, "cronet-netlog-" + System.nanoTime() + ".json").absolutePath,
+                false,
+            )
         }
         lastEngine = engine
         val policy = DefaultPolicy(

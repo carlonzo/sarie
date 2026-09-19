@@ -31,17 +31,21 @@ import org.junit.Test
  * lastReason == null (nothing fell back); every stock-path test asserts cronet == 0 with the
  * exact fallback reason.
  *
- * HTTP/3 evidence structure (both halves independent):
- * - Client side: [h3NegotiatedAndServerConfirmed] asserts Protocol.HTTP_3 on the device
- *   against the LOCAL origin, reached via addQuicHint("10.0.2.2", 8443, 8443).
+ * HTTP/3 evidence structure:
+ * - Client side: [h3NegotiatedAgainstPublicOrigin] asserts Protocol.HTTP_3 through the
+ *   trampoline against an h3-only origin, so no h2 downgrade can fake the result.
+ * - Local-origin h3 (quic hint on 10.0.2.2:8443) is BLOCKED by the pinned engine: Chromium's
+ *   QUIC proof verifier closes the handshake with alert 46 (certificate unknown, QUIC wire
+ *   error 302) right after the NSC-based chain verification succeeds, whenever the chain is
+ *   anchored outside the engine's built-in root store - netlog-verified on
+ *   cronet-embedded 143.7445.0 (evidence task-9/netlog-h3-blocked.json), with leaf-only AND
+ *   full-chain (leaf+root) server chains, with and without
+ *   enablePublicKeyPinningBypassForLocalTrustAnchors. TCP-TLS honors the same NSC CA (all
+ *   other tests). No public CronetEngine.Builder knob exists to trust custom QUIC roots
+ *   (no setMockCertVerifierForTesting in cronet-api 143.7445.0). [h2LocalOriginWhileQuicBlocked]
+ *   pins that fallback so a future engine that DOES negotiate local h3 is immediately visible.
  * - Server side: the :sample verifyH3ServerEvidence Gradle task greps
- *   scripts/bin/caddy-access.log for "proto":"HTTP/3" entries after the run.
- *
- * Local-origin h3 needs the origin to serve the FULL chain (leaf + root, see
- * scripts/gen-certs.sh): with a leaf-only chain Chromium's QUIC proof verifier fails the
- * TLS handshake with alert 46 (certificate unknown) even though the NSC raw-resource CA
- * verifies the chain and TCP-TLS (h2) works - netlog-verified. enablePublicKeyPinningBypass
- * ForLocalTrustAnchors does not affect it; the full chain does.
+ *   scripts/bin/caddy-access.log for "proto":"HTTP/3" entries (origin h3 capability).
  */
 class CronetSuite {
 
@@ -105,34 +109,45 @@ class CronetSuite {
     }
 
     @Test
-    fun h3NegotiatedAndServerConfirmed() {
-        installCronet(quicHintHost = HOST, quicHintPort = PORT)
-        val client = OkHttpClient()
+    fun h3NegotiatedAgainstPublicOrigin() {
+        // cloudflare-quic.com serves HTTP/3 ONLY (no TCP listener), so the request cannot
+        // downgrade to h2: if this returns, the device negotiated real h3 through the
+        // trampoline. Its cert chains to a known public root, which the embedded engine's
+        // QUIC proof verifier requires - locally-anchored CAs are rejected (see the class
+        // KDoc and h2LocalOriginWhileQuicBlocked).
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
 
-        // The quic hint makes Cronet race QUIC against TCP; over slirp TCP can win the first
-        // request(s) while the QUIC handshake is still in flight. The engine pins the origin
-        // to h3 as soon as the handshake completes, so poll for it: responses here are h3
-        // (done) or h2 (race still running). If UDP to 10.0.2.2 is blocked every attempt is
-        // h2, the loop exhausts, and the assert fails with the last observed protocol -
-        // never an h2-pass.
-        var lastProtocol: Protocol? = null
-        var sawH3 = false
-        repeat(6) {
-            client.newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
+        OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
+            .execute()
+            .use { response ->
+                assertEquals(
+                    "expected real HTTP/3 through the Cronet path (client saw ${response.protocol})",
+                    Protocol.HTTP_3,
+                    response.protocol,
+                )
                 assertEquals(200, response.code)
-                assertEquals("ok", response.body.string())
-                lastProtocol = response.protocol
-                if (response.protocol == Protocol.HTTP_3) sawH3 = true
             }
-            if (!sawH3) Thread.sleep(250)
+        assertCronetServed()
+    }
+
+    @Test
+    fun h2LocalOriginWhileQuicBlocked() {
+        // Pinned engine limitation (netlog-verified, evidence task-9): the quic hint makes
+        // the engine TRY QUIC first, every attempt is rejected with alert 46 (see the class
+        // KDoc), and the request completes over the TCP fallback as h2. h2 is NOT h3: this
+        // test must flip if a future engine ever negotiates local-origin h3.
+        installCronet(quicHintHost = HOST, quicHintPort = PORT)
+
+        OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
+            assertEquals(200, response.code)
+            assertEquals("ok", response.body.string())
+            assertTrue(
+                "local-CA origin must not negotiate h3 (client saw ${response.protocol}); " +
+                    "a change here invalidates the pinned known-root limitation",
+                response.protocol != Protocol.HTTP_3,
+            )
         }
-        assertTrue(
-            "expected HTTP/3 from the quic-hint engine (last client protocol $lastProtocol); " +
-                "if this stays h2 the QUIC/UDP path to 10.0.2.2 is broken - server-side " +
-                "view: scripts/bin/caddy-access.log",
-            sawH3,
-        )
-        assertCronetServed(minCount = 2)
+        assertCronetServed()
     }
 
     @Test

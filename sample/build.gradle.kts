@@ -1,3 +1,5 @@
+import java.net.Socket
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -44,6 +46,110 @@ dependencies {
     androidTestImplementation(libs.androidx.test.core)
 }
 
+// The connected suite depends on host-side helpers (Caddy HTTP/3 origin + the /slow stall
+// backend). These tasks make the Gradle task graph self-sufficient: no manual helper starts.
+val startTestOrigin = tasks.register("startTestOrigin") {
+    group = "verification"
+    description = "Idempotently starts the Caddy HTTP/3 origin and the /slow stall backend."
+    doLast {
+        val bin = rootProject.file("scripts/bin")
+        bin.mkdirs()
+
+        fun caddyHealthy(): Boolean {
+            val proc = ProcessBuilder("curl", "-sk", "--max-time", "5", "https://localhost:8443/ok")
+                .start()
+            val body = proc.inputStream.bufferedReader().readText()
+            proc.waitFor()
+            return proc.exitValue() == 0 && body == "ok"
+        }
+        if (!caddyHealthy()) {
+            println("startTestOrigin: Caddy not healthy on :8443 - starting it")
+            ProcessBuilder("./scripts/bin/caddy", "run", "--config", "scripts/Caddyfile")
+.directory(rootProject.projectDir)
+                .redirectOutput(rootProject.file("scripts/bin/caddy.log"))
+                .redirectErrorStream(true)
+                .start()
+            var up = false
+            repeat(30) {
+                if (caddyHealthy()) {
+                    up = true
+                } else {
+                    Thread.sleep(500)
+                }
+            }
+            if (!up) {
+                throw GradleException(
+                    "Caddy did not become healthy on :8443 within 15s - see scripts/bin/caddy.log " +
+                        "(certs present? run scripts/gen-certs.sh; port free?)",
+                )
+            }
+        }
+
+        // The /slow upstream port lives in scripts/Caddyfile (reverse_proxy 127.0.0.1:<port>).
+        val slowPort = Regex("reverse_proxy\\s+127\\.0\\.0\\.1:(\\d+)")
+            .find(rootProject.file("scripts/Caddyfile").readText())
+            ?.groupValues?.get(1)?.toInt()
+            ?: throw GradleException("could not parse the /slow reverse_proxy port from scripts/Caddyfile")
+
+        fun slowUp(): Boolean = try {
+            Socket("127.0.0.1", slowPort).close()
+            true
+        } catch (e: java.io.IOException) {
+            false
+        }
+        if (!slowUp()) {
+            println("startTestOrigin: slow-backend not listening on 127.0.0.1:$slowPort - starting it")
+            val pidFile = rootProject.file("scripts/bin/slow-backend.pid")
+            if (pidFile.exists()) {
+                val stale = pidFile.readText().trim()
+                if (stale.isNotEmpty()) {
+                    ProcessBuilder("kill", stale).start().waitFor()
+                }
+                pidFile.delete()
+            }
+            val proc = ProcessBuilder("python3", "scripts/slow-backend.py")
+.directory(rootProject.projectDir)
+                .redirectOutput(rootProject.file("scripts/bin/slow-backend.log"))
+                .redirectErrorStream(true)
+                .start()
+            pidFile.writeText(proc.pid().toString())
+            var up = false
+            repeat(20) {
+                if (slowUp()) {
+                    up = true
+                } else {
+                    Thread.sleep(250)
+                }
+            }
+            if (!up) {
+                throw GradleException(
+                    "slow-backend did not listen on 127.0.0.1:$slowPort within 5s - " +
+                        "see scripts/bin/slow-backend.log",
+                )
+            }
+        }
+        println("startTestOrigin: Caddy (:8443 h3) + slow-backend (127.0.0.1:$slowPort) ready")
+    }
+}
+
+// Stops only the stall backend via its PID file; Caddy stays running (harmless daemon, and
+// verifyH3ServerEvidence reads its access log afterwards).
+val stopTestOrigin = tasks.register("stopTestOrigin") {
+    group = "verification"
+    description = "Stops the /slow stall backend via its PID file (Caddy is left running)."
+    doLast {
+        val pidFile = rootProject.file("scripts/bin/slow-backend.pid")
+        if (pidFile.exists()) {
+            val pid = pidFile.readText().trim()
+            if (pid.isNotEmpty()) {
+                ProcessBuilder("kill", pid).start().waitFor()
+            }
+            pidFile.delete()
+            println("stopTestOrigin: slow-backend (pid $pid) stopped; Caddy left running")
+        }
+    }
+}
+
 // Server-side half of the HTTP/3 proof: the Caddy origin (started per scripts/Caddyfile
 // header) writes a JSON access log on the build machine; HTTP/3 requests log
 // request.proto as "HTTP/3.0". This task fails unless at least one HTTP/3 entry exists,
@@ -71,5 +177,6 @@ val verifyH3ServerEvidence = tasks.register("verifyH3ServerEvidence") {
 }
 
 tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
-    finalizedBy(verifyH3ServerEvidence)
+    dependsOn(startTestOrigin)
+    finalizedBy(verifyH3ServerEvidence, stopTestOrigin)
 }
