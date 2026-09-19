@@ -32,6 +32,9 @@ object Metrics {
     val cronet = AtomicLong()
     val okhttpFallback = AtomicLong()
 
+    /** Transport-failure retries on the Cronet path (idempotent, pre-headers only). */
+    val retries = AtomicLong()
+
     @Volatile
     var lastReason: Reason? = null
         private set
@@ -47,6 +50,7 @@ object Metrics {
     fun resetForTest() {
         cronet.set(0)
         okhttpFallback.set(0)
+        retries.set(0)
         lastReason = null
     }
 }

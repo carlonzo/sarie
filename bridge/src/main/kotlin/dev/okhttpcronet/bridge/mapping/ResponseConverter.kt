@@ -34,7 +34,9 @@ import org.chromium.net.UrlResponseInfo
  * Converts Cronet's responses (as delivered by the [OkHttpBridgeCallback]) to OkHttp's Response.
  *
  * Deviation from upstream: h3-family negotiated protocols map to [Protocol.HTTP_3] (OkHttp 5 has
- * it) instead of [Protocol.QUIC], so real h3 is visible to callers.
+ * it) instead of [Protocol.QUIC], so real h3 is visible to callers. Also populates
+ * sentRequestAtMillis/receivedResponseAtMillis from bridge-owned clocks (upstream leaves both
+ * unset); handshake/networkResponse are never fabricated.
  */
 class ResponseConverter {
 
@@ -46,7 +48,10 @@ class ResponseConverter {
     fun toResponse(request: Request, callback: OkHttpBridgeCallback): Response {
         val cronetResponseInfo = getFutureValue(callback.headersFuture)
         val bodySource = getFutureValue(callback.bodySourceFuture)
-        return createResponse(request, cronetResponseInfo, bodySource).build()
+        return createResponse(request, cronetResponseInfo, bodySource)
+            .sentRequestAtMillis(callback.sentAtMillis)
+            .receivedResponseAtMillis(callback.receivedHeadersAtMillis)
+            .build()
     }
 
     private fun createResponse(

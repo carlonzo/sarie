@@ -1,5 +1,6 @@
 package dev.okhttpcronet.bridge.mapping
 
+import java.util.concurrent.Executor
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
@@ -236,4 +237,35 @@ class ResponseConverterTest {
 
         assertEquals(req, response.request)
     }
+
+    @Test
+    fun `timestamps populated through the real callback and ordered`() {
+        val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000)
+        val before = System.currentTimeMillis()
+        val info = FakeUrlResponseInfo(
+            headersAsList = listOf(
+                FakeUrlResponseInfo.headerEntry("Content-Type", "text/plain"),
+                FakeUrlResponseInfo.headerEntry("Content-Length", "3"),
+            ),
+        )
+        cb.onResponseStarted(newRequest(cb), info)
+
+        val response = converter.toResponse(request(), cb)
+
+        assertTrue("sentRequestAtMillis must be set", response.sentRequestAtMillis >= before)
+        assertTrue(
+            "receivedResponseAtMillis must be set",
+            response.receivedResponseAtMillis >= before,
+        )
+        assertTrue(
+            "sent must not be after received (${response.sentRequestAtMillis} > " +
+                "${response.receivedResponseAtMillis})",
+            response.sentRequestAtMillis <= response.receivedResponseAtMillis,
+        )
+    }
+
+    private fun newRequest(callback: OkHttpBridgeCallback): FakeUrlRequest =
+        FakeUrlRequest(
+            FakeUrlRequestBuilder("https://example.com/a", callback, Executor { it.run() }),
+        )
 }

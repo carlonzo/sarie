@@ -3,6 +3,7 @@
 
 package dev.okhttpcronet.bridge
 
+import dev.okhttpcronet.bridge.mapping.FakeCronetException
 import dev.okhttpcronet.bridge.mapping.FakeUrlResponseInfo
 import dev.okhttpcronet.bridge.mapping.OkHttpBridgeCallback
 import java.io.IOException
@@ -19,7 +20,8 @@ import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
-import okhttp3.internal.OkHttpInternalApi
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.http.CallServerInterceptor
 import okhttp3.internal.http.RealInterceptorChain
@@ -71,6 +73,12 @@ class CronetBridgeTest {
         var startGate: Gate? = null
         var responseInfo: UrlResponseInfo = FakeUrlResponseInfo()
 
+        /**
+         * Number of requests (in build order) whose start() fails pre-headers with a
+         * transport-level CronetException, mirroring onFailed before onResponseStarted.
+         */
+        var preHeaderFailures = 0
+
         override fun newUrlRequestBuilder(
             url: String,
             callback: UrlRequest.Callback,
@@ -109,12 +117,15 @@ class CronetBridgeTest {
         override fun setPriority(priority: Int): UrlRequest.Builder = this
         override fun setUploadDataProvider(provider: UploadDataProvider, executor: Executor): UrlRequest.Builder = this
         override fun allowDirectExecutor(): UrlRequest.Builder = this
-        override fun build(): UrlRequest = ScriptedUrlRequest(callback, engine).also { builtRequest = it }
+        override fun build(): UrlRequest =
+            ScriptedUrlRequest(callback, engine, engine.builders.count { it.builtRequest != null })
+                .also { builtRequest = it }
     }
 
     private class ScriptedUrlRequest(
         val callback: UrlRequest.Callback,
         private val engine: ScriptedCronetEngine,
+        private val buildIndex: Int,
     ) : UrlRequest() {
         var startCalls = 0
             private set
@@ -136,7 +147,13 @@ class CronetBridgeTest {
             engine.startGate?.block()
             // A cancel that landed while start() was parked replaces the header delivery,
             // mirroring a real engine (onCanceled is delivered from cancel() below).
-            if (cancelCalls == 0) callback.onResponseStarted(this, engine.responseInfo)
+            if (cancelCalls == 0) {
+                if (buildIndex < engine.preHeaderFailures) {
+                    callback.onFailed(this, engine.responseInfo, FakeCronetException("net err"))
+                } else {
+                    callback.onResponseStarted(this, engine.responseInfo)
+                }
+            }
         }
 
         override fun cancel() {
@@ -189,8 +206,13 @@ class CronetBridgeTest {
     }
 
     /** Chain shape used by the Cronet path (no proceed happens on that path). */
-    private fun cronetChain(client: OkHttpClient, url: String): Pair<RealCall, RealInterceptorChain> {
-        val request: Request = Request.Builder().url(url).build()
+    private fun cronetChain(
+        client: OkHttpClient,
+        url: String,
+        method: String = "GET",
+        body: RequestBody? = null,
+    ): Pair<RealCall, RealInterceptorChain> {
+        val request: Request = Request.Builder().url(url).method(method, body).build()
         val call = client.newCall(request) as RealCall
         return call to RealInterceptorChain(call, emptyList(), 0, null, request, client)
     }
@@ -423,6 +445,105 @@ class CronetBridgeTest {
         // Closing the body quietly cancels the still-unfinished engine request.
         assertEquals(1, engine.builtRequests.single().cancelCalls)
         assertEquals(0, CallRegistry.activeCount())
+    }
+
+    // --- transport-failure retry (idempotent, pre-headers only, once) ---
+
+    @Test
+    fun `pre-headers transport failure retries once for GET and returns response`() {
+        val engine = ScriptedCronetEngine()
+        engine.preHeaderFailures = 1
+        engine.responseInfo = FakeUrlResponseInfo(
+            statusCode = 200,
+            headersAsList = listOf(
+                FakeUrlResponseInfo.headerEntry("Content-Type", "text/plain"),
+                FakeUrlResponseInfo.headerEntry("Content-Length", "5"),
+            ),
+        )
+        install(engine, "example.com")
+        val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val retriesBefore = Metrics.retries.get()
+
+        val response = CronetBridge.intercept(chain)
+
+        assertEquals(200, response.code)
+        assertEquals(2, engine.builtRequests.size)
+        engine.builtRequests.forEach { assertEquals(1, it.startCalls) }
+        // Closing the unread body cancels attempt 2 and unregisters.
+        response.body.close()
+        assertEquals(retriesBefore + 1, Metrics.retries.get())
+        assertEquals(0, CallRegistry.activeCount())
+    }
+
+    @Test
+    fun `pre-headers transport failure twice for GET throws after exactly two attempts`() {
+        val engine = ScriptedCronetEngine()
+        engine.preHeaderFailures = 2
+        install(engine, "example.com")
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val retriesBefore = Metrics.retries.get()
+
+        val thrown = assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
+
+        // awaitHeaders unwraps the ExecutionException: the CronetException itself surfaces
+        // (it is an IOException), which is exactly what the retry predicate matches on.
+        assertTrue("expected the CronetException to surface", thrown is FakeCronetException)
+        assertEquals(2, engine.builtRequests.size)
+        assertEquals(retriesBefore + 1, Metrics.retries.get())
+        assertEquals(0, CallRegistry.activeCount())
+    }
+
+    @Test
+    fun `non-idempotent POST pre-headers failure is terminal - no retry`() {
+        val engine = ScriptedCronetEngine()
+        engine.preHeaderFailures = 1
+        install(engine, "example.com")
+        val (_, chain) = cronetChain(
+            OkHttpClient(),
+            "https://example.com/",
+            method = "POST",
+            body = "x".toRequestBody(null),
+        )
+
+        assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
+
+        assertEquals(1, engine.builtRequests.size)
+        assertEquals(0, Metrics.retries.get())
+    }
+
+    @Test
+    fun `cancel during the first attempt prevents the retry`() {
+        val engine = ScriptedCronetEngine()
+        val gate = Gate()
+        engine.startGate = gate
+        install(engine, "example.com")
+        val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+
+        val error = interceptAsync(chain)
+        assertTrue(gate.awaitEntered()) // start() parked: request attached
+        call.cancel() // listener delivers exactly one engine cancel
+        gate.releaseNow()
+
+        val thrown = error.get(5, TimeUnit.SECONDS)
+        assertTrue("expected IOException but was $thrown", thrown is IOException)
+        assertEquals("Canceled", thrown.message)
+        assertEquals(1, engine.builtRequests.size)
+        assertEquals(0, Metrics.retries.get())
+        assertEquals(0, CallRegistry.activeCount())
+    }
+
+    @Test
+    fun `retryOnConnectionFailure false disables the retry`() {
+        val engine = ScriptedCronetEngine()
+        engine.preHeaderFailures = 1
+        install(engine, "example.com")
+        val client = OkHttpClient.Builder().retryOnConnectionFailure(false).build()
+        val (_, chain) = cronetChain(client, "https://example.com/")
+
+        assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
+
+        assertEquals(1, engine.builtRequests.size)
+        assertEquals(0, Metrics.retries.get())
     }
 
     // --- shouldHandle never throws ---

@@ -330,6 +330,57 @@ class CronetSuite {
     }
 
     @Test
+    fun acceptEncodingCallerHeaderReplacedAndDecodeKeptConsistent() {
+        installCronet(quicHintHost = null)
+        val client = OkHttpClient()
+
+        // (a) An explicit caller Accept-Encoding does NOT reach the wire on the pinned engine
+        // (cronet-embedded 143.7445.0, observed server-side): the engine replaces it with its
+        // own "gzip, deflate, br" and transparently decodes. There is no per-request control
+        // (no API on UrlRequest.Builder; the mapper hook also runs at the builder level, but
+        // the replacement happens natively at request execution) and engine-level
+        // enableBrotli only affects brotli ADVERTISING - so the bridge keeps Cronet's decode
+        // and strips Content-Encoding/Content-Length for all-engine-handled encodings.
+        client.newCall(
+            Request.Builder().url("$ORIGIN/headers")
+                .header("Accept-Encoding", "identity")
+                .build(),
+        ).execute().use { response ->
+            assertEquals(200, response.code)
+            val echoed = response.body.string()
+            println("AE-ECHO-BEGIN\n$echoed\nAE-ECHO-END")
+            assertTrue(
+                "pinned engine must replace the caller Accept-Encoding, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [gzip, deflate, br]"),
+            )
+            assertFalse(
+                "the caller's explicit Accept-Encoding must not survive:\n$echoed",
+                echoed.contains("[identity]"),
+            )
+        }
+
+        // (b) Invariant (never double-decode, never a header/body mismatch): exactly ONE
+        // decode happens - the engine's - even when the caller asked for something else.
+        // If the bridge delivered encoded bytes with the headers stripped, this body would
+        // be raw gzip garbage; if it decoded AND OkHttp's BridgeInterceptor decoded, the
+        // GzipSource would throw on plaintext. Plaintext proves exactly one decode and
+        // consistent headers.
+        client.newCall(
+            Request.Builder().url("$ORIGIN/compress/gzip")
+                .header("Accept-Encoding", "identity")
+                .build(),
+        ).execute().use { response ->
+            assertEquals(200, response.code)
+            assertNull(
+                "decoded body must not keep Content-Encoding, headers=${response.headers}",
+                response.header("Content-Encoding"),
+            )
+            assertEquals("gzip-payload-ok", response.body.string())
+        }
+        assertCronetServed(minCount = 2)
+    }
+
+    @Test
     fun hostHeaderAndDuplicatesDocumented() {
         installCronet(quicHintHost = null)
         val client = OkHttpClient()

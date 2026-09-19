@@ -17,6 +17,7 @@ import java.util.logging.Level
 import java.util.logging.Logger
 import okhttp3.Interceptor
 import okhttp3.MediaType
+import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
 import okhttp3.internal.OkHttpInternalApi
@@ -26,6 +27,7 @@ import okhttp3.internal.http.RealInterceptorChain
 import okio.BufferedSource
 import okio.ForwardingSource
 import okio.buffer
+import org.chromium.net.CronetException
 import org.chromium.net.UrlRequest
 
 /**
@@ -47,9 +49,21 @@ import org.chromium.net.UrlRequest
  *   body streaming happens after callDone and is bounded by readTimeout (header wait and every
  *   body read).
  * - Network interceptors never run (policy denies clients that have them).
- * - No fabricated metadata: handshake, networkResponse and sentRequestAtMillis stay unset.
+ * - No fabricated metadata: handshake and networkResponse stay unset; the sent/received
+ *   timestamps come from bridge-owned clocks (RequestConverter start / onResponseStarted).
  * - Redirects surface as 3xx with an empty body for OkHttp's follow-up logic to follow.
  * - 407 is rejected: RetryAndFollowUp would dereference a null Exchange route (Metis B2).
+ *
+ * Transport-failure retry (compensates for the missing Exchange-based route retry stock runs
+ * inside ConnectInterceptor/RetryAndFollowUp): a Cronet request that fails at the transport
+ * level BEFORE any response bytes arrived (onFailed -> headersFuture completed exceptionally
+ * with a CronetException; no onResponseStarted, no body consumed) is retried EXACTLY ONCE with
+ * a fresh UrlRequest, and only when the method is idempotent (GET/HEAD/OPTIONS per RFC), the
+ * call was not canceled and `client.retryOnConnectionFailure` is true. Never after
+ * onResponseStarted (the server may have acted on the request), never for non-idempotent
+ * methods, and no retry for header-wait timeouts (stock treats InterruptedIOException the same
+ * way). Bodyless methods have no request body, so re-running the converter has no replay
+ * hazard. Each retry is counted in [Metrics.retries].
  *
  * Cancellation: 5-step ordered protocol (Metis B3) — pre-start checks plus a per-call
  * EventListener (public Call.addEventListener) that delivers exactly one engine cancel;
@@ -63,6 +77,9 @@ object CronetBridge {
     private const val CANCELED_MESSAGE = "Canceled"
     private const val PROXY_AUTH_MESSAGE =
         "Proxy authentication is not supported over the Cronet path"
+
+    /** Methods safe to retry once on a pre-headers transport failure (RFC idempotent). */
+    private val IDEMPOTENT_METHODS = setOf("GET", "HEAD", "OPTIONS")
 
     /** Never throws: any policy failure fails closed to stock OkHttp. */
     @JvmStatic
@@ -108,8 +125,8 @@ object CronetBridge {
         val call = realChain.call
         val request = realChain.request
         val readTimeoutMillis = realChain.readTimeoutMillis().toLong()
-
-        val converted = RequestConverter(
+        val writeTimeoutMillis = realChain.writeTimeoutMillis().toLong()
+        val converter = RequestConverter(
             cronetEngine = snapshot.engine,
             // Distinct executors: Cronet posts UploadDataProvider callbacks onto the upload
             // executor while the provider submits its body work to the reader executor -
@@ -117,36 +134,64 @@ object CronetBridge {
             uploadDataProviderExecutor = CronetUploadExecutor,
             bodyReaderExecutor = CronetExecutor,
             responseConverter = ResponseConverter(),
-        ).convert(request, readTimeoutMillis, realChain.writeTimeoutMillis().toLong())
-        val urlRequest = converted.urlRequest
+        )
 
-        // 5-step ordered cancellation protocol (Metis B3).
-        if (call.isCanceled()) throw IOException(CANCELED_MESSAGE) // (i)
-        val handle = CallRegistry.register(call, AtomicReference(urlRequest)) // (ii)
-        try {
-            if (call.isCanceled()) { // (iii)
-                handle.cancelUrlRequestOnce()
-                throw IOException(CANCELED_MESSAGE)
-            }
-            urlRequest.start() // (iv)
-            if (call.isCanceled()) { // (v)
-                handle.cancelUrlRequestOnce()
-                throw IOException(CANCELED_MESSAGE)
-            }
+        var retried = false
+        while (true) {
+            val converted = converter.convert(request, readTimeoutMillis, writeTimeoutMillis)
+            val urlRequest = converted.urlRequest
 
-            awaitHeaders(converted.callback, handle, readTimeoutMillis)
-            val response = converted.getResponse()
-            if (response.code == 407) {
-                response.body?.closeQuietly()
-                throw IOException(PROXY_AUTH_MESSAGE)
+            // 5-step ordered cancellation protocol (Metis B3).
+            if (call.isCanceled()) throw IOException(CANCELED_MESSAGE) // (i)
+            val handle = CallRegistry.register(call, AtomicReference(urlRequest)) // (ii)
+            try {
+                try {
+                    if (call.isCanceled()) { // (iii)
+                        handle.cancelUrlRequestOnce()
+                        throw IOException(CANCELED_MESSAGE)
+                    }
+                    urlRequest.start() // (iv)
+                    if (call.isCanceled()) { // (v)
+                        handle.cancelUrlRequestOnce()
+                        throw IOException(CANCELED_MESSAGE)
+                    }
+
+                    awaitHeaders(converted.callback, handle, readTimeoutMillis)
+                } catch (e: IOException) {
+                    // Pre-headers transport failure: the single idempotent retry (see KDoc).
+                    CallRegistry.unregister(call)
+                    if (!retried && isRetryable(e, call, request)) {
+                        retried = true
+                        Metrics.retries.incrementAndGet()
+                        continue
+                    }
+                    throw e
+                }
+
+                val response = converted.getResponse()
+                if (response.code == 407) {
+                    response.body?.closeQuietly()
+                    throw IOException(PROXY_AUTH_MESSAGE)
+                }
+                val body = response.body ?: run { CallRegistry.unregister(call); return response }
+                return response.newBuilder().body(UnregisteringResponseBody(body, call)).build()
+            } catch (e: Throwable) {
+                CallRegistry.unregister(call)
+                throw e
             }
-            val body = response.body ?: run { CallRegistry.unregister(call); return response }
-            return response.newBuilder().body(UnregisteringResponseBody(body, call)).build()
-        } catch (e: Throwable) {
-            CallRegistry.unregister(call)
-            throw e
         }
     }
+
+    /**
+     * Whether a pre-headers failure qualifies for the single retry: transport-level
+     * CronetException only (header-wait timeouts and cancellations do not qualify), idempotent
+     * method, live call, and the stock `retryOnConnectionFailure` setting honored.
+     */
+    private fun isRetryable(e: IOException, call: RealCall, request: Request): Boolean =
+        e is CronetException &&
+            !call.isCanceled() &&
+            request.method in IDEMPOTENT_METHODS &&
+            call.client.retryOnConnectionFailure
 
     /** Waits for headers within the read-timeout budget; on stall the request is canceled. */
     private fun awaitHeaders(

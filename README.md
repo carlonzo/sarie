@@ -91,7 +91,56 @@ Application interceptors still run (they sit above the swap point); network inte
 never run on the Cronet path. Full row-by-row contract with test citations:
 `COMPATIBILITY.md`.
 
-### 6. Toolchain requirements
+### 6. Fixed vs google/cronet-transport-for-okhttp
+
+The upstream Google transport (same Cronet, OkHttp as a user-facing interceptor library)
+has structural limits this project removes. Every row cites the test that proves it.
+
+| Behavior | google/cronet-transport-for-okhttp | This library | Mechanism / evidence |
+| --- | --- | --- | --- |
+| Interceptor placement | The transport must be installed as the **last** interceptor; removing or reordering it silently drops Cronet. | **Eliminated**: no interceptor to install — a build-time bytecode trampoline replaces exactly one OkHttp method (`ConnectInterceptor.intercept`) and cannot be removed or reordered from app code. | `ConnectInterceptorRewriterTest.rewritten intercept is exactly the trampoline for every recipe variant`, `MinifiedSuite.cronetPathStillServes` |
+| WebSocket | WebSocket calls are unsupported on the Cronet path (the transport is not callable for them; the app must special-case). | **Native via stock routing**: upgrade attempts are denied pre-send (`reason=websocket` / cleartext rule) and complete on the exact-stock OkHttp path. | `BaselineSuite.webSocketStaysNative`, `PolicyEngineTest.websocket call yields websocket` |
+| Cancellation latency | Cancel reaches the engine via periodic state polling (~500 ms granularity). | **Immediate**: one engine cancel delivered through the public `Call.addEventListener` event path; exactly-once semantics. | `CronetBridgeTest.cancel between attach and start delivers exactly one engine cancel`, `CronetSuite.cancelAfterHeadersAbortsBody` |
+| Client network config | A client configured with things Cronet cannot honor (proxies, pins, custom trust, authenticators…) still gets routed to Cronet — the config is **silently bypassed**. | **Fail-closed pre-send routing with reason codes**: 19 ordered rules inspect the effective chain before any I/O; unsupported configs run exact-stock. | `PolicyEngineTest` (full rule-order coverage), `BaselineSuite.authenticatorRoutesToStockFallback` |
+| OkHttp tags | Request tags are dropped in the OkHttp→Cronet conversion. | **Preserved**: the host mapper hook re-applies tags (and anything else) to the `UrlRequest.Builder` just before `build()`; the `CronetOptOut` tag drives per-request routing. | `RequestConverterTest.runtime mapper is applied to the builder before build`, `PolicyEngineTest.CronetOptOut tag yields tag_opt_out` |
+| OkHttp cache | Fully bypassed: cronet-path responses are never written to the client's `Cache`, even when one is configured. | Cache-carrying clients are routed to **stock** pre-send (`reason=cache`), so the `CacheInterceptor` behaves exactly stock — cache hits short-circuit above the swap point and never reach Cronet. | `PolicyEngineTest.client cache yields cache` |
+| 407 responses | A proxy-auth challenge crashes the follow-up logic (no usable route/exchange behind the bridge response). | **Clear IOException** (`"Proxy authentication is not supported over the Cronet path"`); proxy clients are denied pre-send anyway. | `CronetBridgeTest.407 response is rejected with proxy authentication IOException` |
+| Transport-failure retry | A failed Cronet request is terminal — no retry at all. | **Idempotent pre-headers retry, exactly once**: GET/HEAD/OPTIONS, not canceled, `retryOnConnectionFailure` honored, only before any response byte; non-idempotent methods stay terminal. | `CronetBridgeTest.pre-headers transport failure retries once for GET and returns response` |
+| Response timestamps | `sentRequestAtMillis` / `receivedResponseAtMillis` stay unset. | **Populated** from bridge-owned clocks (converter start / `onResponseStarted`). | `ResponseConverterTest.timestamps populated through the real callback and ordered` |
+
+### 7. What differs when your traffic runs HTTP/3 vs HTTP/2
+
+Facts a caller can observe on the Cronet path, split by the negotiated protocol
+(`response.protocol`): `Protocol.HTTP_3` (`h3`) vs `Protocol.HTTP_2` (`h2`).
+
+- `response.protocol` is `HTTP_3` when the engine negotiated h3, `HTTP_2` for h2 —
+  `CronetSuite.h3NegotiatedAgainstPublicOrigin`, `CronetSuite.h2FirstRequestWithoutHint`,
+  `ResponseConverterTest.negotiated protocol mapping`.
+- h3 responses carry **no `handshake` / `networkResponse` / `cacheResponse`** (and neither do
+  h2 ones): QUIC-TLS has no OkHttp `Handshake` representation and the bridge never
+  fabricates metadata (see `COMPATIBILITY.md` row 6).
+- `EventListener.callEnd` fires at **header return** on both protocols (the body keeps
+  streaming after it); `callFailed` only if the chain fails earlier — `COMPATIBILITY.md`
+  row 7.
+- `callTimeout` bounds the **header phase only**; body reads are bounded by `readTimeout`
+  regardless of protocol — `CronetSuite.readTimeoutStallAborts`.
+- Connection migration and 0-RTT are **engine-managed** (no OkHttp visibility, no events).
+- `EventListener` sees **no connect/DNS stages** on the Cronet path — no Exchange exists;
+  only the call-level events above fire.
+- Duplicate request headers **collapse to the last value on the wire** (engine behavior,
+  measured): `CronetSuite.hostHeaderAndDuplicatesDocumented`.
+- `Accept-Encoding`: the engine replaces the caller's header with its own
+  `gzip, deflate, br` and transparently decodes (exactly one decode, engine-owned; no
+  per-request control exists) — `CronetSuite.acceptEncodingCallerHeaderReplacedAndDecodeKeptConsistent`,
+  `CronetSuite.compressionGzipDecoded`.
+- Cache writes are skipped for Cronet responses (cache clients are on stock entirely) —
+  `PolicyEngineTest.client cache yields cache`.
+
+Local-origin h3 is additionally blocked by Chromium's known-root QUIC policy on the pinned
+engine (deterministic h2 fallback; netlog-archived) — `CronetSuite.h2LocalOriginWhileQuicBlocked`,
+`COMPATIBILITY.md` row 23.
+
+### 8. Toolchain requirements
 
 - **JDK 21** for building (`JAVA_HOME` must point at a Temurin 21 install; this repo pins
   `/home/carlo/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS`).
@@ -105,7 +154,7 @@ never run on the Cronet path. Full row-by-row contract with test citations:
 - AGP 8.13.0 / Gradle 8.14.3 / Kotlin 2.2.20 / cronet-api + cronet-embedded 143.7445.0
   (full pins and quirks in the table below and `THIRD_PARTY.md`).
 
-### 7. Verify it (this repo's suites)
+### 9. Verify it (this repo's suites)
 
 Every claim in the docs traces to one of these suites; they are the living documentation.
 

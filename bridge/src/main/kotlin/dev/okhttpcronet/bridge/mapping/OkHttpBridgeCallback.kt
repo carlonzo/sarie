@@ -51,6 +51,20 @@ class OkHttpBridgeCallback(readTimeoutMillis: Long) : UrlRequest.Callback() {
         const val CANCELED_MESSAGE = "Canceled"
     }
 
+    /**
+     * Wall-clock time the request was handed to Cronet: surfaced as OkHttp's
+     * sentRequestAtMillis (we own this clock - no fabricated engine data).
+     */
+    val sentAtMillis: Long = System.currentTimeMillis()
+
+    /**
+     * Wall-clock time response headers arrived (onResponseStarted / onRedirectReceived):
+     * surfaced as OkHttp's receivedResponseAtMillis.
+     */
+    @Volatile
+    var receivedHeadersAtMillis: Long = 0L
+        private set
+
     /** The read timeout as specified by OkHttp. */
     private val readTimeoutMillis: Long =
         // So that we don't have to special case infinity. Int.MAX_VALUE is ~infinity for all
@@ -93,6 +107,7 @@ class OkHttpBridgeCallback(readTimeoutMillis: Long) : UrlRequest.Callback() {
         // We never follow redirects inside Cronet: pass the 3xx upstream to OkHttp's follow-up
         // logic. There is no way to retrieve a redirect response's body with Cronet's APIs, so
         // provide an empty one.
+        receivedHeadersAtMillis = System.currentTimeMillis()
         check(headersFuture.complete(urlResponseInfo))
         check(bodySourceFuture.complete(Buffer()))
         urlRequest.cancel()
@@ -100,6 +115,7 @@ class OkHttpBridgeCallback(readTimeoutMillis: Long) : UrlRequest.Callback() {
 
     override fun onResponseStarted(urlRequest: UrlRequest, urlResponseInfo: UrlResponseInfo) {
         request = urlRequest
+        receivedHeadersAtMillis = System.currentTimeMillis()
         check(headersFuture.complete(urlResponseInfo))
         check(bodySourceFuture.complete(CronetBodySource()))
     }
