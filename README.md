@@ -111,7 +111,7 @@ Every claim in the docs traces to one of these suites; they are the living docum
 export JAVA_HOME=/home/carlo/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS
 
 # JVM: mapping, policy, bridge glue, rewriter + fingerprints + TestKit plugin tests
-./gradlew :bridge:testDebugUnitTest :plugin:test
+./gradlew :bridge:testDebugUnitTest :plugin-build:plugin:test
 
 # Device: stock/fallback baseline + real-Cronet suite (needs a booted API-30+ emulator).
 # The HTTP/3 origin (pinned Caddy 2.11.4) is gradle-managed: connectedDebugAndroidTest
