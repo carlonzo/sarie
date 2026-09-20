@@ -4,7 +4,7 @@ okhttpMin = "5.4.0"
 # Highest verified (sample default, -PokhttpVersion override for the CI matrix).
 okhttp = "5.5.0"
 cronetApi = "143.7445.0"
-cronetEmbedded = "143.7445.0"
+cronetEmbedded = "500.0.2"
 kotlin = "2.4.20"
 agp = "9.4.1"
 junit = "4.13.2"
