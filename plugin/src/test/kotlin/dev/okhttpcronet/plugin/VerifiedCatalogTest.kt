@@ -51,11 +51,6 @@ class VerifiedCatalogTest {
                 "$name must not hardcode an okhttp coordinate, got:\n$build",
                 Regex("""okhttp:[0-9]""").containsMatchIn(build),
             )
-            val settings = File("src/test/fixtures/$name/settings.gradle.kts").readText()
-            assertTrue(
-                "$name settings must load gradle/libs.versions.toml, got:\n$settings",
-                settings.contains("gradle/libs.versions.toml"),
-            )
         }
     }
 }

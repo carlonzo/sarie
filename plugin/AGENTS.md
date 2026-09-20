@@ -67,9 +67,9 @@ never weaken it to admit a version.
 ## TestKit
 
 Fixtures live in `src/test/fixtures/sample-app` (application + plugin) and
-`src/test/fixtures/sample-lib` (library + plugin). Both load the repo version catalog
-(`implementation(libs.okhttp)`); TestKit copies `gradle/libs.versions.toml` into the
-temp project. Scenarios in `TransportPluginTest`: happy app build with both guards
+`src/test/fixtures/sample-lib` (library + plugin). Both use `implementation(libs.okhttp)`. TestKit copies `gradle/libs.versions.toml` into
+the temp project so Gradle's default `libs` catalog loads (do not also `from()` it in
+settings — Gradle 9 rejects a second import). Scenarios in `TransportPluginTest`: happy app build with both guards
 running, library apply that is not a no-op, and okhttp 4 failing as unsupported (the
 catalog `okhttp =` pin is rewritten for that case). TestKit needs AGP on the
 `pluginUnderTestMetadata` classpath; that wiring already exists in `build.gradle.kts`.
