@@ -6,6 +6,11 @@
   "labels": [
     "dependencies"
   ],
+  "enabledManagers": [
+    "gradle",
+    "gradle-wrapper",
+    "github-actions"
+  ],
   "packageRules": [
     {
       "description": "OkHttp bumps must never automerge. CI fails until RecipeRegistry, goldens, and the PR matrix include the new version.",
@@ -16,6 +21,16 @@
       "automerge": false,
       "addLabels": [
         "okhttp-bump"
+      ]
+    },
+    {
+      "description": "Group GitHub Actions updates into one PR.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "github-actions",
+      "addLabels": [
+        "github-actions"
       ]
     }
   ]
