@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Downloads the pinned Caddy build used as the HTTP/3 test origin.
-# Version + sha256 recorded in THIRD_PARTY.md ("Caddy HTTP/3 test origin").
 # Usage: ./scripts/download-caddy.sh   (idempotent; extracts to scripts/bin/caddy)
 set -euo pipefail
 

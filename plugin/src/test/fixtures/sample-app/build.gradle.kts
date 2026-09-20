@@ -7,8 +7,7 @@ plugins {
 
 android {
     namespace = "dev.okhttpcronet.sample.fixture"
-    // Minor-release platform dir on disk is android-37.0; CI passes -Pokhttpcronet.compileSdk=android-37.
-    compileSdkVersion = providers.gradleProperty("okhttpcronet.compileSdk").orElse("android-37.0").get()
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 24

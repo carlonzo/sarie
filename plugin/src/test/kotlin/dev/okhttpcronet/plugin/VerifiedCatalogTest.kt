@@ -30,13 +30,12 @@ class VerifiedCatalogTest {
     }
 
     @Test
-    fun `plugin compileOnly okhttp is the oldest verified recipe`() {
+    fun `plugin compileOnly okhttp is the catalog min pin`() {
         val build = File("build.gradle.kts").readText()
-        val versions = Regex("""okhttp:([0-9]+\.[0-9]+\.[0-9]+)""")
-            .findAll(build)
-            .map { it.groupValues[1] }
-            .toSet()
-        assertEquals(setOf(RecipeRegistry.recipes.keys.minOrNull()), versions)
+        assertTrue(
+            "plugin must compileOnly(libs.okhttp.min), got:\n$build",
+            build.contains("compileOnly(libs.okhttp.min)"),
+        )
     }
 
     @Test

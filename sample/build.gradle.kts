@@ -2,7 +2,6 @@ import java.net.Socket
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     id("com.carlonzo.sarie")
 }
 
@@ -13,12 +12,11 @@ okhttpCronet {
 
 android {
     namespace = "dev.okhttpcronet.sample"
-    // Minor-release platform dir on disk is android-37.0; CI passes android-37.
-    compileSdkVersion = providers.gradleProperty("okhttpcronet.compileSdk").get()
+    compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
         applicationId = "dev.okhttpcronet.sample"
-        minSdk = 24
+        minSdk = libs.versions.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -125,6 +123,37 @@ val startTestOrigin = tasks.register("startTestOrigin") {
                 )
             }
         }
+
+        // Local-origin QUIC from the emulator is blocked by Chromium's known-root policy,
+        // so device traffic never writes HTTP/3 to the access log. Prove origin h3 from
+        // the host instead (see CronetSuite KDoc and verifyH3ServerEvidence).
+        val curlH3 = rootProject.file("scripts/bin/curl-http3")
+        if (!curlH3.canExecute()) {
+            val dl = ProcessBuilder("./scripts/download-curl-http3.sh")
+                .directory(rootProject.projectDir)
+                .inheritIO()
+                .start()
+            if (dl.waitFor() != 0) {
+                throw GradleException("scripts/download-curl-http3.sh failed")
+            }
+        }
+        val probe = ProcessBuilder(
+            curlH3.absolutePath,
+            "-sk",
+            "--http3-only",
+            "--max-time", "5",
+            "https://127.0.0.1:8443/ok",
+        ).directory(rootProject.projectDir).start()
+        val probeBody = probe.inputStream.bufferedReader().readText()
+        val probeErr = probe.errorStream.bufferedReader().readText()
+        probe.waitFor()
+        if (probe.exitValue() != 0 || probeBody != "ok") {
+            throw GradleException(
+                "host HTTP/3 probe of https://127.0.0.1:8443/ok failed " +
+                    "(exit=${probe.exitValue()} body='$probeBody' err='$probeErr')",
+            )
+        }
+        println("startTestOrigin: host HTTP/3 probe ok")
 
         // The /slow upstream port lives in scripts/Caddyfile (reverse_proxy 127.0.0.1:<port>).
         val slowPort = Regex("reverse_proxy\\s+127\\.0\\.0\\.1:(\\d+)")

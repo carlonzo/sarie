@@ -16,18 +16,18 @@ gradlePlugin {
 }
 
 dependencies {
-    compileOnly("com.android.tools.build:gradle-api:8.13.0")
-    compileOnly("org.ow2.asm:asm:9.7.1")
-    compileOnly("org.ow2.asm:asm-commons:9.7.1")
+    compileOnly(libs.agp.api)
+    compileOnly(libs.asm)
+    compileOnly(libs.asm.commons)
     // Test-only: rewriter and fingerprint work compile against OkHttp classes; never exposed as api.
-    compileOnly("com.squareup.okhttp3:okhttp:5.4.0")
+    compileOnly(libs.okhttp.min)
     testImplementation(gradleTestKit())
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
     // Needed by the visitor unit tests: ClassData fake requires the AGP API on the test classpath
     // (compileOnly does not reach tests).
-    testImplementation("com.android.tools.build:gradle-api:8.13.0")
-    testImplementation("org.ow2.asm:asm:9.7.1")
-    testImplementation("com.squareup.okhttp3:okhttp:5.4.0")
+    testImplementation(libs.agp.api)
+    testImplementation(libs.asm)
+    testImplementation(libs.okhttp.min)
 }
 
 kotlin {
@@ -39,9 +39,9 @@ kotlin {
 // TestKit's injected plugin classloader is isolated from the fixture's own plugin loaders, so the
 // fixture cannot link against gradle-api or apply AGP next to the plugin-under-test unless AGP
 // rides the SAME injected classpath (same trick as square/wire and square/leakcanary).
-val agpForTests by configurations.creating
+val agpForTests = configurations.create("agpForTests")
 dependencies {
-    agpForTests("com.android.tools.build:gradle:8.13.0")
+    agpForTests(libs.agp)
 }
 tasks.withType<org.gradle.plugin.devel.tasks.PluginUnderTestMetadata>().configureEach {
     pluginClasspath.from(agpForTests)

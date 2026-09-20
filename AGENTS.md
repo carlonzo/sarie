@@ -64,5 +64,4 @@ runtime bridge; the bridge decides per request whether Cronet or stock OkHttp ha
 ## Where truth lives
 
 - `COMPATIBILITY.md`: behavior contract, every row test-cited. Reference it; do not duplicate.
-- `THIRD_PARTY.md`: upstream provenance (Google mapper port, OkHttp goldens, Cronet).
 - `ROLLBACK.md`: kill switch and recovery paths.

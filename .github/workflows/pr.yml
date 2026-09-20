@@ -15,24 +15,19 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  ANDROID_COMPILE_SDK: android-37
-
 jobs:
   plugin:
     name: plugin tests
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-37 build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v4
       - name: Unpin machine-local JDK path
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
@@ -49,15 +44,13 @@ jobs:
       matrix:
         okhttp: ["5.4.0", "5.5.0"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-37 build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v4
       - name: Unpin machine-local JDK path
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
@@ -69,7 +62,6 @@ jobs:
           :bridge:testDebugUnitTest
           :sample:assembleDebug
           -PokhttpVersion=${{ matrix.okhttp }}
-          -Pokhttpcronet.compileSdk=android-37
 
   device:
     name: device okhttp ${{ matrix.okhttp }}
@@ -80,15 +72,13 @@ jobs:
       matrix:
         okhttp: ["5.4.0", "5.5.0"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-37 build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v4
       - name: Unpin machine-local JDK path
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
@@ -101,9 +91,10 @@ jobs:
       - name: Test origin (Caddy + certs + /big payloads)
         run: |
           ./scripts/download-caddy.sh
+          ./scripts/download-curl-http3.sh
           ./scripts/gen-certs.sh
       - name: Instrumented suites
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 30
           arch: x86_64
@@ -115,4 +106,22 @@ jobs:
             :sample:connectedDebugAndroidTest
             :sample:connectedMinifiedReleaseAndroidTest
             -PokhttpVersion=${{ matrix.okhttp }}
-            -Pokhttpcronet.compileSdk=android-37
+      - name: Dump test failures on failure
+        if: failure()
+        run: |
+          for f in sample/build/outputs/androidTest-results/connected/*/*.xml; do
+            if [ -f "$f" ] && grep -q '<failure' "$f"; then
+              echo "::group::Test failures in $f"
+              grep -B 2 -A 30 '<failure' "$f"
+              echo "::endgroup::"
+            fi
+          done
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-device-okhttp-${{ matrix.okhttp }}
+          path: |
+            sample/build/reports/androidTests/
+            sample/build/outputs/androidTest-results/
+

@@ -44,8 +44,10 @@ import org.junit.Test
  *   other tests). No public CronetEngine.Builder knob exists to trust custom QUIC roots
  *   (no setMockCertVerifierForTesting in cronet-api 143.7445.0). [h2LocalOriginWhileQuicBlocked]
  *   pins that fallback so a future engine that DOES negotiate local h3 is immediately visible.
- * - Server side: the :sample verifyH3ServerEvidence Gradle task greps
- *   scripts/bin/caddy-access.log for "proto":"HTTP/3" entries (origin h3 capability).
+ * - Server side: startTestOrigin probes https://127.0.0.1:8443/ok with a host
+ *   `--http3-only` curl (scripts/bin/curl-http3). The emulator cannot complete
+ *   local-origin h3. verifyH3ServerEvidence then greps scripts/bin/caddy-access.log
+ *   for "proto":"HTTP/3" entries.
  */
 class CronetSuite {
 

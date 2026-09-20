@@ -60,11 +60,7 @@ private const val TEST_JAVA_HOME = "/home/carlo/.local/share/mise/installs/java/
 
 private fun testJavaHome(): String = System.getenv("JAVA_HOME") ?: TEST_JAVA_HOME
 
-private fun fixtureArgs(): List<String> {
-    val args = mutableListOf("assembleDebug", "--console=plain")
-    System.getenv("ANDROID_COMPILE_SDK")?.let { args += "-Pokhttpcronet.compileSdk=$it" }
-    return args
-}
+private fun fixtureArgs(): List<String> = listOf("assembleDebug", "--console=plain")
 
 /**
  * Copies the fixture into a fresh temp dir (TestKit must never build in-place), points it at the
