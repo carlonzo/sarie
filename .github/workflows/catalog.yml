@@ -72,7 +72,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         if: steps.detect.outputs.changed == 'true'
         with:
-          packages: "platforms;android-37 build-tools;35.0.0"
+          packages: "platforms;android-37.0 build-tools;35.0.0"
 
       - name: Unpin machine-local JDK path
         if: steps.detect.outputs.changed == 'true'
@@ -87,14 +87,14 @@ jobs:
       - name: JVM + plugin + assemble against the new pin
         if: steps.detect.outputs.changed == 'true'
         env:
-          ANDROID_COMPILE_SDK: android-37
+          ANDROID_COMPILE_SDK: android-37.0
         run: |
           ./gradlew --no-daemon \
             :bridge:checkOkHttpCompileOnly \
             :bridge:testDebugUnitTest \
             :sample:assembleDebug \
             -PokhttpVersion=${{ steps.detect.outputs.new }} \
-            -Pokhttpcronet.compileSdk=android-37
+            -Pokhttpcronet.compileSdk=android-37.0
           ./gradlew --no-daemon -p plugin test
 
       - name: Commit pins and retrigger PR checks
@@ -123,4 +123,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "chore: pin okhttp ${{ steps.detect.outputs.new }} as verified"
           git push
-          gh workflow run PR.yml --ref "${{ github.head_ref }}"
+          gh workflow run pr.yml --ref "${{ github.head_ref }}"

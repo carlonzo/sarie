@@ -13,7 +13,7 @@ okhttpCronet {
 
 android {
     namespace = "dev.okhttpcronet.sample"
-    // Minor-release platform dir on disk is android-37.0; CI passes android-37.
+    // API 37 ships as platforms;android-37.0.
     compileSdkVersion = providers.gradleProperty("okhttpcronet.compileSdk").get()
 
     defaultConfig {
