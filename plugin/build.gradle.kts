@@ -41,7 +41,7 @@ kotlin {
 // rides the SAME injected classpath (same trick as square/wire and square/leakcanary).
 val agpForTests by configurations.creating
 dependencies {
-    agpForTests("com.android.tools.build:gradle:8.13.0")
+    agpForTests("com.android.tools.build:gradle:8.13.2")
 }
 tasks.withType<org.gradle.plugin.devel.tasks.PluginUnderTestMetadata>().configureEach {
     pluginClasspath.from(agpForTests)
