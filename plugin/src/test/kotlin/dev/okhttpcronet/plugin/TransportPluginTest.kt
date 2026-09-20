@@ -5,6 +5,7 @@ import java.nio.file.Files
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -30,6 +31,28 @@ class TransportPluginTest {
         assertTrue(
             "guard tasks must run before assembly",
             result.output.indexOf("> Task :verifyOkHttpPin") < result.output.indexOf("> Task :preBuild"),
+        )
+    }
+
+    @Test(timeout = 1_800_000L)
+    fun `library fixture registers guards and is not a no-op`() {
+        val dir = prepareFixture(PIN_OKHTTP_VERSION, fixture = "sample-lib")
+        val result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(dir)
+            .withArguments(fixtureArgs())
+            .withEnvironment(System.getenv() + ("JAVA_HOME" to testJavaHome()))
+            .build()
+        println(result.output)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyOkHttpPin")!!.outcome)
+        assertEquals(TaskOutcome.SUCCESS, result.task(":verifyOkHttpFingerprint")!!.outcome)
+        assertTrue(
+            "library apply must log that the rewrite still needs the application:\n${result.output}",
+            result.output.contains(TransportPlugin.LIBRARY_REWRITE_NOTE),
+        )
+        assertFalse(
+            "library apply must not be reported as a no-op:\n${result.output}",
+            result.output.contains("plugin is a no-op"),
         )
     }
 
@@ -66,8 +89,8 @@ private fun fixtureArgs(): List<String> = listOf("assembleDebug", "--console=pla
  * Copies the fixture into a fresh temp dir (TestKit must never build in-place), points it at the
  * Android SDK, and optionally swaps the okhttp version for an unsupported-version scenario.
  */
-private fun prepareFixture(okhttpVersion: String): File {
-    val source = File("src/test/fixtures/sample-app")
+private fun prepareFixture(okhttpVersion: String, fixture: String = "sample-app"): File {
+    val source = File("src/test/fixtures/$fixture")
     check(source.isDirectory) { "fixture not found at ${source.absolutePath}" }
     val dir = Files.createTempDirectory("okhttp-cronet-fixture-").toFile()
     source.copyRecursively(dir)

@@ -35,7 +35,8 @@ stock OkHttp): `CronetBridgeTest.fallback bytecode shape - initExchange and copy
 
 ## 3. Fingerprint / pin failure recovery
 
-The plugin guards run on `preBuild` of every app module:
+The plugin guards run on `preBuild` of every application or library module the plugin is
+applied to:
 
 - `verifyOkHttpPin` — accepts the supported versions (currently 5.4.0 and 5.5.0), warns
   if a newer untested okhttp is resolved, and fails on anything older (including OkHttp 4).

@@ -7,8 +7,15 @@ import org.chromium.net.CronetEngine
 private val runtimeLogger: Logger = Logger.getLogger("dev.okhttpcronet.bridge")
 
 /**
- * Holds the installed [RuntimeSnapshot]. The engine is host-owned and borrowed:
- * [install]/[uninstall] only swap or drop the reference and never stop any engine.
+ * Process-wide handle to the host-owned Cronet engine.
+ *
+ * The host creates the [CronetEngine] (choosing the Maven artifact, QUIC hints, cache path,
+ * and so on) and calls [install] once at startup, before the first OkHttp call. The bridge
+ * borrows that engine: [install] / [uninstall] only swap or drop the reference and never
+ * call [CronetEngine.shutdown].
+ *
+ * Without an install, every request falls back to stock OkHttp (`reason=engine_missing`).
+ * The runtime kill switch `okhttp.cronet.enabled=false` does the same without uninstalling.
  */
 object CronetRuntime {
     private const val KILL_SWITCH_PROPERTY = "okhttp.cronet.enabled"
@@ -16,8 +23,26 @@ object CronetRuntime {
     @Volatile
     private var current: RuntimeSnapshot? = null
 
-    /** Atomically replaces any existing snapshot with a new one. */
-    fun install(policy: CronetPolicy, engine: CronetEngine, mapper: RequestToUrlRequestMapper) {
+    /**
+     * Publishes [engine] so the rewritten `ConnectInterceptor` can route matching requests
+     * through Cronet. A second call replaces the snapshot; the previous engine is not shut
+     * down.
+     *
+     * @param engine Host-built engine. The host owns its lifecycle and the artifact it came
+     *   from (`cronet-embedded`, `cronet-bundled`, Play Services, …).
+     * @param policy Which requests may use Cronet. [DefaultPolicy] with an empty
+     *   [CronetPolicy.allowedOrigins] (the default) lets every origin that passes the other
+     *   fail-closed checks through; pass a non-empty set to restrict to those hosts.
+     * @param mapper Optional hook applied to each Cronet `UrlRequest.Builder` after the
+     *   OkHttp request is copied. Used for Cronet-only knobs (priority, traffic-stats tag,
+     *   annotations). Most hosts leave the default no-op.
+     */
+    @JvmOverloads
+    fun install(
+        engine: CronetEngine,
+        policy: CronetPolicy = DefaultPolicy(),
+        mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
+    ) {
         warnIfUnverified(OkHttp.VERSION)
         current = RuntimeSnapshot(engine, policy, mapper, System.currentTimeMillis())
     }

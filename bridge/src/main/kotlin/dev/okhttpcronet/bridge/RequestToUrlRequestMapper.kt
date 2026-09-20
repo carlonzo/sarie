@@ -4,9 +4,19 @@ import okhttp3.Request
 import org.chromium.net.UrlRequest
 
 /**
- * Host hook applied to the [UrlRequest.Builder] before it is built, so host tags survive
- * on the Cronet request. Defined here (todo 2); todo 5 applies it in the converters.
+ * Optional host hook applied to the Cronet [UrlRequest.Builder] after the OkHttp
+ * [Request] has been copied and before [UrlRequest.Builder.build].
+ *
+ * Use this for Cronet-only knobs that have no OkHttp equivalent (priority,
+ * traffic-stats uid, request annotations). Do not mutate the OkHttp request.
+ * Most hosts never need one: [CronetRuntime.install] defaults to [NOOP].
  */
 fun interface RequestToUrlRequestMapper {
     fun map(request: Request, builder: UrlRequest.Builder)
+
+    companion object {
+        /** Identity mapper: leave the builder as [RequestConverter] filled it. */
+        @JvmField
+        val NOOP: RequestToUrlRequestMapper = RequestToUrlRequestMapper { _, _ -> }
+    }
 }

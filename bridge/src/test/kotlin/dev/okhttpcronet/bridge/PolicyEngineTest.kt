@@ -176,7 +176,7 @@ class PolicyEngineTest {
         Metrics.resetForTest()
         TrustBaseline.clearMemoForTest()
         // isEnabled() requires a snapshot present in CronetRuntime itself.
-        CronetRuntime.install(policy("example.com"), engine, mapper)
+        CronetRuntime.install(engine, policy("example.com"), mapper)
     }
 
     @After
@@ -405,6 +405,24 @@ class PolicyEngineTest {
     fun `loopback https with allowLoopbackHttps yields allow`() {
         val p = policy("localhost", allowLoopback = true)
         val d = decision(input = inputFor(url = "https://localhost/"), snapshot = snap(p))
+        assertEquals(Decision(true, null), d)
+    }
+
+    @Test
+    fun `empty allowedOrigins admits every https origin`() {
+        val d = decision(
+            input = inputFor(url = "https://other.com/"),
+            snapshot = snap(policy()),
+        )
+        assertEquals(Decision(true, null), d)
+    }
+
+    @Test
+    fun `star token admits every https origin`() {
+        val d = decision(
+            input = inputFor(url = "https://other.com/"),
+            snapshot = snap(policy("*")),
+        )
         assertEquals(Decision(true, null), d)
     }
 

@@ -4,7 +4,7 @@ Let an OkHttp 5.4 / 5.5 Android app speak HTTP/3 through Cronet without forking 
 and without installing an interceptor.
 
 A Gradle plugin rewrites one OkHttp method at build time. Requests then pass through a
-bridge that sends allowlisted origins over Cronet and everything else over stock OkHttp.
+bridge that sends matching HTTPS calls over Cronet and everything else over stock OkHttp.
 The bridge sits below every interceptor you add. Unsupported configurations go back to
 stock OkHttp before any Cronet I/O starts.
 
@@ -12,7 +12,7 @@ See `COMPATIBILITY.md` for the exact contract and `ROLLBACK.md` to turn it off.
 
 ## Requirements
 
-- Android **application** module (library modules are ignored)
+- Android **application** module (the rewrite runs when packaging the APK)
 - OkHttp **5.4.0** or **5.5.0** (newer versions warn; older versions including OkHttp 4 fail the build)
 - minSdk 24
 - A host-owned `CronetEngine` (this project never downloads or selects an engine)
@@ -21,6 +21,9 @@ See `COMPATIBILITY.md` for the exact contract and `ROLLBACK.md` to turn it off.
 
 ### 1. Apply the plugin
 
+Apply it to the **application** that packages the APK. That is where OkHttp is rewritten,
+including when OkHttp is only a dependency of an Android library:
+
 ```kotlin
 // app/build.gradle.kts
 plugins {
@@ -28,6 +31,11 @@ plugins {
     id("com.carlonzo.sarie")
 }
 ```
+
+AGP cannot rewrite dependency classes into a library AAR (`InstrumentationScope.ALL` is
+application-only). You can also apply the plugin to the library that declares OkHttp —
+the version/fingerprint guards run there — but you still need it on the application for
+the `ConnectInterceptor` rewrite.
 
 ### 2. Add dependencies
 
@@ -41,8 +49,13 @@ dependencies {
 }
 ```
 
-`cronet-embedded` supplies the engine and native libraries. There is no Play Services
-provider waterfall.
+The host owns the engine. This repo's sample and connected suites pin
+`cronet-embedded:143.7445.0`. Google later published `500.0.2`, where `cronet-embedded`
+is a deprecated empty artifact that pulls `org.chromium.net:cronet-bundled` (and
+`cronet-api` pulls `org.chromium.net:cronet`). Either coordinate works at the API this
+bridge compiles against; we have not re-run the connected suites on 500.
+
+There is no Play Services provider waterfall.
 
 ### 3. Build an engine and install it once at startup
 
@@ -52,18 +65,43 @@ val engine = CronetEngine.Builder(context)
     .enableHttp2(true)
     .enableBrotli(true)
     .setStoragePath(context.cacheDir.absolutePath)
-    .addQuicHint("api.example.com", 443, 443)
     .build()
 
+CronetRuntime.install(engine)
+```
+
+That is the whole required API: a host-owned engine, installed once before the first
+call. `install` stores a reference, `uninstall()` drops it, and neither calls
+`engine.shutdown()`.
+
+`DefaultPolicy()` (the default) sends every origin that passes the other fail-closed
+checks over Cronet. Restrict it when you have only tested some hosts — the Cronet path
+is not OkHttp-parity (no cache writes, no network interceptors, no handshake metadata;
+see `COMPATIBILITY.md`):
+
+```kotlin
 CronetRuntime.install(
-    DefaultPolicy(allowedOrigins = setOf("api.example.com")),
     engine,
-    RequestToUrlRequestMapper { _, _ -> },
+    DefaultPolicy(allowedOrigins = setOf("api.example.com")), // "host" = port 443; "host:port" is exact
 )
 ```
 
-The engine is borrowed: `install` stores a reference, `uninstall()` drops it, and neither
-calls `engine.shutdown()`. Install before the first call.
+`addQuicHint(host, port, alternatePort)` is a Cronet engine knob, not a Sarie API. It
+tells Cronet "this host already speaks QUIC" so the **first** connection can attempt
+HTTP/3 instead of waiting for an Alt-Svc advertisement after TCP/H2. It is optional. A
+disk cache (`setStoragePath` plus `enableHttpCache`) also lets later sessions reuse QUIC
+server config. Wrong hints waste a QUIC attempt and fall back to TCP.
+
+```kotlin
+CronetEngine.Builder(context)
+    .enableQuic(true)
+    .addQuicHint("api.example.com", 443, 443)
+    .build()
+```
+
+`RequestToUrlRequestMapper` is an optional hook on `UrlRequest.Builder` for Cronet-only
+knobs (priority, traffic-stats tag, annotations) that OkHttp's `Request` cannot express.
+Most hosts never pass one; the default is a no-op.
 
 ### 4. Opt a request out
 
@@ -79,7 +117,7 @@ That request runs on stock OkHttp.
 
 | Request | Path |
 | --- | --- |
-| HTTPS to an allowlisted origin, default client | Cronet (h3 or h2, per the engine) |
+| HTTPS on a default client (empty allowlist, or a listed origin) | Cronet (h3 or h2, per the engine) |
 | `http://`, loopback, WebSocket | stock OkHttp |
 | Client with cache, network interceptors, custom authenticator / proxy / pins / trust / socket factory / hostname verifier, or `H2_PRIOR_KNOWLEDGE` | stock OkHttp |
 | No engine, kill switch off (`okhttp.cronet.enabled=false`), or `CronetOptOut` tag | stock OkHttp |

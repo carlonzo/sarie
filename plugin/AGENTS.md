@@ -7,15 +7,23 @@ Published as `com.carlonzo.sarie:plugin` (plugin id `com.carlonzo.sarie`).
 
 ## Registration
 
-`TransportPlugin` requires `com.android.application`; outside one it is a no-op with a
-warning. On application modules it hooks `androidComponents.onVariants` and registers
+`TransportPlugin` applies to `com.android.application` and `com.android.library`.
+Outside those it is a no-op with a warning.
+
+On **application** modules it hooks `androidComponents.onVariants` and registers
 `transformClassesWith(ConnectInterceptorVisitorFactory, InstrumentationScope.ALL)` plus
-`FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS`. The visitor factory's
-parameters are `OkhttpCronetInstrumentationParams` with `okhttpVersion: Property<String>`
-and optional `invalidateToken: Property<Long>`; only simple `Property` types cross the AGP
-instrumentation worker boundary (`okhttpVersion` defaults to `"family"`, `invalidateToken`
-can be set via `forceInstrument` or `-PokhttpCronet.forceInstrument=true` to invalidate AGP's
-transform cache during development).
+`FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS`. AGP forbids
+`InstrumentationScope.ALL` on libraries (instrumenting a dependency AAR has no effect on
+consumers), so a library apply registers only the pin/fingerprint guards and logs that
+the rewrite still needs the plugin on the application that packages the APK. OkHttp
+declared only in a library is still rewritten there as a transitive class.
+
+The visitor factory's parameters are `OkhttpCronetInstrumentationParams` with
+`okhttpVersion: Property<String>` and optional `invalidateToken: Property<Long>`; only
+simple `Property` types cross the AGP instrumentation worker boundary (`okhttpVersion`
+defaults to `"family"`, `invalidateToken` can be set via `forceInstrument` or
+`-PokhttpCronet.forceInstrument=true` to invalidate AGP's transform cache during
+development).
 
 ## Rewrite pipeline
 
@@ -58,11 +66,12 @@ never weaken it to admit a version.
 
 ## TestKit
 
-Fixtures live in `src/test/fixtures/sample-app` (applies `com.carlonzo.sarie`,
-pins okhttp 5.5.0). Scenarios in `TransportPluginTest`: happy build with both guards running,
-and okhttp 4 failing as unsupported. TestKit needs AGP on the `pluginUnderTestMetadata`
-classpath; that wiring already exists in `build.gradle.kts`. TestKit forks must use
-temurin-21 (see the JDK note in that file).
+Fixtures live in `src/test/fixtures/sample-app` (application + plugin, pins okhttp 5.5.0)
+and `src/test/fixtures/sample-lib` (library + plugin). Scenarios in `TransportPluginTest`:
+happy app build with both guards running, library apply that is not a no-op, and okhttp 4
+failing as unsupported. TestKit needs AGP on the `pluginUnderTestMetadata` classpath; that
+wiring already exists in `build.gradle.kts`. TestKit forks must use temurin-21 (see the
+JDK note in that file).
 
 ## Invariants
 

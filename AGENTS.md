@@ -20,7 +20,7 @@ runtime bridge; the bridge decides per request whether Cronet or stock OkHttp ha
   Cronet path; deny runs an exact-stock fallback (`initExchange` + `copy(exchange=)` +
   `proceed`, re-implemented because `index` has no getter).
 - The host app creates and owns the `CronetEngine` and hands it over via
-  `CronetRuntime.install`; the bridge only borrows it.
+  `CronetRuntime.install(engine)` (policy and mapper are optional); the bridge only borrows it.
 - Build guards `verifyOkHttpPin` and `verifyOkHttpFingerprint` fail closed; a structural
   bytecode guard fails the build on any unexpected `intercept` shape.
 

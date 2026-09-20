@@ -33,7 +33,7 @@ data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
  * 16. TLS/trust fingerprint mismatch -> trust (Metis B1)
  * 17. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
  *     is a local-test-server concern, not a distinct transport incompatibility)
- * 18. origin not allowlisted -> allowlist
+ * 18. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
  * 19. else allow
  */
 object PolicyEngine {
@@ -90,18 +90,24 @@ object PolicyEngine {
     private fun isLoopback(host: String): Boolean =
         host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2"
 
-    /** Entries are "host" (default port 443) or "host:port" (exact port match). */
-    private fun originAllowed(allowed: Set<String>, host: String, port: Int): Boolean = allowed.any { entry ->
-        val colon = entry.lastIndexOf(':')
-        val entryHost: String
-        val entryPort: Int
-        if (colon > 0) {
-            entryHost = entry.substring(0, colon)
-            entryPort = entry.substring(colon + 1).toIntOrNull() ?: 443
-        } else {
-            entryHost = entry
-            entryPort = 443
+    /**
+     * Empty set or `"*"` admits every origin. Other entries are `"host"` (port 443)
+     * or `"host:port"` (exact port match).
+     */
+    private fun originAllowed(allowed: Set<String>, host: String, port: Int): Boolean {
+        if (allowed.isEmpty() || "*" in allowed) return true
+        return allowed.any { entry ->
+            val colon = entry.lastIndexOf(':')
+            val entryHost: String
+            val entryPort: Int
+            if (colon > 0) {
+                entryHost = entry.substring(0, colon)
+                entryPort = entry.substring(colon + 1).toIntOrNull() ?: 443
+            } else {
+                entryHost = entry
+                entryPort = 443
+            }
+            entryHost == host && entryPort == port
         }
-        entryHost == host && entryPort == port
     }
 }

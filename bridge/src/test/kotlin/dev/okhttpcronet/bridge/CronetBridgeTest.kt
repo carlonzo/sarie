@@ -196,10 +196,10 @@ class CronetBridgeTest {
 
     private fun install(engine: CronetEngine, vararg origins: String) {
         CronetRuntime.install(
+            engine,
             object : CronetPolicy {
                 override val allowedOrigins: Set<String> = origins.toSet()
             },
-            engine,
             mapper,
         )
     }
