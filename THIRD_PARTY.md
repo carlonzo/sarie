@@ -67,8 +67,8 @@ Which suite tests derive from upstream patterns, and from what:
 
 ## Toolchain pins and verification (2026-09-19)
 
-- **AGP 8.13.0** — verified against Google Maven `com.android.tools.build/gradle` maven-metadata.xml
-  (8.13.0 present; newest stable below 9.0.0 is 8.13.2, not used — task pins 8.13.0).
+- **AGP 8.13.2** — catalog pin (`agp`); TestKit injects the same artifact via `libs.agp`.
+  AGP 9.x needs Gradle 9.1+ (9.4 needs 9.6) and is a separate major.
 - **Gradle 8.14.3** — wrapper distribution (`gradle-8.14.3-bin`) pinned in root and `plugin/`;
   within AGP 8.13's declared compatibility range (requires Gradle 8.13+).
 - **Kotlin 2.2.20**, **OkHttp 5.5.0**, **cronet-api / cronet-embedded 143.7445.0**
