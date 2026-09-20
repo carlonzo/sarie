@@ -73,9 +73,23 @@ class CronetRuntimeTest {
     }
 
     @Test
+    fun `install with engine only uses DefaultPolicy and a no-op mapper`() {
+        val engine = FakeCronetEngine()
+        CronetRuntime.install(engine)
+
+        val snap = CronetRuntime.snapshot()
+        assertNotNull(snap)
+        assertSame(engine, snap!!.engine)
+        assertTrue(snap.policy is DefaultPolicy)
+        assertTrue(snap.policy.allowedOrigins.isEmpty())
+        assertSame(RequestToUrlRequestMapper.NOOP, snap.mapper)
+        assertTrue(CronetRuntime.isEnabled())
+    }
+
+    @Test
     fun `install stores snapshot`() {
         val engine = FakeCronetEngine()
-        CronetRuntime.install(policy, engine, mapper)
+        CronetRuntime.install(engine, policy, mapper)
 
         val snap = CronetRuntime.snapshot()
         assertNotNull(snap)
@@ -91,9 +105,9 @@ class CronetRuntimeTest {
         val engine1 = FakeCronetEngine()
         val engine2 = FakeCronetEngine()
 
-        CronetRuntime.install(policy, engine1, mapper)
+        CronetRuntime.install(engine1, policy, mapper)
         val first = CronetRuntime.snapshot()!!
-        CronetRuntime.install(policy, engine2, mapper)
+        CronetRuntime.install(engine2, policy, mapper)
         val second = CronetRuntime.snapshot()!!
 
         assertSame(engine2, second.engine)
@@ -104,7 +118,7 @@ class CronetRuntimeTest {
 
     @Test
     fun `uninstall drops snapshot and disables`() {
-        CronetRuntime.install(policy, FakeCronetEngine(), mapper)
+        CronetRuntime.install(FakeCronetEngine(), policy, mapper)
         CronetRuntime.uninstall()
 
         assertNull(CronetRuntime.snapshot())
@@ -113,7 +127,7 @@ class CronetRuntimeTest {
 
     @Test
     fun `kill switch system property disables and restores`() {
-        CronetRuntime.install(policy, FakeCronetEngine(), mapper)
+        CronetRuntime.install(FakeCronetEngine(), policy, mapper)
         assertTrue(CronetRuntime.isEnabled())
 
         try {

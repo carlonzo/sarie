@@ -157,7 +157,7 @@ class RequestConverterTest {
             seen.add(seenRequest)
             builder.addHeader("X-Mapped", "1")
         }
-        CronetRuntime.install(FakePolicy(), engine, mapper)
+        CronetRuntime.install(engine, FakePolicy(), mapper)
 
         converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
 

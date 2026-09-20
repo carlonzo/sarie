@@ -32,8 +32,15 @@ abstract class OkhttpCronetExtension {
 }
 
 /**
- * Registers the AGP ASM instrumentation (exactly ConnectInterceptor) and the pin/fingerprint
- * guards on Android application modules; a no-op with a warning everywhere else.
+ * Registers the AGP ASM instrumentation (exactly ConnectInterceptor) on Android application
+ * modules and the pin/fingerprint guards on application **and** library modules. A no-op with
+ * a warning everywhere else.
+ *
+ * The rewrite uses [InstrumentationScope.ALL], which AGP allows only on apps: OkHttp lives in
+ * a dependency AAR, and instrumenting that AAR from a library has no effect on consumers.
+ * Apply this plugin to the application that packages the APK even when OkHttp is declared
+ * only in a library — the app's merged classpath still contains it. Applying it to the
+ * library as well runs the version guards where OkHttp is declared.
  */
 class TransportPlugin : Plugin<Project> {
     override fun apply(target: Project) {
@@ -43,11 +50,19 @@ class TransportPlugin : Plugin<Project> {
             registerInstrumentation(target, extension)
             registerGuards(target, extension)
         }
+        target.plugins.withId("com.android.library") {
+            registerGuards(target, extension)
+            target.logger.lifecycle(LIBRARY_REWRITE_NOTE)
+        }
         // Fires once after evaluation, so it is accurate even when this plugin is applied
-        // before com.android.application in the plugins block.
+        // before com.android.application / com.android.library in the plugins block.
         target.afterEvaluate {
-            if (!it.plugins.hasPlugin("com.android.application")) {
-                it.logger.warn("[okhttp-cronet] plugin is a no-op outside an Android application module")
+            val android = it.plugins.hasPlugin("com.android.application") ||
+                it.plugins.hasPlugin("com.android.library")
+            if (!android) {
+                it.logger.warn(
+                    "[okhttp-cronet] plugin is a no-op outside an Android application or library module",
+                )
             }
         }
     }
@@ -107,5 +122,10 @@ class TransportPlugin : Plugin<Project> {
 
     companion object {
         const val PLUGIN_ID: String = "com.carlonzo.sarie"
+
+        internal const val LIBRARY_REWRITE_NOTE: String =
+            "[okhttp-cronet] library module: pin/fingerprint guards registered. " +
+                "The ConnectInterceptor rewrite requires this plugin on the application " +
+                "(AGP cannot instrument dependencies into a library AAR)."
     }
 }

@@ -3,6 +3,8 @@
 okhttpMin = "5.4.0"
 # Highest verified (sample default, -PokhttpVersion override for the CI matrix).
 okhttp = "5.5.0"
+# Sample / connected-suite pin. Hosts may ship a newer engine; Google 500.x renamed
+# cronet-embedded -> cronet-bundled (cronet-embedded 500 is an empty alias).
 cronetApi = "143.7445.0"
 cronetEmbedded = "143.7445.0"
 kotlin = "2.4.20"

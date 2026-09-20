@@ -1,11 +1,14 @@
 package dev.okhttpcronet.bridge
 
 /**
- * Host-supplied routing policy. Defined here (todo 2) and implemented by the host;
- * todo 4 provides the default implementation and the per-request evaluation engine.
+ * Host-supplied routing policy evaluated by [PolicyEngine] before any Cronet I/O.
  */
 interface CronetPolicy {
-    /** Exact origins (host[:port]) allowed on the Cronet path; default-deny for everything else. */
+    /**
+     * Origins that may use the Cronet path, as `host` (port 443) or `host:port`.
+     * Empty, or containing `"*"`, means every origin that passed the other policy
+     * checks. A non-empty set without `"*"` is exact-match default-deny.
+     */
     val allowedOrigins: Set<String>
 
     /** Whether loopback HTTPS origins (local test servers) may go over Cronet. */

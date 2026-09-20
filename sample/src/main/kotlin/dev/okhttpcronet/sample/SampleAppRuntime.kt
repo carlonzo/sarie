@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import dev.okhttpcronet.bridge.CronetRuntime
 import dev.okhttpcronet.bridge.DefaultPolicy
-import dev.okhttpcronet.bridge.RequestToUrlRequestMapper
 import java.io.File
 import org.chromium.net.CronetEngine
 
@@ -86,7 +85,7 @@ object SampleAppRuntime {
                 else -> throw IllegalArgumentException("unknown mode: $mode")
             },
         )
-        CronetRuntime.install(policy, engine, RequestToUrlRequestMapper { _, _ -> })
+        CronetRuntime.install(engine, policy)
     }
 
     /** True when instrumentation args request Cronet NetLog capture (h3 diagnostics). */

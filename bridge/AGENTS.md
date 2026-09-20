@@ -35,8 +35,10 @@ deny:
   rules in fixed order (see the `PolicyEngine` doc comment), including a TLS check on the
   trust manager's `acceptedIssuers` fingerprint, not just its class.
 - `CronetRuntime.kt`, `RuntimeSnapshot.kt`, `CronetPolicy.kt`, `DefaultPolicy.kt`,
-  `CronetOptOut.kt`: lifecycle. The host installs the engine; the bridge borrows it and never
-  shuts it down. Kill switch via system property `okhttp.cronet.enabled=false`.
+  `CronetOptOut.kt`: lifecycle. The host installs the engine (`install(engine)` is enough);
+  the bridge borrows it and never shuts it down. `DefaultPolicy()` admits every origin that
+  passes the other rules; a non-empty `allowedOrigins` is optional. Kill switch via system
+  property `okhttp.cronet.enabled=false`.
 - `CallRegistry.kt`: cancellation. 5-step ordered protocol with a per-call `EventListener`
   (public `Call.addEventListener`) and a single-delivery CAS so the engine is canceled exactly
   once.
@@ -47,7 +49,7 @@ deny:
 - `Metrics.kt`: `Path` (CRONET/FALLBACK) and `Reason` counters. Tests assert on it; keep
   reasons stable.
 - `RequestToUrlRequestMapper.kt`, `BridgePlaceholders.kt`, `VerifiedOkHttpVersions.kt`:
-  mapper interface and generated support.
+  optional `UrlRequest.Builder` hook (default no-op) and generated support.
 
 ## Invariants
 

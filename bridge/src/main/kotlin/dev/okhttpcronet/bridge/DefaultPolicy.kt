@@ -1,12 +1,17 @@
 package dev.okhttpcronet.bridge
 
 /**
- * Straightforward [CronetPolicy] implementation for the common host case: exact-origin
- * allowlist, optional loopback HTTPS, SDK pins, and a secondary enable gate (the kill
- * switch supplies its own `enabled = { false }`).
+ * Straightforward [CronetPolicy] for the common host case.
+ *
+ * [allowedOrigins] defaults to empty, which admits every origin that passes
+ * [PolicyEngine]'s other rules (HTTPS, default trust, no cache, no network interceptors,
+ * …). Pass a non-empty set of `host` or `host:port` entries to send only those hosts
+ * over Cronet — the Cronet path is not OkHttp-parity (see `COMPATIBILITY.md`), so an
+ * allowlist is how you limit it to hosts you have tested. `"*"` is an explicit
+ * allow-all token.
  */
 class DefaultPolicy(
-    override val allowedOrigins: Set<String>,
+    override val allowedOrigins: Set<String> = emptySet(),
     override val allowLoopbackHttps: Boolean = false,
     override val sdkPins: Set<String> = emptySet(),
     enabled: () -> Boolean = { true },
