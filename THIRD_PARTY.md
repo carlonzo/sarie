@@ -65,6 +65,15 @@ Which suite tests derive from upstream patterns, and from what:
   - Use: local HTTP/3 (QUIC) test origin for the instrumented suites; downloaded by
     `scripts/download-caddy.sh`, configured by `scripts/Caddyfile`.
 
+- **static-curl 8.22.0** (`curl-linux-x86_64-musl-8.22.0.tar.xz`)
+  - Upstream: https://github.com/stunnel/static-curl/releases/tag/8.22.0
+  - License: curl (ISC-style) plus bundled OpenSSL/zlib/nghttp3/ngtcp2 (see the tarball)
+  - sha256 (tarball): `dfb02460ba2abe513087538f12a3cf79b74b64a5ea3787ce8ac0cdb11251f884`
+  - Use: host-side `--http3-only` probe of the local Caddy origin so
+    `verifyH3ServerEvidence` has access-log `"proto":"HTTP/3"` entries. The emulator
+    cannot complete local-origin h3 (Chromium known-root policy). Downloaded by
+    `scripts/download-curl-http3.sh`.
+
 ## Toolchain pins and verification (2026-09-19)
 
 - **AGP 8.13.2** — catalog pin (`agp`); TestKit injects the same artifact via `libs.agp`.

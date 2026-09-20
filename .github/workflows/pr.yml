@@ -101,6 +101,7 @@ jobs:
       - name: Test origin (Caddy + certs + /big payloads)
         run: |
           ./scripts/download-caddy.sh
+          ./scripts/download-curl-http3.sh
           ./scripts/gen-certs.sh
       - name: Instrumented suites
         uses: reactivecircus/android-emulator-runner@v2.38.0
