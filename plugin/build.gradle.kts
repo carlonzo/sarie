@@ -16,7 +16,7 @@ gradlePlugin {
 }
 
 dependencies {
-    compileOnly("com.android.tools.build:gradle-api:8.13.0")
+    compileOnly("com.android.tools.build:gradle-api:8.13.2")
     compileOnly("org.ow2.asm:asm:9.7.1")
     compileOnly("org.ow2.asm:asm-commons:9.7.1")
     // Test-only: rewriter and fingerprint work compile against OkHttp classes; never exposed as api.
@@ -25,7 +25,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Needed by the visitor unit tests: ClassData fake requires the AGP API on the test classpath
     // (compileOnly does not reach tests).
-    testImplementation("com.android.tools.build:gradle-api:8.13.0")
+    testImplementation("com.android.tools.build:gradle-api:8.13.2")
     testImplementation("org.ow2.asm:asm:9.7.1")
     testImplementation("com.squareup.okhttp3:okhttp:5.4.0")
 }
