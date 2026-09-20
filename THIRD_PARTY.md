@@ -76,14 +76,12 @@ Which suite tests derive from upstream patterns, and from what:
 
 ## Toolchain pins and verification (2026-09-19)
 
-- **AGP 8.13.2** — catalog pin (`agp`); TestKit injects the same artifact via `libs.agp`.
-  AGP 9.x needs Gradle 9.1+ (9.4 needs 9.6) and is a separate major.
-- **Gradle 8.14.3** — wrapper distribution (`gradle-8.14.3-bin`) pinned in root and `plugin/`;
-  within AGP 8.13's declared compatibility range (requires Gradle 8.13+).
-- **Kotlin 2.2.20**, **OkHttp 5.5.0**, **cronet-api / cronet-embedded 143.7445.0**
+- **AGP 9.4.1** — catalog pin (`agp`); TestKit injects the same artifact via `libs.agp`.
+- **Gradle 9.7.1** — wrapper distribution (`gradle-9.7.1-bin`) pinned in root and `plugin/`;
+  AGP 9.4 requires Gradle 9.6+.
+- **Kotlin 2.4.20**, **OkHttp 5.5.0**, **cronet-api / cronet-embedded 143.7445.0**
   (both verified present on Google Maven), **JUnit 4.13.2**, **mockwebserver3 5.5.0**, **ASM 9.7.1**.
-- compileSdk 37 (platform dir `android-37.0` on disk), minSdk 24, targetSdk 37 (applies to the
-  application module introduced in a later todo).
+- compileSdk 37, minSdk 24 (catalog pins).
 
 <!-- golden-bytecode:start -->
 ## Golden bytecode artifacts

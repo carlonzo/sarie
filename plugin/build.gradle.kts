@@ -20,14 +20,14 @@ dependencies {
     compileOnly(libs.asm)
     compileOnly(libs.asm.commons)
     // Test-only: rewriter and fingerprint work compile against OkHttp classes; never exposed as api.
-    compileOnly("com.squareup.okhttp3:okhttp:5.4.0")
+    compileOnly(libs.okhttp.min)
     testImplementation(gradleTestKit())
     testImplementation(libs.junit)
     // Needed by the visitor unit tests: ClassData fake requires the AGP API on the test classpath
     // (compileOnly does not reach tests).
     testImplementation(libs.agp.api)
     testImplementation(libs.asm)
-    testImplementation("com.squareup.okhttp3:okhttp:5.4.0")
+    testImplementation(libs.okhttp.min)
 }
 
 kotlin {
@@ -39,7 +39,7 @@ kotlin {
 // TestKit's injected plugin classloader is isolated from the fixture's own plugin loaders, so the
 // fixture cannot link against gradle-api or apply AGP next to the plugin-under-test unless AGP
 // rides the SAME injected classpath (same trick as square/wire and square/leakcanary).
-val agpForTests by configurations.creating
+val agpForTests = configurations.create("agpForTests")
 dependencies {
     agpForTests(libs.agp)
 }

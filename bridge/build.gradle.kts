@@ -1,16 +1,14 @@
 plugins {
     alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.maven.publish)
 }
 
 android {
     namespace = "dev.okhttpcronet.bridge"
-    // API 37 ships as platforms;android-37.0.
-    compileSdkVersion = providers.gradleProperty("okhttpcronet.compileSdk").get()
+    compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        minSdk = 24
+        minSdk = libs.versions.minSdk.get().toInt()
     }
 
     compileOptions {

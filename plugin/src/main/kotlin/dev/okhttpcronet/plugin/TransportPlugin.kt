@@ -33,10 +33,7 @@ class TransportPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         val extension = target.extensions.create("okhttpCronet", OkhttpCronetExtension::class.java)
         target.plugins.withId("com.android.application") {
-            // Optional META-INF/okhttp-cronet-marker.txt breadcrumb skipped on purpose:
-            // AGP 8.13 exposes no public Variant API for generated assets (Sources.assets
-            // was removed); recorded as a deviation in the todo-7 notepad.
-            target.logger.lifecycle("[okhttp-cronet] META-INF marker skipped: no public AGP 8.13 API for generated assets")
+            target.logger.lifecycle("[okhttp-cronet] META-INF marker skipped: no public Variant API for generated assets")
             registerInstrumentation(target, extension)
             registerGuards(target, extension)
         }

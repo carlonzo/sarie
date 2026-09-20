@@ -13,7 +13,6 @@ GEN="$ROOT/plugin/scripts/generate-fingerprints.sh"
 PR_YML="$ROOT/.github/workflows/pr.yml"
 COMPAT="$ROOT/COMPATIBILITY.md"
 TOML="$ROOT/gradle/libs.versions.toml"
-PLUGIN_BUILD="$ROOT/plugin/build.gradle.kts"
 
 if grep -qE "^[[:space:]]*\"$V\" to recipe" "$REGISTRY"; then
   echo "pin-okhttp-version: $V is already in RecipeRegistry"
@@ -31,11 +30,11 @@ if ! grep -qE "^$V: .* verified=yes$" "$PROBE_LOG"; then
   exit 1
 fi
 
-python3 - "$V" "$REGISTRY" "$PR_YML" "$COMPAT" "$TOML" "$PLUGIN_BUILD" "$GEN" <<'PY'
+python3 - "$V" "$REGISTRY" "$PR_YML" "$COMPAT" "$TOML" "$GEN" <<'PY'
 import re, sys
 from pathlib import Path
 
-v, registry, pr_yml, compat, toml, plugin_build, gen = sys.argv[1:8]
+v, registry, pr_yml, compat, toml, gen = sys.argv[1:7]
 
 def version_key(s):
     return tuple(int(x) for x in s.split("."))
@@ -76,12 +75,6 @@ toml_text, n = re.subn(r'^okhttpMin\s*=\s*"[^"]+"', f'okhttpMin = "{oldest}"', t
 if n != 1:
     sys.exit("okhttpMin not found in libs.versions.toml")
 Path(toml).write_text(toml_text)
-
-pb = Path(plugin_build).read_text()
-pb2, n = re.subn(r'okhttp:[0-9]+\.[0-9]+\.[0-9]+', f"okhttp:{oldest}", pb)
-if n == 0:
-    sys.exit("no okhttp:x.y.z coordinates in plugin/build.gradle.kts")
-Path(plugin_build).write_text(pb2)
 
 gen_text = Path(gen).read_text()
 m = re.search(r"STABLE_5X=\((.*)\)", gen_text)

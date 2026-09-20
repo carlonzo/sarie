@@ -7,8 +7,7 @@ plugins {
 
 android {
     namespace = "dev.okhttpcronet.sample.fixture"
-    // API 37 ships as platforms;android-37.0. CI passes the same via ANDROID_COMPILE_SDK.
-    compileSdkVersion = providers.gradleProperty("okhttpcronet.compileSdk").orElse("android-37.0").get()
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 24
