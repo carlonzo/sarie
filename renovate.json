@@ -13,6 +13,13 @@
   ],
   "packageRules": [
     {
+      "description": "Do not bump okhttp compile floor; it must stay pinned to the oldest supported OkHttp version in RecipeRegistry.",
+      "matchDepNames": [
+        "okhttp-min"
+      ],
+      "enabled": false
+    },
+    {
       "description": "OkHttp bumps must never automerge. CI fails until RecipeRegistry, goldens, and the PR matrix include the new version.",
       "matchPackageNames": [
         "/^com\\.squareup\\.okhttp3/"
@@ -21,6 +28,16 @@
       "automerge": false,
       "addLabels": [
         "okhttp-bump"
+      ]
+    },
+    {
+      "description": "Group Cronet updates into one PR.",
+      "matchPackageNames": [
+        "/^org\\.chromium\\.net:cronet/"
+      ],
+      "groupName": "cronet",
+      "addLabels": [
+        "cronet-bump"
       ]
     },
     {
