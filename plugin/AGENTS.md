@@ -11,9 +11,11 @@ Published as `com.carlonzo.sarie:plugin` (plugin id `com.carlonzo.sarie`).
 warning. On application modules it hooks `androidComponents.onVariants` and registers
 `transformClassesWith(ConnectInterceptorVisitorFactory, InstrumentationScope.ALL)` plus
 `FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS`. The visitor factory's
-parameters are `OkhttpCronetInstrumentationParams` with `okhttpVersion: Property<String>`;
-only simple `Property` types cross the AGP instrumentation worker boundary (it is currently
-set to the constant `"family"`).
+parameters are `OkhttpCronetInstrumentationParams` with `okhttpVersion: Property<String>`
+and optional `invalidateToken: Property<Long>`; only simple `Property` types cross the AGP
+instrumentation worker boundary (`okhttpVersion` defaults to `"family"`, `invalidateToken`
+can be set via `forceInstrument` or `-PokhttpCronet.forceInstrument=true` to invalidate AGP's
+transform cache during development).
 
 ## Rewrite pipeline
 

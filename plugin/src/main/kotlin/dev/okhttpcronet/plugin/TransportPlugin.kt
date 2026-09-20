@@ -16,12 +16,18 @@ abstract class OkhttpCronetExtension {
     abstract val allowUnfingerprinted: Property<Boolean>
     /** When true, an UNTESTED (newer) okhttp fails the pin instead of warning. Default false. */
     abstract val failOnUntested: Property<Boolean>
+    /**
+     * When true, invalidates AGP's transformed dependency cache on every build.
+     * Useful during plugin/transform development or debugging with InstrumentationScope.ALL.
+     */
+    abstract val forceInstrument: Property<Boolean>
 
     init {
         enabled.convention(true)
         // okhttpVersion is optional: the pin/fingerprint tasks read the resolved classpath.
         allowUnfingerprinted.convention(false)
         failOnUntested.convention(false)
+        forceInstrument.convention(false)
     }
 }
 
@@ -53,7 +59,14 @@ class TransportPlugin : Plugin<Project> {
                 variant.instrumentation.transformClassesWith(
                     ConnectInterceptorVisitorFactory::class.java,
                     InstrumentationScope.ALL,
-                ) { params -> params.okhttpVersion.set("family") }
+                ) { params ->
+                    params.okhttpVersion.set(extension.okhttpVersion.orElse("family"))
+                    val force = extension.forceInstrument.get() ||
+                        project.providers.gradleProperty("okhttpCronet.forceInstrument").orNull == "true"
+                    if (force) {
+                        params.invalidateToken.set(System.currentTimeMillis())
+                    }
+                }
                 variant.instrumentation.setAsmFramesComputationMode(
                     FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
                 )

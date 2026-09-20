@@ -30,6 +30,47 @@ class ConnectInterceptorVisitorFactoryTest {
             assertFalse(other, factory.isInstrumentable(fakeClassData(other)))
         }
     }
+    @Test
+    fun `createClassVisitor creates guard visitor with configured okhttp version parameter`() {
+        val project = org.gradle.testfixtures.ProjectBuilder.builder().build()
+        val paramsProperty = project.objects.property(OkhttpCronetInstrumentationParams::class.java)
+        paramsProperty.set(fakeParams("5.5.0"))
+
+        val factory = object : ConnectInterceptorVisitorFactory() {
+            override val parameters: Property<OkhttpCronetInstrumentationParams> = paramsProperty
+            override val instrumentationContext: InstrumentationContext
+                get() = throw UnsupportedOperationException("not needed for createClassVisitor")
+        }
+
+        val classContext = object : com.android.build.api.instrumentation.ClassContext {
+            override val currentClassData: ClassData = fakeClassData("okhttp3.internal.connection.ConnectInterceptor")
+            override fun loadClassData(className: String): ClassData? = null
+        }
+
+        val visitor = factory.createClassVisitor(classContext, org.objectweb.asm.ClassWriter(0))
+        assertTrue(visitor is ConnectInterceptorGuardVisitor)
+    }
+
+    @Test
+    fun `createClassVisitor falls back to family guard when okhttp version is omitted`() {
+        val project = org.gradle.testfixtures.ProjectBuilder.builder().build()
+        val paramsProperty = project.objects.property(OkhttpCronetInstrumentationParams::class.java)
+        paramsProperty.set(fakeParams(null))
+
+        val factory = object : ConnectInterceptorVisitorFactory() {
+            override val parameters: Property<OkhttpCronetInstrumentationParams> = paramsProperty
+            override val instrumentationContext: InstrumentationContext
+                get() = throw UnsupportedOperationException("not needed for createClassVisitor")
+        }
+
+        val classContext = object : com.android.build.api.instrumentation.ClassContext {
+            override val currentClassData: ClassData = fakeClassData("okhttp3.internal.connection.ConnectInterceptor")
+            override fun loadClassData(className: String): ClassData? = null
+        }
+
+        val visitor = factory.createClassVisitor(classContext, org.objectweb.asm.ClassWriter(0))
+        assertTrue(visitor is ConnectInterceptorGuardVisitor)
+    }
 }
 
 private fun factory(): ConnectInterceptorVisitorFactory = object : ConnectInterceptorVisitorFactory() {
@@ -37,6 +78,18 @@ private fun factory(): ConnectInterceptorVisitorFactory = object : ConnectInterc
         get() = throw UnsupportedOperationException("not needed for isInstrumentable")
     override val instrumentationContext: InstrumentationContext
         get() = throw UnsupportedOperationException("not needed for isInstrumentable")
+}
+
+private fun fakeParams(version: String? = null, invalidateToken: Long? = null): OkhttpCronetInstrumentationParams {
+    val project = org.gradle.testfixtures.ProjectBuilder.builder().build()
+    return object : OkhttpCronetInstrumentationParams {
+        override val okhttpVersion: Property<String> = project.objects.property(String::class.java).apply {
+            if (version != null) set(version)
+        }
+        override val invalidateToken: Property<Long> = project.objects.property(Long::class.javaObjectType).apply {
+            if (invalidateToken != null) set(invalidateToken)
+        }
+    }
 }
 
 private fun fakeClassData(className: String): ClassData = object : ClassData {
