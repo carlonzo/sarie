@@ -53,8 +53,7 @@ Recovery when OkHttp changes:
    version from that table and keep the previous library line published so hosts who
    cannot bump OkHttp stay there; patch that old line for bugfixes.
 3. Re-run `JAVA_HOME=<temurin-21> plugin/scripts/generate-fingerprints.sh` to refresh
-   the fingerprint constants and the goldens (`THIRD_PARTY.md`, "Golden bytecode
-   artifacts" section is script-maintained between markers).
+   the fingerprint constants and the goldens.
 4. Re-run the full verification stack against every remaining supported version
    (`./gradlew :bridge:testDebugUnitTest :sample:assembleDebug -PokhttpVersion=<v>`,
    `:plugin:test`, device suites on lowest + highest) — the contract in

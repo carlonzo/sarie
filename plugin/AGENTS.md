@@ -49,8 +49,8 @@ set to the constant `"family"`).
 Adding a future OkHttp 5.x version: run
 `plugin/scripts/generate-fingerprints.sh <version>` (downloads the artifacts, writes
 goldens under `src/test/resources/stock/<version>/`, regenerates
-`GoldenFingerprints.kt`, `bridge/.../VerifiedOkHttpVersions.kt`, the report and the
-`THIRD_PARTY.md` golden section), then add one `Recipe` line to `RecipeRegistry.recipes`.
+`GoldenFingerprints.kt`, `bridge/.../VerifiedOkHttpVersions.kt`, and the report),
+then add one `Recipe` line to `RecipeRegistry.recipes`.
 Tests parameterize over the recipes automatically. The structural guard is the safety net:
 never weaken it to admit a version.
 

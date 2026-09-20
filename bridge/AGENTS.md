@@ -75,5 +75,4 @@ deny:
 ## Pointers
 
 - `../COMPATIBILITY.md`: the test-cited behavior contract. Reference, do not duplicate.
-- `../THIRD_PARTY.md`: provenance of the Google mapper port; Apache-2.0 headers must stay in
-  ported files.
+- Apache-2.0 headers in ported mapper files must stay.

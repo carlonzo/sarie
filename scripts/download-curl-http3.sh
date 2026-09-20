@@ -2,7 +2,6 @@
 # Downloads a pinned static curl-with-HTTP/3 used to probe the local Caddy origin
 # from the host. The emulator cannot complete local-origin h3 (Chromium known-root
 # policy); this client writes the access-log "proto":"HTTP/3" evidence instead.
-# Version + sha256 recorded in THIRD_PARTY.md.
 # Usage: ./scripts/download-curl-http3.sh   (idempotent; extracts to scripts/bin/curl-http3)
 set -euo pipefail
 

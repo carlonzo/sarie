@@ -107,7 +107,6 @@ jobs:
             plugin/build.gradle.kts \
             bridge/src/main/kotlin/dev/okhttpcronet/bridge/VerifiedOkHttpVersions.kt \
             gradle/libs.versions.toml \
-            THIRD_PARTY.md \
             COMPATIBILITY.md \
             .github/workflows/pr.yml
           if git diff --cached --quiet; then
