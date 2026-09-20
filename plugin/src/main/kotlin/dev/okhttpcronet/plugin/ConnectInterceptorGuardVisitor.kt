@@ -10,6 +10,8 @@ import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.MethodVisitor
 import org.objectweb.asm.Opcodes
 
+import org.gradle.api.tasks.Optional
+
 /** Dot-notation class name of the only class this plugin may instrument. */
 private const val TARGET_CLASS_DOT = "okhttp3.internal.connection.ConnectInterceptor"
 
@@ -20,6 +22,10 @@ private const val TARGET_CLASS_DOT = "okhttp3.internal.connection.ConnectInterce
 interface OkhttpCronetInstrumentationParams : InstrumentationParameters {
     @get:Input
     val okhttpVersion: Property<String>
+
+    @get:Input
+    @get:Optional
+    val invalidateToken: Property<Long>
 }
 
 /** The AGP instrumentation entry point; only ever installed on Android application variants. */
@@ -29,12 +35,14 @@ abstract class ConnectInterceptorVisitorFactory : AsmClassVisitorFactory<OkhttpC
     override fun createClassVisitor(
         classContext: ClassContext,
         nextClassVisitor: ClassVisitor,
-    ): ClassVisitor = ConnectInterceptorGuardVisitor(
-        nextClassVisitor,
-        // Every supported recipe shares this spec; UNTESTED (newer) versions use it as the
-        // structural net. Older/unsupported versions never reach instrumentation: the pin task fails first.
-        RecipeRegistry.familyGuard,
-    )
+    ): ClassVisitor {
+        val version = parameters.get().okhttpVersion.orNull ?: "family"
+        return ConnectInterceptorGuardVisitor(
+            nextClassVisitor,
+            // Guard lookup based on the configured/resolved version parameter, falling back to familyGuard
+            RecipeRegistry.guardFor(version),
+        )
+    }
 }
 
 internal fun isTargetClass(className: String): Boolean = className == TARGET_CLASS_DOT

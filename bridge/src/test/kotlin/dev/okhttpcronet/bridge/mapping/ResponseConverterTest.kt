@@ -240,8 +240,8 @@ class ResponseConverterTest {
 
     @Test
     fun `timestamps populated through the real callback and ordered`() {
-        val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000)
         val before = System.currentTimeMillis()
+        val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000)
         val info = FakeUrlResponseInfo(
             headersAsList = listOf(
                 FakeUrlResponseInfo.headerEntry("Content-Type", "text/plain"),
