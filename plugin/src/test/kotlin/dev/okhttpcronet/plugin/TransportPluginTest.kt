@@ -18,7 +18,7 @@ class TransportPluginTest {
 
     @Test(timeout = 1_800_000L)
     fun `fixture with pinned okhttp assembles and both guards run`() {
-        val dir = prepareFixture(PIN_OKHTTP_VERSION)
+        val dir = prepareFixture()
         val result = GradleRunner.create()
             .withPluginClasspath()
             .withProjectDir(dir)
@@ -36,7 +36,7 @@ class TransportPluginTest {
 
     @Test(timeout = 1_800_000L)
     fun `library fixture registers guards and is not a no-op`() {
-        val dir = prepareFixture(PIN_OKHTTP_VERSION, fixture = "sample-lib")
+        val dir = prepareFixture(fixture = "sample-lib")
         val result = GradleRunner.create()
             .withPluginClasspath()
             .withProjectDir(dir)
@@ -58,7 +58,7 @@ class TransportPluginTest {
 
     @Test(timeout = 1_800_000L)
     fun `fixture with okhttp 4 fails as unsupported`() {
-        val dir = prepareFixture("4.12.0")
+        val dir = prepareFixture(okhttpVersion = "4.12.0")
         val result = GradleRunner.create()
             .withPluginClasspath()
             .withProjectDir(dir)
@@ -74,8 +74,6 @@ class TransportPluginTest {
     }
 }
 
-private const val PIN_OKHTTP_VERSION = "5.5.0"
-
 private const val ANDROID_SDK_DEFAULT = "/home/carlo/Android/Sdk"
 
 // Machine default JDK is 26 and breaks AGP; TestKit forks must always use temurin-21.
@@ -87,15 +85,25 @@ private fun fixtureArgs(): List<String> = listOf("assembleDebug", "--console=pla
 
 /**
  * Copies the fixture into a fresh temp dir (TestKit must never build in-place), points it at the
- * Android SDK, and optionally swaps the okhttp version for an unsupported-version scenario.
+ * Android SDK, and drops in the repo version catalog. [okhttpVersion] rewrites only the catalog
+ * `okhttp =` pin (the unsupported-okhttp-4 scenario); the default is the catalog as committed.
  */
-private fun prepareFixture(okhttpVersion: String, fixture: String = "sample-app"): File {
+private fun prepareFixture(okhttpVersion: String? = null, fixture: String = "sample-app"): File {
     val source = File("src/test/fixtures/$fixture")
     check(source.isDirectory) { "fixture not found at ${source.absolutePath}" }
     val dir = Files.createTempDirectory("okhttp-cronet-fixture-").toFile()
     source.copyRecursively(dir)
-    val buildScript = File(dir, "build.gradle.kts")
-    buildScript.writeText(buildScript.readText().replace(Regex("""okhttp:[0-9.]+"""), "okhttp:$okhttpVersion"))
+    val catalogDest = File(dir, "gradle/libs.versions.toml")
+    catalogDest.parentFile.mkdirs()
+    repoFile("gradle/libs.versions.toml").copyTo(catalogDest)
+    if (okhttpVersion != null) {
+        catalogDest.writeText(
+            catalogDest.readText().replace(
+                Regex("""^okhttp\s*=\s*"[^"]+"""", RegexOption.MULTILINE),
+                """okhttp = "$okhttpVersion"""",
+            ),
+        )
+    }
     val sdk = System.getenv("ANDROID_HOME") ?: ANDROID_SDK_DEFAULT
     File(dir, "local.properties").writeText("sdk.dir=${sdk.replace("\\", "\\\\")}\n")
     return dir

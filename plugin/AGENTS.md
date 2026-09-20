@@ -66,12 +66,14 @@ never weaken it to admit a version.
 
 ## TestKit
 
-Fixtures live in `src/test/fixtures/sample-app` (application + plugin, pins okhttp 5.5.0)
-and `src/test/fixtures/sample-lib` (library + plugin). Scenarios in `TransportPluginTest`:
-happy app build with both guards running, library apply that is not a no-op, and okhttp 4
-failing as unsupported. TestKit needs AGP on the `pluginUnderTestMetadata` classpath; that
-wiring already exists in `build.gradle.kts`. TestKit forks must use temurin-21 (see the
-JDK note in that file).
+Fixtures live in `src/test/fixtures/sample-app` (application + plugin) and
+`src/test/fixtures/sample-lib` (library + plugin). Both load the repo version catalog
+(`implementation(libs.okhttp)`); TestKit copies `gradle/libs.versions.toml` into the
+temp project. Scenarios in `TransportPluginTest`: happy app build with both guards
+running, library apply that is not a no-op, and okhttp 4 failing as unsupported (the
+catalog `okhttp =` pin is rewritten for that case). TestKit needs AGP on the
+`pluginUnderTestMetadata` classpath; that wiring already exists in `build.gradle.kts`.
+TestKit forks must use temurin-21 (see the JDK note in that file).
 
 ## Invariants
 

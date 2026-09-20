@@ -7,13 +7,13 @@ plugins {
 
 android {
     namespace = "dev.okhttpcronet.sample.fixture"
-    compileSdk = 37
+    compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        minSdk = 24
+        minSdk = libs.versions.minSdk.get().toInt()
     }
 }
 
 dependencies {
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    implementation(libs.okhttp)
 }

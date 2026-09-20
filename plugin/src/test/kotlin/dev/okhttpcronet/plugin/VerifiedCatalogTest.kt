@@ -2,6 +2,7 @@ package dev.okhttpcronet.plugin
 
 import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -39,11 +40,23 @@ class VerifiedCatalogTest {
     }
 
     @Test
-    fun `TestKit fixture okhttp is a verified recipe`() {
-        val fixture = File("src/test/fixtures/sample-app/build.gradle.kts").readText()
-        val version = Regex("""okhttp:([0-9]+\.[0-9]+\.[0-9]+)""").find(fixture)
-            ?: throw AssertionError("no okhttp version in TestKit fixture")
-        assertTrue(version.groupValues[1], RecipeRegistry.isVerified(version.groupValues[1]))
+    fun `TestKit fixtures depend on okhttp through the version catalog`() {
+        for (name in listOf("sample-app", "sample-lib")) {
+            val build = File("src/test/fixtures/$name/build.gradle.kts").readText()
+            assertTrue(
+                "$name must implementation(libs.okhttp), got:\n$build",
+                build.contains("implementation(libs.okhttp)"),
+            )
+            assertFalse(
+                "$name must not hardcode an okhttp coordinate, got:\n$build",
+                Regex("""okhttp:[0-9]""").containsMatchIn(build),
+            )
+            val settings = File("src/test/fixtures/$name/settings.gradle.kts").readText()
+            assertTrue(
+                "$name settings must load gradle/libs.versions.toml, got:\n$settings",
+                settings.contains("gradle/libs.versions.toml"),
+            )
+        }
     }
 }
 
@@ -51,14 +64,4 @@ private fun tomlVersion(text: String, key: String): String {
     val match = Regex("""^$key\s*=\s*"([^"]+)"""", RegexOption.MULTILINE).find(text)
         ?: throw AssertionError("gradle/libs.versions.toml is missing $key")
     return match.groupValues[1]
-}
-
-private fun repoFile(relative: String): File {
-    var dir = File(".").canonicalFile
-    repeat(8) {
-        val candidate = File(dir, relative)
-        if (candidate.isFile) return candidate
-        dir = dir.parentFile ?: return@repeat
-    }
-    throw AssertionError("cannot find $relative from ${File(".").canonicalFile}")
 }

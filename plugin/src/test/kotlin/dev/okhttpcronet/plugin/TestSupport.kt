@@ -1,5 +1,6 @@
 package dev.okhttpcronet.plugin
 
+import java.io.File
 import java.util.IdentityHashMap
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
@@ -199,4 +200,15 @@ internal fun memberDump(bytes: ByteArray): List<String> {
         }
     }, 0)
     return out
+}
+
+/** Walks up from the TestKit / included-build working directory to the repo file. */
+internal fun repoFile(relative: String): File {
+    var dir = File(".").canonicalFile
+    repeat(8) {
+        val candidate = File(dir, relative)
+        if (candidate.isFile) return candidate
+        dir = dir.parentFile ?: return@repeat
+    }
+    error("cannot find $relative from ${File(".").canonicalFile}")
 }
