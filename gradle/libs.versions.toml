@@ -1,6 +1,6 @@
 [versions]
 # Compile floor: bridge/plugin compileOnly. Must match the oldest RecipeRegistry pin.
-okhttpMin = "5.4.0"
+okhttpMin = "5.5.0"
 # Highest verified (sample default, -PokhttpVersion override for the CI matrix).
 okhttp = "5.5.0"
 cronetApi = "143.7445.0"
