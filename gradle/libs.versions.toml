@@ -10,7 +10,7 @@ agp = "9.4.1"
 junit = "4.13.2"
 asm = "9.7.1"
 androidxTestRunner = "1.6.2"
-androidxTestCore = "1.6.1"
+androidxTestCore = "1.7.0"
 compileSdk = "37"
 minSdk = "24"
 
