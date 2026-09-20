@@ -1,5 +1,40 @@
 # Compatibility matrix
 
+## OkHttp versions
+
+The bridge is `compileOnly` against the **oldest** supported OkHttp so it cannot pick up
+newer APIs and does not pull a version into the host app. The plugin allowlists the same
+set at build time (`RecipeRegistry`). Hosts keep their own `implementation("okhttp:…")`.
+
+| This library line | OkHttp | Notes |
+| --- | --- | --- |
+| unpublished (this repo) | 5.4.0, 5.5.0 | 5.4.0 is the compile floor; 5.5.0 is the sample/default |
+
+When a new OkHttp **shares** internals with this family, add it to `RecipeRegistry`, the
+CI matrix in `.github/workflows/pr.yml`, and this table (a **minor** of this library).
+
+When a new OkHttp **breaks** internals (`initExchange` / `copy$okhttp$default` /
+`ConnectInterceptor` shape / `Call.addEventListener`):
+
+1. Raise the compile floor and drop the old OkHttp from the table (**minor**, if the
+   published coordinate stays the same family, or **major** if the rewrite/bridge ABI
+   is a new family).
+2. Leave the previous library line published. Apps that cannot bump OkHttp stay on that
+   line.
+3. **Patch** the old line (`1.0.1` while `1.1.0` has a higher min) for bugfixes that
+   still apply on the old internals. Do not mix two internals families in one AAR.
+
+PR CI runs `:bridge:testDebugUnitTest` and `:sample:assembleDebug` against **every**
+supported OkHttp (`-PokhttpVersion=`), plus `:sample:connectedDebugAndroidTest` and
+`:sample:connectedMinifiedReleaseAndroidTest` on an API-30 emulator (same matrix).
+The catalog workflow (`.github/workflows/catalog.yml`) runs only when
+`gradle/libs.versions.toml` changes **and** the `okhttp =` pin moved. If the new
+version matches the canonical ConnectInterceptor shape and JVM/plugin/assemble
+tests pass, it commits goldens, `RecipeRegistry`, and the PR matrix back to the
+branch (`scripts/pin-okhttp-version.sh`). A shape mismatch (new internals family)
+fails without pinning — raise `okhttpMin` by hand. Host apps that consume the
+published plugin still only **warn** on untested versions.
+
 What the Cronet path does and does not do, exactly as the committed test suites prove it.
 Every row cites at least one real test class/method from this repo's suites
 (`BaselineSuite` / `CronetSuite` / `MinifiedSuite` on device; `CronetBridgeTest` /

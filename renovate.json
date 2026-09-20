@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "labels": [
+    "dependencies"
+  ],
+  "packageRules": [
+    {
+      "description": "OkHttp bumps must never automerge. CI fails until RecipeRegistry, goldens, and the PR matrix include the new version.",
+      "matchPackageNames": [
+        "/^com\\.squareup\\.okhttp3/"
+      ],
+      "groupName": "okhttp",
+      "automerge": false,
+      "addLabels": [
+        "okhttp-bump"
+      ]
+    }
+  ]
+}

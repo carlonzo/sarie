@@ -10,11 +10,13 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        gradlePluginPortal()
+    }
+    versionCatalogs {
+        create("libs") {
+            from(files("../gradle/libs.versions.toml"))
+        }
     }
 }
 
-rootProject.name = "sarie"
-
-includeBuild("plugin")
-include(":bridge")
-include(":sample")
+rootProject.name = "plugin"

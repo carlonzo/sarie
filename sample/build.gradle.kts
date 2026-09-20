@@ -3,13 +3,18 @@ import java.net.Socket
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    id("dev.okhttpcronet.transport")
+    id("com.carlonzo.sarie")
+}
+
+// This repo must not merge an unverified okhttp: Renovate bumps fail the pin instead of warning.
+okhttpCronet {
+    failOnUntested.set(true)
 }
 
 android {
     namespace = "dev.okhttpcronet.sample"
-    // Minor-release platform dir on disk is android-37.0; compileSdk = 37 looks up "android-37" and misses it.
-    compileSdkVersion = "android-37.0"
+    // Minor-release platform dir on disk is android-37.0; CI passes android-37.
+    compileSdkVersion = providers.gradleProperty("okhttpcronet.compileSdk").get()
 
     defaultConfig {
         applicationId = "dev.okhttpcronet.sample"
@@ -62,9 +67,12 @@ androidComponents {
     }
 }
 
+val okhttpVersionForTests: String =
+    providers.gradleProperty("okhttpVersion").orElse(libs.versions.okhttp).get()
+
 dependencies {
     implementation(project(":bridge"))
-    implementation(libs.okhttp)
+    implementation("com.squareup.okhttp3:okhttp:$okhttpVersionForTests")
     // Compile-only: main sources only build the engine; cronet-embedded supplies the
     // implementation (API + natives) on the device at instrumentation time.
     compileOnly(libs.cronet.api)
@@ -75,7 +83,7 @@ dependencies {
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.junit)
-    androidTestImplementation(libs.mockwebserver3)
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver3:$okhttpVersionForTests")
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.core)
 }

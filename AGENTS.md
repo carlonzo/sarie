@@ -13,7 +13,7 @@ runtime bridge; the bridge decides per request whether Cronet or stock OkHttp ha
 
 ## Mechanism
 
-- `plugin-build/` (AGP ASM, `InstrumentationScope.ALL`) rewrites
+- `plugin/` (AGP ASM, `InstrumentationScope.ALL`) rewrites
   `ConnectInterceptor.intercept` into `INVOKESTATIC
   dev/okhttpcronet/bridge/CronetBridge.intercept`.
 - The bridge re-evaluates policy per request (`PolicyEngine.shouldHandle`): allow goes to the
@@ -32,7 +32,7 @@ runtime bridge; the bridge decides per request whether Cronet or stock OkHttp ha
   itself. The fallback re-implements the stock body instead.
 - No cross-engine retry after a Cronet request has started.
 - OkHttp versions are governed by the recipe registry in the plugin (see
-  `plugin-build/AGENTS.md`); never bypass it.
+  `plugin/AGENTS.md`); never bypass it.
 - No fabricated `Response` metadata: `handshake`, `networkResponse` stay unset.
 - Callbacks are CPU-only: `RequestConverter` uses `allowDirectExecutor()`, so Cronet invokes
   `OkHttpBridgeCallback` directly on its own threads. Never block inside a callback.
@@ -41,24 +41,28 @@ runtime bridge; the bridge decides per request whether Cronet or stock OkHttp ha
 
 - `./gradlew build` works as-is; `gradle.properties` pins the JDK via `org.gradle.java.home`
   (temurin-21). The machine default JDK 26 breaks AGP; do not remove the pin.
-- Suites: `:plugin-build:plugin:test` (bytecode rewriting + guards),
+- Publish with vanniktech (`com.vanniktech.maven.publish` 0.35.0): group
+  `com.carlonzo.sarie`, artifacts `plugin` and `bridge`. Credentials and GPG live in
+  `~/.gradle/gradle.properties` (`mavenCentralUsername`, `mavenCentralPassword`,
+  `signAllPublications=true`, signing key). `./gradlew publishToMavenLocal` publishes both.
+- Suites: `./gradlew -p plugin test` (bytecode rewriting + guards),
   `:bridge:testDebugUnitTest` (bridge logic), `:sample:connectedDebugAndroidTest` and
   `:sample:connectedMinifiedReleaseAndroidTest` (device; the Gradle `startTestOrigin` task
-  runs the Caddy HTTP/3 origin in `scripts/`). The connected suites are the living
+  runs the Caddy HTTP/3 origin in `scripts/`). PR CI runs both connected suites on an
+  API-30 emulator for every supported okhttp version. The connected suites are the living
   documentation of behavior.
 
 ## Module map
 
-- `plugin-build/`: build-time bytecode rewriting and fail-closed guards. See
-  `plugin-build/AGENTS.md`.
-- `bridge/`: runtime Cronet transport and routing policy. See `bridge/AGENTS.md`.
+- `plugin/`: build-time bytecode rewriting and fail-closed guards. Published as
+  `com.carlonzo.sarie:plugin`. See `plugin/AGENTS.md`.
+- `bridge/`: runtime Cronet transport and routing policy. Published as
+  `com.carlonzo.sarie:bridge`. See `bridge/AGENTS.md`.
 - `sample/`: androidTest host; its suites (`BaselineSuite`, `CronetSuite`, `MinifiedSuite`)
   are the behavior contract in executable form. No AGENTS.md; see `sample/build.gradle.kts`.
 
 ## Where truth lives
 
-- `/home/carlo/Projects/.omo/plans/okhttp-cronet-transport.md`: execution plan and amendments.
-- `/home/carlo/Projects/.omo/notepads/okhttp-cronet-transport/`: decisions and learnings.
 - `COMPATIBILITY.md`: behavior contract, every row test-cited. Reference it; do not duplicate.
 - `THIRD_PARTY.md`: upstream provenance (Google mapper port, OkHttp goldens, Cronet).
 - `ROLLBACK.md`: kill switch and recovery paths.

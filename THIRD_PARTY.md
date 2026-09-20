@@ -69,10 +69,8 @@ Which suite tests derive from upstream patterns, and from what:
 
 - **AGP 8.13.0** — verified against Google Maven `com.android.tools.build/gradle` maven-metadata.xml
   (8.13.0 present; newest stable below 9.0.0 is 8.13.2, not used — task pins 8.13.0).
-- **Gradle 8.14.3** — wrapper distribution (`gradle-8.14.3-bin`) pinned in root and `plugin-build/`;
+- **Gradle 8.14.3** — wrapper distribution (`gradle-8.14.3-bin`) pinned in root and `plugin/`;
   within AGP 8.13's declared compatibility range (requires Gradle 8.13+).
-- **JDK Temurin 21.0.12+1 LTS** — `/home/carlo/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS`;
-  required for every Gradle invocation (`JAVA_HOME`), machine default JDK 26 breaks AGP.
 - **Kotlin 2.2.20**, **OkHttp 5.5.0**, **cronet-api / cronet-embedded 143.7445.0**
   (both verified present on Google Maven), **JUnit 4.13.2**, **mockwebserver3 5.5.0**, **ASM 9.7.1**.
 - compileSdk 37 (platform dir `android-37.0` on disk), minSdk 24, targetSdk 37 (applies to the
@@ -146,5 +144,5 @@ Which suite tests derive from upstream patterns, and from what:
   (source of stock/5.5.0/jvm golden).
 - `okhttp3/internal/connection/ConnectInterceptor.class` sha256: android `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527`,
   jvm `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527` (shape check: yes).
-- Regenerate: `JAVA_HOME=<temurin-21> plugin-build/scripts/generate-fingerprints.sh [version ...]`.
+- Regenerate: `JAVA_HOME=<temurin-21> plugin/scripts/generate-fingerprints.sh [version ...]`.
 <!-- golden-bytecode:end -->

@@ -1,5 +1,4 @@
 @file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
-@file:OptIn(okhttp3.internal.OkHttpInternalApi::class)
 
 package dev.okhttpcronet.bridge
 

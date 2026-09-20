@@ -1,5 +1,4 @@
 @file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
-@file:OptIn(okhttp3.internal.OkHttpInternalApi::class)
 
 package dev.okhttpcronet.bridge
 
@@ -20,7 +19,6 @@ import okhttp3.MediaType
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody
-import okhttp3.internal.OkHttpInternalApi
 import okhttp3.internal.closeQuietly
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.http.RealInterceptorChain
@@ -170,10 +168,10 @@ object CronetBridge {
 
                 val response = converted.getResponse()
                 if (response.code == 407) {
-                    response.body?.closeQuietly()
+                    response.body.closeQuietly()
                     throw IOException(PROXY_AUTH_MESSAGE)
                 }
-                val body = response.body ?: run { CallRegistry.unregister(call); return response }
+                val body = response.body
                 return response.newBuilder().body(UnregisteringResponseBody(body, call)).build()
             } catch (e: Throwable) {
                 CallRegistry.unregister(call)

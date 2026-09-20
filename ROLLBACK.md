@@ -20,7 +20,7 @@ Nothing is torn down.
 
 ## 2. Uninstalling the plugin (build-time revert to stock)
 
-Remove `id("dev.okhttpcronet.transport")` from the application module's `plugins` block
+Remove `id("com.carlonzo.sarie")` from the application module's `plugins` block
 (and the `:bridge` dependency, if you want the classes gone too), then rebuild.
 
 The rewrite is **build-time only**: the plugin transforms exactly
@@ -47,14 +47,18 @@ The plugin guards run on `preBuild` of every app module:
 Recovery when OkHttp changes:
 
 1. Decide deliberately to support the new version; this project has **not** verified it.
-2. Update the okhttp pin in `gradle/libs.versions.toml`.
-3. Re-run `JAVA_HOME=<temurin-21> plugin-build/scripts/generate-fingerprints.sh` to refresh
+2. If internals still match, add the version to `RecipeRegistry`,
+   `.github/workflows/pr.yml`, and the table in `COMPATIBILITY.md` "OkHttp versions"
+   (a minor of this library). If internals broke, raise `okhttpMin` / drop the old
+   version from that table and keep the previous library line published so hosts who
+   cannot bump OkHttp stay there; patch that old line for bugfixes.
+3. Re-run `JAVA_HOME=<temurin-21> plugin/scripts/generate-fingerprints.sh` to refresh
    the fingerprint constants and the goldens (`THIRD_PARTY.md`, "Golden bytecode
    artifacts" section is script-maintained between markers).
-4. Re-run the full verification stack (`:bridge:testDebugUnitTest`, `:plugin:test`,
-   `:sample:connectedDebugAndroidTest`, `:sample:connectedMinifiedReleaseAndroidTest`) —
-   the compatibility contract in `COMPATIBILITY.md` must be re-proven on the new bytecode,
-   not assumed.
+4. Re-run the full verification stack against every remaining supported version
+   (`./gradlew :bridge:testDebugUnitTest :sample:assembleDebug -PokhttpVersion=<v>`,
+   `:plugin:test`, device suites on lowest + highest) — the contract in
+   `COMPATIBILITY.md` must be re-proven on the new bytecode, not assumed.
 
 Until step 2–4 are done, a newer okhttp is UNTESTED: the build warns and still applies
 the structural guard (which hard-fails on shape drift). Older okhttp, including every

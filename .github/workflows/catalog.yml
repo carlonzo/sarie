@@ -1,0 +1,126 @@
+# Runs when gradle/libs.versions.toml changes. If the `okhttp =` pin actually moved,
+# probe the new version, and only if the canonical guard matches AND JVM/plugin/assemble
+# tests pass, commit goldens + RecipeRegistry + CI matrix back to the PR branch.
+name: catalog
+
+on:
+  pull_request:
+    paths:
+      - "gradle/libs.versions.toml"
+  push:
+    branches: [main]
+    paths:
+      - "gradle/libs.versions.toml"
+  workflow_dispatch:
+
+concurrency:
+  group: catalog-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+
+jobs:
+  pin-okhttp:
+    name: pin okhttp if the catalog version moved
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Detect okhttp catalog pin change
+        id: detect
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || '' }}
+          BEFORE: ${{ github.event.before || '' }}
+        run: |
+          set -euo pipefail
+          catalog_okhttp() { awk -F'"' '/^okhttp[[:space:]]*=/ { print $2; exit }' "$1"; }
+          NEW=$(catalog_okhttp gradle/libs.versions.toml)
+          if [ -n "$BASE_REF" ]; then
+            git fetch --no-tags origin "$BASE_REF" --depth=1
+            OLD=$(git show "origin/$BASE_REF:gradle/libs.versions.toml" | awk -F'"' '/^okhttp[[:space:]]*=/ { print $2; exit }')
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            OLD=$(git show "$BEFORE:gradle/libs.versions.toml" | awk -F'"' '/^okhttp[[:space:]]*=/ { print $2; exit }')
+          else
+            OLD="$NEW"
+          fi
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          if [ "$OLD" = "$NEW" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "okhttp catalog pin unchanged ($NEW)"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "okhttp catalog pin $OLD -> $NEW"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.detect.outputs.changed == 'true'
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.detect.outputs.changed == 'true'
+
+      - uses: android-actions/setup-android@v3
+        if: steps.detect.outputs.changed == 'true'
+        with:
+          packages: "platforms;android-37 build-tools;35.0.0"
+
+      - name: Unpin machine-local JDK path
+        if: steps.detect.outputs.changed == 'true'
+        run: |
+          sed -i '/^org.gradle.java.home=/d' gradle.properties
+          sed -i '/^org.gradle.java.home=/d' plugin/gradle.properties
+
+      - name: Probe shape and pin goldens
+        if: steps.detect.outputs.changed == 'true'
+        run: ./scripts/pin-okhttp-version.sh "${{ steps.detect.outputs.new }}"
+
+      - name: JVM + plugin + assemble against the new pin
+        if: steps.detect.outputs.changed == 'true'
+        env:
+          ANDROID_COMPILE_SDK: android-37
+        run: |
+          ./gradlew --no-daemon \
+            :bridge:checkOkHttpCompileOnly \
+            :bridge:testDebugUnitTest \
+            :sample:assembleDebug \
+            -PokhttpVersion=${{ steps.detect.outputs.new }} \
+            -Pokhttpcronet.compileSdk=android-37
+          ./gradlew --no-daemon -p plugin test
+
+      - name: Commit pins and retrigger PR checks
+        if: steps.detect.outputs.changed == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git add \
+            plugin/src/main/kotlin/dev/okhttpcronet/plugin/RecipeRegistry.kt \
+            plugin/src/main/kotlin/dev/okhttpcronet/plugin/GoldenFingerprints.kt \
+            plugin/src/test/resources/stock/"${{ steps.detect.outputs.new }}" \
+            plugin/scripts/generate-fingerprints.sh \
+            plugin/recipe-verification-report.md \
+            plugin/build.gradle.kts \
+            bridge/src/main/kotlin/dev/okhttpcronet/bridge/VerifiedOkHttpVersions.kt \
+            gradle/libs.versions.toml \
+            THIRD_PARTY.md \
+            COMPATIBILITY.md \
+            .github/workflows/pr.yml
+          if git diff --cached --quiet; then
+            echo "no pin files changed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: pin okhttp ${{ steps.detect.outputs.new }} as verified"
+          git push
+          gh workflow run PR.yml --ref "${{ github.head_ref }}"

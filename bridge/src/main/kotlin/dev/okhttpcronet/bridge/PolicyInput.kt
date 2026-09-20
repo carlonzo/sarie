@@ -1,5 +1,4 @@
 @file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
-@file:OptIn(okhttp3.internal.OkHttpInternalApi::class)
 
 package dev.okhttpcronet.bridge
 
@@ -15,16 +14,15 @@ import okhttp3.CertificatePinner
 import okhttp3.Interceptor
 import okhttp3.Protocol
 import okhttp3.Request
-import okhttp3.internal.OkHttpInternalApi
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.http.RealInterceptorChain
 
 /**
  * Effective per-request routing inputs for [PolicyEngine].
  *
- * Chain-effective configuration (everything [okhttp3.Interceptor.Chain] publicly exposes in
- * OkHttp 5.5.0, i.e. what an application interceptor may have adjusted via `withX` before
- * ConnectInterceptor) is read from the chain. `networkInterceptors`, `protocols` and
+ * Chain-effective configuration (everything [okhttp3.Interceptor.Chain] publicly exposes
+ * since OkHttp 5.4.0, i.e. what an application interceptor may have adjusted via `withX`
+ * before ConnectInterceptor) is read from the chain. `networkInterceptors`, `protocols` and
  * `forWebSocket` are not on the chain and come from the [RealCall]/its [okhttp3.OkHttpClient]
  * (both are public members on the internal `RealCall`, reachable only with the file-level
  * suppressions/opt-in — Kotlin 2.2.20 pinned so the mangled internals stay resolvable).
