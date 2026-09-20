@@ -24,15 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-37.0 build-tools;35.0.0"
+          packages: "platforms;android-37.0"
       - name: Unpin machine-local JDK path
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
@@ -49,15 +49,15 @@ jobs:
       matrix:
         okhttp: ["5.4.0", "5.5.0"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-37.0 build-tools;35.0.0"
+          packages: "platforms;android-37.0"
       - name: Unpin machine-local JDK path
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
@@ -80,15 +80,15 @@ jobs:
       matrix:
         okhttp: ["5.4.0", "5.5.0"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@v4
-      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-37.0 build-tools;35.0.0"
+          packages: "platforms;android-37.0"
       - name: Unpin machine-local JDK path
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
@@ -103,7 +103,7 @@ jobs:
           ./scripts/download-caddy.sh
           ./scripts/gen-certs.sh
       - name: Instrumented suites
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 30
           arch: x86_64
