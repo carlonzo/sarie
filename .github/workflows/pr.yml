@@ -106,3 +106,22 @@ jobs:
             :sample:connectedDebugAndroidTest
             :sample:connectedMinifiedReleaseAndroidTest
             -PokhttpVersion=${{ matrix.okhttp }}
+      - name: Dump test failures on failure
+        if: failure()
+        run: |
+          for f in sample/build/outputs/androidTest-results/connected/*/*.xml; do
+            if [ -f "$f" ] && grep -q '<failure' "$f"; then
+              echo "::group::Test failures in $f"
+              grep -B 2 -A 30 '<failure' "$f"
+              echo "::endgroup::"
+            fi
+          done
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-device-okhttp-${{ matrix.okhttp }}
+          path: |
+            sample/build/reports/androidTests/
+            sample/build/outputs/androidTest-results/
+
