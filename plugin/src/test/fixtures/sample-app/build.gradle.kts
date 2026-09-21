@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "dev.okhttpcronet.sample.fixture"
+    namespace = "sarie.sample.fixture"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {

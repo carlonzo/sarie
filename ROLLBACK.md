@@ -28,7 +28,7 @@ The rewrite is **build-time only**: the plugin transforms exactly
 `CronetBridge.intercept` inside the produced artifact. Without the plugin, the shipped
 OkHttp bytecode is untouched — no bridge reference remains in `ConnectInterceptor` because
 nothing was ever injected into the published library. Removing the `:bridge` dependency as
-well leaves no `dev.okhttpcronet` classes in the APK at all.
+well leaves no `sarie` classes in the APK at all.
 
 Evidence of the injected shape (and that the fallback inside it is byte-shape identical to
 stock OkHttp): `CronetBridgeTest.fallback bytecode shape - initExchange and copy referenced and ConnectInterceptor absent`.

@@ -86,7 +86,7 @@ Initialize the provider asynchronously at app startup (e.g., in your `Applicatio
 
 ```kotlin
 import com.google.android.gms.net.CronetProviderInstaller
-import dev.okhttpcronet.bridge.CronetRuntime
+import sarie.bridge.CronetRuntime
 import org.chromium.net.CronetEngine
 
 CronetProviderInstaller.installProvider(context).addOnCompleteListener { task ->

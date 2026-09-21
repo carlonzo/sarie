@@ -9,15 +9,15 @@ registered shape are excluded, never force-fit. Do not hand-edit; rerun the scri
 
 | okhttp version | ConnectInterceptor.class sha256 (android / jvm) | guard matched | pinned | notes |
 |---|---|---|---|---|
-| 5.0.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.1.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.2.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.2.1 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.2.2 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.2.3 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.3.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.3.1 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
-| 5.3.2 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | yes | structurally verified |
+| 5.0.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.1.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.2.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.2.1 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.2.2 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.2.3 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.3.0 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.3.1 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
+| 5.3.2 | `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` / `e0840705f2836f0c9f220f8b256a56a2b2c4562bfb171d1dae1875443e95781e` | canonical-5x | no | structurally verified |
 | 5.4.0 | `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527` / `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527` | canonical-5x | yes | structurally verified |
 | 5.5.0 | `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527` / `bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527` | canonical-5x | yes | structurally verified |
 

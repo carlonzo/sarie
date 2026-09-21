@@ -1,7 +1,7 @@
 # bridge/AGENTS.md
 
 Read this first: this module is the runtime transport and routing policy. The trampoline
-target `dev.okhttpcronet.bridge.CronetBridge` lives here. It is deliberately not a thin
+target `sarie.bridge.CronetBridge` lives here. It is deliberately not a thin
 wrapper: for allowed requests it replaces the bottom of OkHttp's network stack, so every
 OkHttp-internal responsibility has a Cronet counterpart in this module.
 

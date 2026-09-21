@@ -27,7 +27,7 @@ public final class okhttp3/internal/connection/ConnectInterceptor implements okh
   // access flags 0x1
   public intercept(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response; throws java/io/IOException
     ALOAD 1
-    INVOKESTATIC dev/okhttpcronet/bridge/CronetBridge.intercept (Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;
+    INVOKESTATIC sarie/bridge/CronetBridge.intercept (Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;
     ARETURN
     MAXSTACK = 1
     MAXLOCALS = 2

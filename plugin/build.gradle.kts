@@ -8,7 +8,7 @@ gradlePlugin {
     plugins {
         create("sarie") {
             id = "com.carlonzo.sarie"
-            implementationClass = "dev.okhttpcronet.plugin.TransportPlugin"
+            implementationClass = "sarie.plugin.TransportPlugin"
             displayName = "Sarie"
             description = "HTTP/3 for OkHttp apps via Cronet"
         }

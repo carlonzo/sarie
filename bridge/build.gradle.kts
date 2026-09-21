@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "dev.okhttpcronet.bridge"
+    namespace = "sarie.bridge"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
