@@ -86,7 +86,7 @@ Initialize the provider asynchronously at app startup (e.g., in your `Applicatio
 
 ```kotlin
 import com.google.android.gms.net.CronetProviderInstaller
-import sarie.bridge.CronetRuntime
+import sarie.bridge.SarieBridge
 import org.chromium.net.CronetEngine
 
 CronetProviderInstaller.installProvider(context).addOnCompleteListener { task ->
@@ -97,7 +97,7 @@ CronetProviderInstaller.installProvider(context).addOnCompleteListener { task ->
             .enableBrotli(true)
             .build()
 
-        CronetRuntime.install(engine)
+        SarieBridge.install(engine)
     } else {
         // Play Services is unavailable or outdated.
         // No action needed: Sarie fails closed to stock OkHttp automatically!
@@ -132,14 +132,14 @@ val engine = CronetEngine.Builder(context)
     .enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, 10 * 1024 * 1024) // 10 MB cache
     .build()
 
-CronetRuntime.install(engine)
+SarieBridge.install(engine)
 ```
 
 ---
 
 ### 3. Setting up the library
 
-Once you call `CronetRuntime.install(engine)`, **you are done!**
+Once you call `SarieBridge.install(engine)`, **you are done!**
 
 You do **not** need to touch your `OkHttpClient` setup, register interceptors, or adapt Retrofit builders:
 
@@ -172,7 +172,7 @@ val retrofit = Retrofit.Builder()
 By default, `DefaultPolicy()` allows every HTTPS host that passes safety checks. You can restrict Cronet routing to specific domains:
 
 ```kotlin
-CronetRuntime.install(
+SarieBridge.install(
     engine,
     DefaultPolicy(
         allowedOrigins = setOf("api.example.com", "cdn.example.com:443") // bare host assumes port 443

@@ -175,14 +175,14 @@ class PolicyEngineTest {
         System.clearProperty("okhttp.cronet.enabled")
         Metrics.resetForTest()
         TrustBaseline.clearMemoForTest()
-        // isEnabled() requires a snapshot present in CronetRuntime itself.
-        CronetRuntime.install(engine, policy("example.com"), mapper)
+        // isEnabled() requires a snapshot present in SarieBridge itself.
+        SarieBridge.install(engine, policy("example.com"), mapper)
     }
 
     @After
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
         Metrics.resetForTest()
         TrustBaseline.clearMemoForTest()
     }

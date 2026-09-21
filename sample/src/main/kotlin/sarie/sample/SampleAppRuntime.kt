@@ -2,8 +2,8 @@ package sarie.sample
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import sarie.bridge.CronetRuntime
 import sarie.bridge.DefaultPolicy
+import sarie.bridge.SarieBridge
 import java.io.File
 import org.chromium.net.CronetEngine
 
@@ -85,7 +85,7 @@ object SampleAppRuntime {
                 else -> throw IllegalArgumentException("unknown mode: $mode")
             },
         )
-        CronetRuntime.install(engine, policy)
+        SarieBridge.install(engine, policy)
     }
 
     /** True when instrumentation args request Cronet NetLog capture (h3 diagnostics). */

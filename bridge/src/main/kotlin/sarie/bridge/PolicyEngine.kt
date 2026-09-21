@@ -40,7 +40,7 @@ object PolicyEngine {
 
     fun shouldHandle(input: PolicyInput, snapshot: RuntimeSnapshot?): Decision {
         if (snapshot == null) return Decision(false, Metrics.Reason.engine_missing)
-        if (!CronetRuntime.isEnabled()) return Decision(false, Metrics.Reason.disabled)
+        if (!SarieBridge.isEnabled()) return Decision(false, Metrics.Reason.disabled)
         if (!snapshot.policy.enabled()) return Decision(false, Metrics.Reason.disabled)
         if (input.isCanceled) return Decision(false, Metrics.Reason.engine_missing)
         if (input.request.tag(CronetOptOut::class.java) != null) {

@@ -82,7 +82,7 @@ object CronetBridge {
     /** Never throws: any policy failure fails closed to stock OkHttp. */
     @JvmStatic
     fun shouldHandle(chain: Interceptor.Chain): Boolean = try {
-        PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), CronetRuntime.snapshot()).allow
+        PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), SarieBridge.snapshot()).allow
     } catch (t: Throwable) {
         logOnce(t)
         false
@@ -92,7 +92,7 @@ object CronetBridge {
     @Throws(IOException::class)
     fun intercept(chain: Interceptor.Chain): Response {
         val realChain = chain as RealInterceptorChain
-        val snapshot = CronetRuntime.snapshot()
+        val snapshot = SarieBridge.snapshot()
         val decision = try {
             PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snapshot)
         } catch (t: Throwable) {

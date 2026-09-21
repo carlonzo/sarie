@@ -16,7 +16,7 @@
 // Ported from google/cronet-transport-for-okhttp@eda650fbc9b5279b6219160c2a0b210b28303fd7
 package sarie.bridge.mapping
 
-import sarie.bridge.CronetRuntime
+import sarie.bridge.SarieBridge
 import java.io.IOException
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
@@ -39,7 +39,7 @@ class RequestConverter(
      *
      * Since Cronet delivers responses through callbacks, the returned holder also exposes
      * [ConvertedRequest.getResponse], which blocks until the status code and headers are
-     * available. The host mapper from [CronetRuntime] is applied to the builder just before
+     * available. The host mapper from [SarieBridge] is applied to the builder just before
      * build() so host tags survive on the Cronet request.
      */
     @Throws(IOException::class)
@@ -104,7 +104,7 @@ class RequestConverter(
             }
         }
 
-        CronetRuntime.snapshot()?.mapper?.map(okHttpRequest, builder)
+        SarieBridge.snapshot()?.mapper?.map(okHttpRequest, builder)
 
         return ConvertedRequest(builder.build(), callback, okHttpRequest, responseConverter)
     }

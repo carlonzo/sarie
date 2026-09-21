@@ -1,8 +1,8 @@
 package sarie.sample.baseline
 
 import androidx.test.platform.app.InstrumentationRegistry
-import sarie.bridge.CronetRuntime
 import sarie.bridge.Metrics
+import sarie.bridge.SarieBridge
 import sarie.sample.SampleAppRuntime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -32,16 +32,17 @@ class BaselineSuite {
     private lateinit var server: MockWebServer
     private var installedMode: String = SampleAppRuntime.MODE_STOCK
 
-    private val mode: String
-        get() = InstrumentationRegistry.getArguments().getString("mode") ?: SampleAppRuntime.MODE_STOCK
-
     @Before
     fun setUp() {
-        Metrics.resetForTest()
         server = MockWebServer()
         server.start()
-        when (mode) {
+        Metrics.resetForTest()
+        // BaselineSuite tests different install modes; honor the instrumentation runner arg.
+        val runnerMode = InstrumentationRegistry.getArguments().getString("mode")
+            ?: SampleAppRuntime.MODE_CRONET
+        when (runnerMode) {
             SampleAppRuntime.MODE_CRONET -> installCronet()
+            SampleAppRuntime.MODE_STOCK -> Unit
             SampleAppRuntime.MODE_FALLBACK -> installDisabled()
         }
     }
@@ -49,7 +50,7 @@ class BaselineSuite {
     @After
     fun tearDown() {
         server.close()
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
         Metrics.resetForTest()
         installedMode = SampleAppRuntime.MODE_STOCK
     }
@@ -165,7 +166,7 @@ class BaselineSuite {
         installDisabled()
         enqueueCleartext200("killswitch-ok")
 
-        assertNull(CronetRuntime.snapshot()?.policy?.takeIf { it.enabled() })
+        assertNull(SarieBridge.snapshot()?.policy?.takeIf { it.enabled() })
         OkHttpClient().newCall(getRequest()).execute().use { response ->
             assertEquals(200, response.code)
             assertEquals("killswitch-ok", response.body.string())

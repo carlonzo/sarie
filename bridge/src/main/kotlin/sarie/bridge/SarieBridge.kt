@@ -17,7 +17,7 @@ private val runtimeLogger: Logger = Logger.getLogger("sarie.bridge")
  * Without an install, every request falls back to stock OkHttp (`reason=engine_missing`).
  * The runtime kill switch `okhttp.cronet.enabled=false` does the same without uninstalling.
  */
-object CronetRuntime {
+object SarieBridge {
     private const val KILL_SWITCH_PROPERTY = "okhttp.cronet.enabled"
 
     @Volatile
@@ -60,9 +60,18 @@ object CronetRuntime {
 }
 
 /**
+ * Backward-compatibility alias for [SarieBridge].
+ */
+@Deprecated(
+    message = "Renamed to SarieBridge to match the library name.",
+    replaceWith = ReplaceWith("SarieBridge", "sarie.bridge.SarieBridge"),
+)
+typealias CronetRuntime = SarieBridge
+
+/**
  * Runtime compatibility tripwire: the build-time registry pins verified okhttp versions, but a
  * host app may ship a different one. Warns instead of failing - routing is unaffected. Called
- * once per [CronetRuntime.install]; `OkHttp.VERSION` has no ConstantValue attribute (javap on
+ * once per [SarieBridge.install]; `OkHttp.VERSION` has no ConstantValue attribute (javap on
  * the pinned artifact), so the reference is a real GETSTATIC read of the runtime version.
  */
 internal fun warnIfUnverified(runtimeVersion: String) {

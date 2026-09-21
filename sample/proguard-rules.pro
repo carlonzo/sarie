@@ -83,18 +83,18 @@
 # (-applymapping), so test-side references are rewritten to the final names - but ONLY
 # if the mapping has a CLASS line: when R8 vertically merges a class (its methods inline
 # into the merge target and the class line disappears), the test refs stay under the
-# original name and die with NoClassDefFoundError (CronetRuntime, run9: merged away once
+# original name and die with NoClassDefFoundError (SarieBridge, run9: merged away once
 # the kotlin.** keep below shifted R8's merging decisions). Full keeps pin the classes
 # the suites drive; the rest of the bridge (CronetBridge, PolicyEngine, converters, ...)
 # stays shrinkable/renamable.
 #   SampleAppRuntime - every suite's install/lastEngine entry point (also stripped
 #       outright without a keep: nothing in main references it)
-#   CronetRuntime - install/uninstall/snapshot
+#   SarieBridge - install/uninstall/snapshot
 #   Metrics + Metrics$Reason - resetForTest/getCronet/getOkhttpFallback/getLastReason +
 #       the reason constants every path assertion compares
 #   RuntimeSnapshot.getPolicy() / CronetPolicy.enabled() - BaselineSuite kill-switch probe
 -keep class sarie.sample.SampleAppRuntime { *; }
--keep class sarie.bridge.CronetRuntime { *; }
+-keep class sarie.bridge.SarieBridge { *; }
 -keep class sarie.bridge.Metrics { *; }
 -keep class sarie.bridge.Metrics$Reason { *; }
 -keep class sarie.bridge.RuntimeSnapshot { *; }

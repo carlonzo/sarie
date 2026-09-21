@@ -1,7 +1,7 @@
 package sarie.sample.minified
 
-import sarie.bridge.CronetRuntime
 import sarie.bridge.Metrics
+import sarie.bridge.SarieBridge
 import sarie.sample.SampleAppRuntime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -50,7 +50,7 @@ class MinifiedSuite {
     @After
     fun tearDown() {
         server.close()
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
         installedEngine?.let { engine ->
             @Suppress("DEPRECATION") // suite owns these engines; stop them to keep the emulator healthy
             engine.shutdown()

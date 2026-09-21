@@ -16,7 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-class CronetRuntimeTest {
+class SarieBridgeTest {
 
     /** Minimal cronet-api double; counts shutdown() calls to prove the engine is never stopped. */
     private class FakeCronetEngine : CronetEngine() {
@@ -59,7 +59,7 @@ class CronetRuntimeTest {
     @After
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
         Metrics.resetForTest()
     }
 
@@ -75,29 +75,29 @@ class CronetRuntimeTest {
     @Test
     fun `install with engine only uses DefaultPolicy and a no-op mapper`() {
         val engine = FakeCronetEngine()
-        CronetRuntime.install(engine)
+        SarieBridge.install(engine)
 
-        val snap = CronetRuntime.snapshot()
+        val snap = SarieBridge.snapshot()
         assertNotNull(snap)
         assertSame(engine, snap!!.engine)
         assertTrue(snap.policy is DefaultPolicy)
         assertTrue(snap.policy.allowedOrigins.isEmpty())
         assertSame(RequestToUrlRequestMapper.NOOP, snap.mapper)
-        assertTrue(CronetRuntime.isEnabled())
+        assertTrue(SarieBridge.isEnabled())
     }
 
     @Test
     fun `install stores snapshot`() {
         val engine = FakeCronetEngine()
-        CronetRuntime.install(engine, policy, mapper)
+        SarieBridge.install(engine, policy, mapper)
 
-        val snap = CronetRuntime.snapshot()
+        val snap = SarieBridge.snapshot()
         assertNotNull(snap)
         assertSame(engine, snap!!.engine)
         assertSame(policy, snap.policy)
         assertSame(mapper, snap.mapper)
         assertTrue(snap.installedAtMillis > 0)
-        assertTrue(CronetRuntime.isEnabled())
+        assertTrue(SarieBridge.isEnabled())
     }
 
     @Test
@@ -105,10 +105,10 @@ class CronetRuntimeTest {
         val engine1 = FakeCronetEngine()
         val engine2 = FakeCronetEngine()
 
-        CronetRuntime.install(engine1, policy, mapper)
-        val first = CronetRuntime.snapshot()!!
-        CronetRuntime.install(engine2, policy, mapper)
-        val second = CronetRuntime.snapshot()!!
+        SarieBridge.install(engine1, policy, mapper)
+        val first = SarieBridge.snapshot()!!
+        SarieBridge.install(engine2, policy, mapper)
+        val second = SarieBridge.snapshot()!!
 
         assertSame(engine2, second.engine)
         assertTrue(first.engine !== second.engine)
@@ -118,31 +118,43 @@ class CronetRuntimeTest {
 
     @Test
     fun `uninstall drops snapshot and disables`() {
-        CronetRuntime.install(FakeCronetEngine(), policy, mapper)
-        CronetRuntime.uninstall()
+        SarieBridge.install(FakeCronetEngine(), policy, mapper)
+        SarieBridge.uninstall()
 
-        assertNull(CronetRuntime.snapshot())
-        assertFalse(CronetRuntime.isEnabled())
+        assertNull(SarieBridge.snapshot())
+        assertFalse(SarieBridge.isEnabled())
     }
 
     @Test
     fun `kill switch system property disables and restores`() {
-        CronetRuntime.install(FakeCronetEngine(), policy, mapper)
-        assertTrue(CronetRuntime.isEnabled())
+        SarieBridge.install(FakeCronetEngine(), policy, mapper)
+        assertTrue(SarieBridge.isEnabled())
 
         try {
             System.setProperty("okhttp.cronet.enabled", "false")
-            assertFalse(CronetRuntime.isEnabled())
+            assertFalse(SarieBridge.isEnabled())
         } finally {
             System.clearProperty("okhttp.cronet.enabled")
         }
-        assertTrue(CronetRuntime.isEnabled())
+        assertTrue(SarieBridge.isEnabled())
     }
 
     @Test
     fun `no snapshot means disabled`() {
-        assertNull(CronetRuntime.snapshot())
-        assertFalse(CronetRuntime.isEnabled())
+        assertNull(SarieBridge.snapshot())
+        assertFalse(SarieBridge.isEnabled())
+    }
+
+    @Test
+    @Suppress("DEPRECATION")
+    fun `CronetRuntime alias points to SarieBridge`() {
+        val engine = FakeCronetEngine()
+        CronetRuntime.install(engine)
+        assertSame(engine, SarieBridge.snapshot()?.engine)
+        assertSame(engine, CronetRuntime.snapshot()?.engine)
+        assertTrue(CronetRuntime.isEnabled())
+        CronetRuntime.uninstall()
+        assertNull(SarieBridge.snapshot())
     }
 
     @Test

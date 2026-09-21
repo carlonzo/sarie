@@ -1,7 +1,7 @@
 package sarie.bridge.mapping
 
-import sarie.bridge.CronetRuntime
 import sarie.bridge.RequestToUrlRequestMapper
+import sarie.bridge.SarieBridge
 import java.util.concurrent.Executor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -24,12 +24,12 @@ class RequestConverterTest {
 
     @Before
     fun setUp() {
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
     }
 
     @After
     fun tearDown() {
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
     }
 
     private fun converter(): RequestConverter =
@@ -157,14 +157,14 @@ class RequestConverterTest {
             seen.add(seenRequest)
             builder.addHeader("X-Mapped", "1")
         }
-        CronetRuntime.install(engine, FakePolicy(), mapper)
+        SarieBridge.install(engine, FakePolicy(), mapper)
 
         converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
 
         val builder = engine.builders.single()
         assertSame(request, seen.single())
         assertTrue("X-Mapped" to "1" in builder.headers)
-        assertSame(engine, CronetRuntime.snapshot()!!.engine)
+        assertSame(engine, SarieBridge.snapshot()!!.engine)
     }
 
     @Test
