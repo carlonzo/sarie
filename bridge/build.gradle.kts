@@ -53,7 +53,7 @@ dependencies {
     testImplementation("com.squareup.okhttp3:mockwebserver3:$okhttpVersionForTests")
 }
 
-// compileOnly must not leak okhttp onto the published/runtime classpath.
+// compileOnly must not leak okhttp or cronet onto the published/runtime classpath.
 tasks.register("checkOkHttpCompileOnly") {
     group = "verification"
     description = "Fails if okhttp is resolved on the bridge runtime classpath."
@@ -68,4 +68,20 @@ tasks.register("checkOkHttpCompileOnly") {
         }
     }
 }
-tasks.named("check") { dependsOn("checkOkHttpCompileOnly") }
+tasks.register("checkCronetCompileOnly") {
+    group = "verification"
+    description = "Fails if cronet is resolved on the bridge runtime classpath."
+    doLast {
+        val found = configurations.getByName("debugRuntimeClasspath")
+            .incoming.resolutionResult.allComponents
+            .mapNotNull { it.moduleVersion }
+            .filter { it.group == "org.chromium.net" }
+        check(found.isEmpty()) {
+            "bridge must not ship cronet on its runtime classpath (compileOnly against " +
+                "${libs.versions.cronetApi.get()}); found $found"
+        }
+    }
+}
+tasks.named("check") {
+    dependsOn("checkOkHttpCompileOnly", "checkCronetCompileOnly")
+}

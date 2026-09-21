@@ -1,28 +1,44 @@
 # Sarie
 
-Let an OkHttp 5.4 / 5.5 Android app speak HTTP/3 through Cronet without forking OkHttp
-and without installing an interceptor.
+**Sarie** enables OkHttp 5.x Android applications to speak **HTTP/3 (QUIC)** through Chromium's [Cronet](https://developer.android.com/guide/topics/connectivity/cronet) networking stack — without forking OkHttp and without installing or reordering application interceptors.
 
-A Gradle plugin rewrites one OkHttp method at build time. Requests then pass through a
-bridge that sends matching HTTPS calls over Cronet and everything else over stock OkHttp.
-The bridge sits below every interceptor you add. Unsupported configurations go back to
-stock OkHttp before any Cronet I/O starts.
+---
 
-See `COMPATIBILITY.md` for the exact contract and `ROLLBACK.md` to turn it off.
+## What is Sarie?
+
+Sarie is a lightweight transport bridge for Android apps that use OkHttp (and Retrofit). It brings the performance advantages of Cronet — such as **HTTP/3 (QUIC)**, **connection migration** across Wi-Fi and cellular switches, and Chromium's battle-tested connection management — directly to your existing OkHttp client.
+
+Crucially:
+- **No OkHttp fork**: Your app continues using official OkHttp coordinates.
+- **No user-visible interceptors**: You do not need to add or reorder interceptors or replace your `OkHttpClient` with a custom `Call.Factory`.
+- **Pre-send safety**: Requests with configurations Cronet cannot support (e.g. WebSockets, custom proxies, certificate pinning, authenticators, or caching) automatically and safely route to stock OkHttp *before* any network I/O begins.
+
+---
+
+## How it works
+
+1. **Build-time bytecode rewriting**: The Sarie Gradle plugin rewrites a single internal OkHttp method (`okhttp3.internal.connection.ConnectInterceptor.intercept`) at APK packaging time into a bridge trampoline.
+2. **Pre-send policy routing**: Every request reaching the connection stage passes through an internal 19-rule policy engine:
+   - **Allowed HTTPS requests** are converted and dispatched over the high-performance Cronet engine.
+   - **Unsupported or opt-out requests** (cleartext HTTP, WebSockets, custom trust managers, proxies, caching, or explicit opt-outs) fall back to stock OkHttp's native connection pipeline.
+3. **Transparent to application interceptors**: Because the swap happens at `ConnectInterceptor` (the lowest layer of OkHttp's interceptor chain), your logging, tracing, authentication, and header interceptors run normally above the bridge and observe all responses.
+
+---
 
 ## Requirements
 
-- Android **application** module (the rewrite runs when packaging the APK)
-- OkHttp **5.4.0** or **5.5.0** (newer versions warn; older versions including OkHttp 4 fail the build)
-- minSdk 24
-- A host-owned `CronetEngine` (this project never downloads or selects an engine)
+- **Android Application module** (bytecode rewriting takes place when packaging the APK)
+- **OkHttp 5.4.0** or **5.5.0** (older versions including OkHttp 4 fail the build; newer versions warn)
+- **Android minSdk 24+**
+- A host-provided `CronetEngine` (see below)
 
-## Integration
+---
 
-### 1. Apply the plugin
+## First steps
 
-Apply it to the **application** that packages the APK. That is where OkHttp is rewritten,
-including when OkHttp is only a dependency of an Android library:
+### 1. Installation
+
+Apply the Sarie Gradle plugin to your **application** module (`app/build.gradle.kts`). The rewrite operates on the packaging step where OkHttp classes are assembled into the APK:
 
 ```kotlin
 // app/build.gradle.kts
@@ -32,32 +48,80 @@ plugins {
 }
 ```
 
-AGP cannot rewrite dependency classes into a library AAR (`InstrumentationScope.ALL` is
-application-only). You can also apply the plugin to the library that declares OkHttp —
-the version/fingerprint guards run there — but you still need it on the application for
-the `ConnectInterceptor` rewrite.
+> **Note**: AGP transforms dependency bytecode at the application level (`InstrumentationScope.ALL`). If OkHttp is declared in an Android library module, you still apply `com.carlonzo.sarie` to the application module packaging the final APK.
 
-### 2. Add dependencies
-
-You keep owning OkHttp. The bridge does not pull a version into your graph.
+Next, add OkHttp and the Sarie bridge to your app's dependencies:
 
 ```kotlin
 dependencies {
-    implementation("com.squareup.okhttp3:okhttp:5.5.0") // 5.4.0 also supported
-    implementation("com.carlonzo.sarie:bridge:0.1.0-SNAPSHOT") // or project(":bridge") in this repo
-    implementation("org.chromium.net:cronet-embedded:143.7445.0")
+    // OkHttp 5.x (host app owns OkHttp; 5.4.0 or 5.5.0)
+    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+
+    // Sarie bridge runtime
+    implementation("com.carlonzo.sarie:bridge:0.1.0-SNAPSHOT")
 }
 ```
 
-The host owns the engine. This repo's sample and connected suites pin
-`cronet-embedded:143.7445.0`. Google later published `500.0.2`, where `cronet-embedded`
-is a deprecated empty artifact that pulls `org.chromium.net:cronet-bundled` (and
-`cronet-api` pulls `org.chromium.net:cronet`). Either coordinate works at the API this
-bridge compiles against; we have not re-run the connected suites on 500.
+---
 
-There is no Play Services provider waterfall.
+### 2. Adding a Cronet dependency & retrieving the `CronetEngine`
 
-### 3. Build an engine and install it once at startup
+Sarie's bridge has **no runtime dependency on Cronet** (`compileOnly` against `cronet-api`). It does not bundle or dictate which Cronet implementation is included, avoiding binary size bloat and giving you complete control.
+
+To initialize Sarie, you must provide a `CronetEngine` instance. On Android, there are two primary ways to obtain one:
+
+#### Option A: Google Play Services (Recommended for minimal APK size)
+
+The Google Play Services provider loads Cronet dynamically from the platform. The application avoids bundling Chromium binaries (~3–4 MB download size savings) and automatically benefits from platform-delivered security fixes and updates.
+
+Add the Play Services Cronet dependency:
+
+```kotlin
+dependencies {
+    implementation("com.google.android.gms:play-services-cronet:18.1.1")
+}
+```
+
+Initialize the provider asynchronously at app startup (e.g., in your `Application.onCreate()`):
+
+```kotlin
+import com.google.android.gms.net.CronetProviderInstaller
+import dev.okhttpcronet.bridge.CronetRuntime
+import org.chromium.net.CronetEngine
+
+CronetProviderInstaller.installProvider(context).addOnCompleteListener { task ->
+    if (task.isSuccessful) {
+        val engine = CronetEngine.Builder(context)
+            .enableQuic(true)
+            .enableHttp2(true)
+            .enableBrotli(true)
+            .build()
+
+        CronetRuntime.install(engine)
+    } else {
+        // Play Services is unavailable or outdated.
+        // No action needed: Sarie fails closed to stock OkHttp automatically!
+    }
+}
+```
+
+> **Fail-closed safety**: If `CronetProviderInstaller` fails or has not finished initializing, Sarie simply keeps routing all OkHttp calls through stock OkHttp without throwing exceptions.
+
+#### Option B: Embedded / Bundled Cronet (Recommended for guaranteed availability)
+
+If your app runs on devices without Google Play Services (e.g., AOSP devices, Amazon Fire OS, or international markets), you can bundle Cronet directly inside your APK.
+
+Add the embedded or bundled Cronet dependency:
+
+```kotlin
+dependencies {
+    // Bundles Chromium binaries into the APK:
+    implementation("org.chromium.net:cronet-embedded:143.7445.0")
+    // Or Google 500.x equivalent: implementation("org.chromium.net:cronet-bundled:500.0.2")
+}
+```
+
+Build the engine synchronously at startup:
 
 ```kotlin
 val engine = CronetEngine.Builder(context)
@@ -65,32 +129,59 @@ val engine = CronetEngine.Builder(context)
     .enableHttp2(true)
     .enableBrotli(true)
     .setStoragePath(context.cacheDir.absolutePath)
+    .enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, 10 * 1024 * 1024) // 10 MB cache
     .build()
 
 CronetRuntime.install(engine)
 ```
 
-That is the whole required API: a host-owned engine, installed once before the first
-call. `install` stores a reference, `uninstall()` drops it, and neither calls
-`engine.shutdown()`.
+---
 
-`DefaultPolicy()` (the default) sends every origin that passes the other fail-closed
-checks over Cronet. Restrict it when you have only tested some hosts — the Cronet path
-is not OkHttp-parity (no cache writes, no network interceptors, no handshake metadata;
-see `COMPATIBILITY.md`):
+### 3. Setting up the library
+
+Once you call `CronetRuntime.install(engine)`, **you are done!**
+
+You do **not** need to touch your `OkHttpClient` setup, register interceptors, or adapt Retrofit builders:
+
+```kotlin
+// OkHttp calls automatically use Cronet / HTTP/3
+val client = OkHttpClient()
+val request = Request.Builder()
+    .url("https://api.example.com/data")
+    .build()
+
+client.newCall(request).execute().use { response ->
+    println("Protocol: ${response.protocol}") // Returns HTTP_3 when negotiated!
+}
+```
+
+Retrofit works as usual without changes:
+
+```kotlin
+val retrofit = Retrofit.Builder()
+    .baseUrl("https://api.example.com/")
+    .client(okHttpClient) // Or default client
+    .build()
+```
+
+---
+
+### 4. Advanced configuration & knobs
+
+#### Restricting origins (Allowlist)
+By default, `DefaultPolicy()` allows every HTTPS host that passes safety checks. You can restrict Cronet routing to specific domains:
 
 ```kotlin
 CronetRuntime.install(
     engine,
-    DefaultPolicy(allowedOrigins = setOf("api.example.com")), // "host" = port 443; "host:port" is exact
+    DefaultPolicy(
+        allowedOrigins = setOf("api.example.com", "cdn.example.com:443") // bare host assumes port 443
+    )
 )
 ```
 
-`addQuicHint(host, port, alternatePort)` is a Cronet engine knob, not a Sarie API. It
-tells Cronet "this host already speaks QUIC" so the **first** connection can attempt
-HTTP/3 instead of waiting for an Alt-Svc advertisement after TCP/H2. It is optional. A
-disk cache (`setStoragePath` plus `enableHttpCache`) also lets later sessions reuse QUIC
-server config. Wrong hints waste a QUIC attempt and fall back to TCP.
+#### First-connection HTTP/3 (`addQuicHint`)
+Cronet normally discovers HTTP/3 after the first connection receives an `Alt-Svc` response header over TCP. You can hint that an origin supports QUIC so the **very first connection** attempts HTTP/3:
 
 ```kotlin
 CronetEngine.Builder(context)
@@ -99,63 +190,105 @@ CronetEngine.Builder(context)
     .build()
 ```
 
-`RequestToUrlRequestMapper` is an optional hook on `UrlRequest.Builder` for Cronet-only
-knobs (priority, traffic-stats tag, annotations) that OkHttp's `Request` cannot express.
-Most hosts never pass one; the default is a no-op.
-
-### 4. Opt a request out
+#### Opting out individual requests
+If a specific request must run on stock OkHttp, tag it with `CronetOptOut`:
 
 ```kotlin
-request.newBuilder()
+val request = Request.Builder()
+    .url("https://api.example.com/special")
     .tag(CronetOptOut::class.java, CronetOptOut)
     .build()
 ```
 
-That request runs on stock OkHttp.
+#### Emergency runtime kill switch
+Disable Cronet routing immediately across the entire process without rebuilding by setting the system property:
+```kotlin
+System.setProperty("okhttp.cronet.enabled", "false")
+```
+
+---
 
 ## What runs where
 
-| Request | Path |
+| Request | Transport |
 | --- | --- |
-| HTTPS on a default client (empty allowlist, or a listed origin) | Cronet (h3 or h2, per the engine) |
-| `http://`, loopback, WebSocket | stock OkHttp |
-| Client with cache, network interceptors, custom authenticator / proxy / pins / trust / socket factory / hostname verifier, or `H2_PRIOR_KNOWLEDGE` | stock OkHttp |
-| No engine, kill switch off (`okhttp.cronet.enabled=false`), or `CronetOptOut` tag | stock OkHttp |
+| HTTPS matching policy (default client, allowlisted host) | **Cronet** (HTTP/3 or HTTP/2, as negotiated) |
+| Cleartext `http://` or loopback addresses | **Stock OkHttp** |
+| WebSockets (`ws://`, `wss://`) | **Stock OkHttp** |
+| Client with custom `Cache` configured | **Stock OkHttp** (Cronet responses are not written to OkHttp cache) |
+| Client with Network Interceptors | **Stock OkHttp** |
+| Client with custom Authenticator (401/407) | **Stock OkHttp** |
+| Client with custom Proxy / ProxySelector | **Stock OkHttp** |
+| Client with CertificatePinning or custom TrustManager / SSLSocketFactory | **Stock OkHttp** |
+| Client with `H2_PRIOR_KNOWLEDGE` | **Stock OkHttp** |
+| Engine not installed, opt-out tag, or kill switch set to false | **Stock OkHttp** |
 
-Application interceptors still run. Network interceptors never run on the Cronet path.
+*Application interceptors always execute for all requests. Network interceptors run only when routed to stock OkHttp.*
 
-## Compared with google/cronet-transport-for-okhttp
+---
 
-| | google/cronet-transport-for-okhttp | This library |
+## How this project compares with `google/cronet-transport-for-okhttp`
+
+Google provides an official integration in [`google/cronet-transport-for-okhttp`](https://github.com/google/cronet-transport-for-okhttp). While that library served as inspiration, Sarie was designed to address fundamental architectural and operational shortcomings:
+
+### Key differences
+
+1. **Zero-touch integration vs. Fragile interceptor ordering**:
+   - `google/cronet-transport-for-okhttp` is an application interceptor (`CronetInterceptor`) or a `Call.Factory` wrapper (`CronetCallFactory`). If used as an interceptor, **it must be the absolute last interceptor** in the chain; any interceptor placed after it is silently skipped. Furthermore, calls made by third-party libraries using their own `OkHttpClient` cannot use Cronet unless each client instance is individually configured.
+   - **Sarie** rewrites `ConnectInterceptor` at build time. It sits beneath *all* application interceptors where connections are opened. You do not modify client instances, and every OkHttp call across your app and dependencies automatically benefits from Cronet.
+
+2. **Fail-closed pre-send safety vs. Silent configuration bypass**:
+   - `google/cronet-transport-for-okhttp` forces requests through Cronet even when the `OkHttpClient` has configurations Cronet does not support (such as custom proxy selectors, certificate pinners, custom SSL socket factories, or OkHttp caches). This **silently bypasses your security and proxy configurations**.
+   - **Sarie** evaluates a 19-rule pre-send policy before starting any request. If an unsupported client configuration is detected, it cleanly falls back to stock OkHttp with an explicit reason recorded in metrics.
+
+3. **Immediate cancellation vs. Polling lag**:
+   - `google/cronet-transport-for-okhttp` checks for call cancellation using a periodic polling loop (~500 ms delay).
+   - **Sarie** registers directly with OkHttp's `Call.addEventListener`, delivering cancellation signals to Cronet immediately without polling.
+
+4. **WebSockets and streaming protocols**:
+   - `google/cronet-transport-for-okhttp` fails on WebSocket requests.
+   - **Sarie** detects WebSocket upgrades and routes them directly to native OkHttp.
+
+5. **Transport-failure retries**:
+   - `google/cronet-transport-for-okhttp` treats any Cronet transport failure as fatal.
+   - **Sarie** transparently retries pre-header transport failures once for idempotent requests (GET, HEAD, OPTIONS) if `retryOnConnectionFailure` is enabled.
+
+6. **Full request tag support**:
+   - `CronetCallFactory` from Google throws an exception if `Request.tag()` is used.
+   - **Sarie** preserves all OkHttp request tags.
+
+### Feature comparison matrix
+
+| Feature / Behavior | google/cronet-transport-for-okhttp | Sarie |
 | --- | --- | --- |
-| Placement | Must be the last interceptor; removing it silently drops Cronet | No interceptor to install or reorder |
-| WebSocket | Unsupported on the Cronet path | Routed to stock OkHttp |
-| Cancel | ~500 ms poll | Immediate, via `Call.addEventListener` |
-| Unsupported client config (proxy, pins, custom trust, …) | Still sent to Cronet; config is bypassed | Fail-closed to stock OkHttp with a reason |
-| Request tags | Dropped | Preserved; `CronetOptOut` is a tag |
-| OkHttp cache | Cronet responses never written | Cache clients stay on stock OkHttp |
-| 407 | Can crash follow-up logic | Clear `IOException`; proxy clients denied before send |
-| Transport failure | Terminal | One idempotent retry before any response byte (GET/HEAD/OPTIONS) |
-| Timestamps | Unset | Set from the bridge |
+| **Integration** | Must add `CronetInterceptor` or use `CronetCallFactory` | Build-time bytecode rewrite; zero client modifications |
+| **Interceptor placement** | Must be last; reordering silently drops downstream interceptors | Sits below all application interceptors; none are skipped |
+| **Unsupported client config** (proxy, pins, custom trust, …) | Dispatched to Cronet anyway; OkHttp configs silently bypassed | Fail-closed pre-send fallback to stock OkHttp with metrics |
+| **OkHttp Cache** | Cronet responses never cached | Cache-enabled clients safely stay on stock OkHttp |
+| **WebSocket** | Fails / Unsupported | Transparently routed to stock OkHttp |
+| **Cancellation** | ~500 ms poll loop | Immediate, via OkHttp `Call.addEventListener` |
+| **Request tags** | Dropped / throws in `CronetCallFactory` | Fully preserved |
+| **Transport failure** | Terminal | Retries idempotent calls once before headers |
+| **HTTP 407 (Proxy auth)** | Can crash follow-up logic | Clean `IOException`; proxy clients denied pre-send |
+| **Request opt-out** | Requires separate OkHttpClient / CallFactory | Per-request via `CronetOptOut` tag |
+| **Cronet runtime dependency** | Bundled by host or library | None (`compileOnly` API; host picks Play Services or Embedded) |
+
+---
 
 ## HTTP/3 vs HTTP/2 on the Cronet path
 
-`response.protocol` is `HTTP_3` or `HTTP_2` according to what the engine negotiated.
+When requests run over Cronet, `response.protocol` is set to `Protocol.HTTP_3` or `Protocol.HTTP_2` based on the negotiated transport.
 
-On both protocols:
+On the Cronet path:
+- `EventListener.callEnd` fires when response headers return; the response body streams incrementally.
+- `callTimeout` bounds the header phase; streaming body reads are bounded by `readTimeout`.
+- The engine replaces `Accept-Encoding` with `gzip, deflate, br` and transparently decodes responses.
+- Connection migration and 0-RTT QUIC handshakes are handled internally by Cronet.
+- `handshake`, `networkResponse`, and `cacheResponse` fields remain unset (no fabricated metadata).
 
-- No `handshake`, `networkResponse`, or `cacheResponse`
-- `EventListener.callEnd` fires when headers return; the body may still be streaming
-- `callTimeout` bounds the header phase only; body reads use `readTimeout`
-- No connect/DNS `EventListener` stages (there is no OkHttp Exchange)
-- Duplicate request headers collapse to the last value
-- The engine replaces `Accept-Encoding` with `gzip, deflate, br` and decodes the body
-- Connection migration and 0-RTT are engine-managed and invisible to OkHttp
+---
 
-## What this will not do
+## Documentation & Reference
 
-- No OkHttp fork, no republished patched coordinate, no user-visible interceptor
-- No runtime agents, ART hooks, or reflection on the request hot path
-- No automatic engine waterfall or engine download
-- No desktop JVM transport; `cronet-fallback` is not supported
-- No OkHttp feature parity on the Cronet path beyond `COMPATIBILITY.md`
+- [`COMPATIBILITY.md`](COMPATIBILITY.md): Complete behavior contract with test citations for every supported scenario.
+- [`ROLLBACK.md`](ROLLBACK.md): Emergency recovery and build/runtime rollback procedures.

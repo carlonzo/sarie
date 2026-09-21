@@ -59,6 +59,7 @@ jobs:
         run: >
           ./gradlew --no-daemon
           :bridge:checkOkHttpCompileOnly
+          :bridge:checkCronetCompileOnly
           :bridge:testDebugUnitTest
           :sample:assembleDebug
           -PokhttpVersion=${{ matrix.okhttp }}
