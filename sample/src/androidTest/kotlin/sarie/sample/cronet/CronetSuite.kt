@@ -1,7 +1,7 @@
 package sarie.sample.cronet
 
-import sarie.bridge.CronetRuntime
 import sarie.bridge.Metrics
+import sarie.bridge.SarieBridge
 import sarie.sample.SampleAppRuntime
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -68,7 +68,7 @@ class CronetSuite {
 
     @After
     fun tearDown() {
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
         installedEngine?.let { engine ->
             if (SampleAppRuntime.netLogRequested) {
                 @Suppress("DEPRECATION")

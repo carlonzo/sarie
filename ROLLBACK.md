@@ -66,13 +66,13 @@ the structural guard (which hard-fails on shape drift). Older okhttp, including 
 
 ## 4. Engine ownership
 
-The engine is **borrowed, never owned**: `CronetRuntime.install` stores a reference to the
+The engine is **borrowed, never owned**: `SarieBridge.install` stores a reference to the
 host's ready engine, `uninstall()` drops only that reference, and the bridge never calls
 `engine.shutdown()` or `stopNetLog()` — stopping (or not stopping) the engine is entirely
 the host's decision. Replacing an engine is a plain `install(...)` overwrite of the
 snapshot reference.
 
-Evidence: `CronetRuntimeTest` (borrowed-engine semantics: shutdown counter stays zero
+Evidence: `SarieBridgeTest` (borrowed-engine semantics: shutdown counter stays zero
 across install/uninstall/replace).
 
 ## 5. Per-request opt-out

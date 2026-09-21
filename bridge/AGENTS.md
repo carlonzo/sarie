@@ -10,7 +10,7 @@ OkHttp-internal responsibility has a Cronet counterpart in this module.
 ```
 ConnectInterceptor.intercept (rewritten by the plugin)
   -> CronetBridge.intercept(chain)
-  -> PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), CronetRuntime.snapshot())
+  -> PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), SarieBridge.snapshot())
 allow:
   RequestConverter -> UrlRequest (CronetExecutor / CronetUploadExecutor)
   -> OkHttpBridgeCallback -> ResponseConverter -> streaming Response
@@ -34,7 +34,7 @@ deny:
 - `PolicyEngine.kt`, `PolicyInput.kt`, `TrustBaseline.kt`: pre-send routing. 19 fail-closed
   rules in fixed order (see the `PolicyEngine` doc comment), including a TLS check on the
   trust manager's `acceptedIssuers` fingerprint, not just its class.
-- `CronetRuntime.kt`, `RuntimeSnapshot.kt`, `CronetPolicy.kt`, `DefaultPolicy.kt`,
+- `SarieBridge.kt`, `RuntimeSnapshot.kt`, `CronetPolicy.kt`, `DefaultPolicy.kt`,
   `CronetOptOut.kt`: lifecycle. The host installs the engine (`install(engine)` is enough);
   the bridge borrows it and never shuts it down. `DefaultPolicy()` admits every origin that
   passes the other rules; a non-empty `allowedOrigins` is optional. Kill switch via system

@@ -9,7 +9,7 @@ import org.chromium.net.UrlRequest
  *
  * Use this for Cronet-only knobs that have no OkHttp equivalent (priority,
  * traffic-stats uid, request annotations). Do not mutate the OkHttp request.
- * Most hosts never need one: [CronetRuntime.install] defaults to [NOOP].
+ * Most hosts never need one: [SarieBridge.install] defaults to [NOOP].
  */
 fun interface RequestToUrlRequestMapper {
     fun map(request: Request, builder: UrlRequest.Builder)

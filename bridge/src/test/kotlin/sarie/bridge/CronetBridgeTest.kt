@@ -189,13 +189,13 @@ class CronetBridgeTest {
     @After
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
         Metrics.resetForTest()
         CallRegistry.clearForTest()
     }
 
     private fun install(engine: CronetEngine, vararg origins: String) {
-        CronetRuntime.install(
+        SarieBridge.install(
             engine,
             object : CronetPolicy {
                 override val allowedOrigins: Set<String> = origins.toSet()
@@ -549,7 +549,7 @@ class CronetBridgeTest {
 
     @Test
     fun `shouldHandle returns false without throwing when no snapshot is installed`() {
-        CronetRuntime.uninstall()
+        SarieBridge.uninstall()
         val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
         assertFalse(CronetBridge.shouldHandle(chain))
     }
