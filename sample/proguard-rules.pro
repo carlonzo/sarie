@@ -6,9 +6,9 @@
 # ConnectInterceptor by the okhttp.cronet plugin) is only a live root if okhttp itself
 # survives: nothing reachable ever constructed an OkHttpClient, so the first R8 run
 # stripped ALL of okhttp - trampoline included - and the whole bridge with it
-# (usage.txt: dev.okhttpcronet.bridge.CronetBridge removed). Re-rooting the graph at the
+# (usage.txt: sarie.bridge.CronetBridge removed). Re-rooting the graph at the
 # entry instrumentation drives fixes reachability for everything downstream. NO wildcard
-# keep of dev.okhttpcronet.bridge.** and NO blanket okhttp3.internal.** keep: internals
+# keep of sarie.bridge.** and NO blanket okhttp3.internal.** keep: internals
 # (ConnectInterceptor, RealInterceptorChain, RealCall, ...) stay shrinkable/renamable -
 # renaming is exactly what this suite must survive.
 
@@ -93,12 +93,12 @@
 #   Metrics + Metrics$Reason - resetForTest/getCronet/getOkhttpFallback/getLastReason +
 #       the reason constants every path assertion compares
 #   RuntimeSnapshot.getPolicy() / CronetPolicy.enabled() - BaselineSuite kill-switch probe
--keep class dev.okhttpcronet.sample.SampleAppRuntime { *; }
--keep class dev.okhttpcronet.bridge.CronetRuntime { *; }
--keep class dev.okhttpcronet.bridge.Metrics { *; }
--keep class dev.okhttpcronet.bridge.Metrics$Reason { *; }
--keep class dev.okhttpcronet.bridge.RuntimeSnapshot { *; }
--keep class dev.okhttpcronet.bridge.CronetPolicy { *; }
+-keep class sarie.sample.SampleAppRuntime { *; }
+-keep class sarie.bridge.CronetRuntime { *; }
+-keep class sarie.bridge.Metrics { *; }
+-keep class sarie.bridge.Metrics$Reason { *; }
+-keep class sarie.bridge.RuntimeSnapshot { *; }
+-keep class sarie.bridge.CronetPolicy { *; }
 -keepclassmembers class org.chromium.net.CronetEngine {
     public void shutdown();
     public void stopNetLog();

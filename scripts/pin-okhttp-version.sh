@@ -8,7 +8,7 @@ set -euo pipefail
 
 V="${1:?usage: pin-okhttp-version.sh <okhttp-version>}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-REGISTRY="$ROOT/plugin/src/main/kotlin/dev/okhttpcronet/plugin/RecipeRegistry.kt"
+REGISTRY="$ROOT/plugin/src/main/kotlin/sarie/plugin/RecipeRegistry.kt"
 GEN="$ROOT/plugin/scripts/generate-fingerprints.sh"
 PR_YML="$ROOT/.github/workflows/pr.yml"
 COMPAT="$ROOT/COMPATIBILITY.md"

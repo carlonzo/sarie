@@ -2,7 +2,7 @@
 
 Read this first: this included build (own `settings.gradle.kts` and `gradlew`) contains the
 Gradle plugin that rewrites exactly one OkHttp method at build time and fails closed on
-anything unexpected. Product code lives in `src/main/kotlin/dev/okhttpcronet/plugin/`.
+anything unexpected. Product code lives in `src/main/kotlin/sarie/plugin/`.
 Published as `com.carlonzo.sarie:plugin` (plugin id `com.carlonzo.sarie`).
 
 ## Registration
@@ -34,7 +34,7 @@ development).
    first 5 instructions, `initExchange$okhttp` / `copy$okhttp$default` / `proceed` each exactly
    once, ending in `ARETURN`.
 3. Pass: `ConnectInterceptorRewriter.emitTrampoline` emits `ALOAD 1` / `INVOKESTATIC
-   dev/okhttpcronet/bridge/CronetBridge.intercept` / `ARETURN` with `COMPUTE_FRAMES`.
+   sarie/bridge/CronetBridge.intercept` / `ARETURN` with `COMPUTE_FRAMES`.
 4. Fail: `IllegalStateException` with the problem list and a javap-style dump of the captured
    instructions. `visitEnd` also fails if `intercept` was never seen.
 5. `isInstrumentable` is EXCLUSIVE to `okhttp3.internal.connection.ConnectInterceptor`.

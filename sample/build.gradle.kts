@@ -11,11 +11,11 @@ okhttpCronet {
 }
 
 android {
-    namespace = "dev.okhttpcronet.sample"
+    namespace = "sarie.sample"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "dev.okhttpcronet.sample"
+        applicationId = "sarie.sample"
         minSdk = libs.versions.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

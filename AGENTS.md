@@ -15,7 +15,7 @@ runtime bridge; the bridge decides per request whether Cronet or stock OkHttp ha
 
 - `plugin/` (AGP ASM, `InstrumentationScope.ALL`) rewrites
   `ConnectInterceptor.intercept` into `INVOKESTATIC
-  dev/okhttpcronet/bridge/CronetBridge.intercept`.
+  sarie/bridge/CronetBridge.intercept`.
 - The bridge re-evaluates policy per request (`PolicyEngine.shouldHandle`): allow goes to the
   Cronet path; deny runs an exact-stock fallback (`initExchange` + `copy(exchange=)` +
   `proceed`, re-implemented because `index` has no getter).
@@ -27,7 +27,7 @@ runtime bridge; the bridge decides per request whether Cronet or stock OkHttp ha
 ## Hard invariants (MUST NOT break)
 
 - Trampoline descriptor stays `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;` targeting
-  `dev/okhttpcronet/bridge/CronetBridge`.
+  `sarie/bridge/CronetBridge`.
 - The bridge must never call `ConnectInterceptor.INSTANCE.intercept`; that recurses into
   itself. The fallback re-implements the stock body instead.
 - No cross-engine retry after a Cronet request has started.
