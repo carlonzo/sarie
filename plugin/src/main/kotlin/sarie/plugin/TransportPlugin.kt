@@ -6,6 +6,7 @@ import com.android.build.api.variant.ApplicationAndroidComponentsExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.provider.Property
+import java.io.File
 
 /**
  * Host-app extension: `okhttpCronet { enabled; okhttpVersion; allowUnfingerprinted; failOnUntested }`.
@@ -93,14 +94,32 @@ class TransportPlugin : Plugin<Project> {
         val classpaths = project.provider {
             project.configurations.matching { config ->
                 config.isCanBeResolved &&
-                    (config.name == "runtimeClasspath" || config.name.endsWith("RuntimeClasspath"))
+                    (config.name == "runtimeClasspath" || config.name.endsWith("RuntimeClasspath")) &&
+                    // Test-component classpaths are not part of the shipped APK; the guard only
+                    // cares about what the application actually ships.
+                    !config.name.contains("UnitTest") && !config.name.contains("AndroidTest")
             }.toList()
+        }
+        // Publish the *result* (okhttp versions via metadata resolution), never the raw
+        // Configuration handles: serializing Configuration task properties makes the
+        // configuration-cache store resolve them as files, which is variant-ambiguous in
+        // flavor-aware apps (plain library deps lack the flavor attribute) and fails the build.
+        val versions = project.provider { collectOkHttpVersions(classpaths.get()).toList() }
+        // Pinned fingerprint artifacts, resolved at configuration time: the task must not
+        // touch Task.project (or resolve dependencies) at execution time under the
+        // configuration cache. Empty for versions without a recipe; the task's decision
+        // path handles those before it ever reads the artifacts.
+        val artifactFiles = project.provider {
+            val resolved = collectOkHttpVersions(classpaths.get())
+            if (resolved.size != 1 || resolved.first() !in RecipeRegistry.recipes) emptyList<File>()
+            else RecipeRegistry.forVersion(resolved.first()).fingerprintArtifacts.values
+                .map { coords -> resolveArtifactFile(project, coords) }
         }
         val pin = project.tasks.register("verifyOkHttpPin", VerifyOkHttpPinTask::class.java) { task ->
             task.group = "verification"
             task.description = "Accepts supported okhttp versions, warns on untested (newer) ones, " +
                 "fails on older/unsupported ones (including okhttp 4)."
-            task.runtimeClasspaths.set(classpaths)
+            task.okhttpVersions.set(versions)
             task.failOnUntested.set(extension.failOnUntested)
         }
         val fingerprint = project.tasks.register(
@@ -110,7 +129,8 @@ class TransportPlugin : Plugin<Project> {
             task.group = "verification"
             task.description = "SHA-256-checks ConnectInterceptor.class inside the recipe's okhttp " +
                 "artifacts (android AAR + jvm jar); skipped with a warning for untested versions."
-            task.runtimeClasspaths.set(classpaths)
+            task.okhttpVersions.set(versions)
+            task.fingerprintArtifacts.from(artifactFiles)
             task.allowUnfingerprinted.set(extension.allowUnfingerprinted)
             task.failOnUntested.set(extension.failOnUntested)
         }
@@ -118,6 +138,14 @@ class TransportPlugin : Plugin<Project> {
         project.tasks.matching { it.name == "preBuild" }.configureEach { preBuild ->
             preBuild.dependsOn(pin, fingerprint)
         }
+    }
+
+    private fun resolveArtifactFile(project: Project, coordinates: String): File {
+        val dependency = project.dependencies.create(coordinates)
+        return project.configurations
+            .detachedConfiguration(dependency)
+            .setTransitive(false)
+            .singleFile
     }
 
     companion object {
