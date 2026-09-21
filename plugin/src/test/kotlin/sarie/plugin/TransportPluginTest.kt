@@ -74,12 +74,13 @@ class TransportPluginTest {
     }
 }
 
-private const val ANDROID_SDK_DEFAULT = "/home/carlo/Android/Sdk"
+internal const val ANDROID_SDK_DEFAULT = "/home/carlo/Android/Sdk"
 
 // Machine default JDK is 26 and breaks AGP; TestKit forks must always use temurin-21.
-private const val TEST_JAVA_HOME = "/home/carlo/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS"
+internal const val TEST_JAVA_HOME = "/home/carlo/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS"
 
-private fun testJavaHome(): String = System.getenv("JAVA_HOME") ?: TEST_JAVA_HOME
+// Shared with ConfigurationCacheStoreTest.
+internal fun testJavaHome(): String = System.getenv("JAVA_HOME") ?: TEST_JAVA_HOME
 
 private fun fixtureArgs(): List<String> = listOf("assembleDebug", "--console=plain")
 
@@ -88,7 +89,7 @@ private fun fixtureArgs(): List<String> = listOf("assembleDebug", "--console=pla
  * Android SDK, and drops in the repo version catalog. [okhttpVersion] rewrites only the catalog
  * `okhttp =` pin (the unsupported-okhttp-4 scenario); the default is the catalog as committed.
  */
-private fun prepareFixture(okhttpVersion: String? = null, fixture: String = "sample-app"): File {
+internal fun prepareFixture(okhttpVersion: String? = null, fixture: String = "sample-app"): File {
     val source = File("src/test/fixtures/$fixture")
     check(source.isDirectory) { "fixture not found at ${source.absolutePath}" }
     val dir = Files.createTempDirectory("okhttp-cronet-fixture-").toFile()

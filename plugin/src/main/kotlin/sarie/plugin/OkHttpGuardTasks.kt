@@ -2,8 +2,10 @@ package sarie.plugin
 
 import org.gradle.api.GradleException
 import org.gradle.api.DefaultTask
+import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.TaskAction
@@ -68,9 +70,11 @@ internal fun pinDecision(versions: Set<String>): PinDecision {
  */
 abstract class VerifyOkHttpPinTask : DefaultTask() {
 
-    // Configuration handles are wiring, not input state; their contents are read lazily below.
+    // Holds the *result* of the metadata resolution (okhttp versions), not raw Configuration
+    // handles: serializing Configuration task properties makes the configuration-cache store
+    // resolve them as files, which is variant-ambiguous in flavor-aware apps.
     @get:Internal
-    abstract val runtimeClasspaths: ListProperty<Configuration>
+    abstract val okhttpVersions: ListProperty<String>
 
     @get:Input
     abstract val failOnUntested: Property<Boolean>
@@ -79,7 +83,7 @@ abstract class VerifyOkHttpPinTask : DefaultTask() {
     fun verify() {
         when (
             val decision = applyFailOnUntested(
-                pinDecision(collectOkHttpVersions(runtimeClasspaths.get())),
+                pinDecision(okhttpVersions.get().toSet()),
                 failOnUntested.get(),
             )
         ) {
@@ -107,11 +111,17 @@ abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
     abstract val failOnUntested: Property<Boolean>
 
     @get:Internal
-    abstract val runtimeClasspaths: ListProperty<Configuration>
+    abstract val okhttpVersions: ListProperty<String>
+
+    // Pinned artifacts resolved at configuration time by the plugin (one AAR for the android
+    // variant, one plain jar for jvm). Resolving them at execution time would require
+    // Task.project, which the configuration cache forbids.
+    @get:Classpath
+    abstract val fingerprintArtifacts: ConfigurableFileCollection
 
     @TaskAction
     fun verify() {
-        val versions = collectOkHttpVersions(runtimeClasspaths.get())
+        val versions = okhttpVersions.get().toSet()
         when (val decision = applyFailOnUntested(pinDecision(versions), failOnUntested.get())) {
             is PinDecision.Fail -> throw GradleException(decision.message)
             is PinDecision.Warn -> {
@@ -122,10 +132,12 @@ abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
         }
         val recipe = RecipeRegistry.forVersion(versions.first())
         val allow = allowUnfingerprinted.get()
+        val byExtension = fingerprintArtifacts.files.associateBy { it.extension }
         for (variant in Variant.entries) {
             val coordinates = recipe.fingerprintArtifacts.getValue(variant)
+            val artifact = byExtension[if (variant == Variant.ANDROID) "aar" else "jar"] ?: continue
             val expected = recipe.fingerprints.getValue(variant)
-            val actual = connectInterceptorSha256(resolveArtifact(coordinates), coordinates, variant)
+            val actual = connectInterceptorSha256(artifact, coordinates, variant)
             val failure = fingerprintFailure(coordinates, expected, actual, allow) ?: continue
             if (allow) {
                 logger.warn("[okhttp-cronet] $failure")
@@ -133,14 +145,6 @@ abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
                 throw GradleException(failure)
             }
         }
-    }
-
-    private fun resolveArtifact(coordinates: String): File {
-        val dependency = project.dependencies.create(coordinates)
-        return project.configurations
-            .detachedConfiguration(dependency)
-            .setTransitive(false)
-            .singleFile
     }
 }
 
