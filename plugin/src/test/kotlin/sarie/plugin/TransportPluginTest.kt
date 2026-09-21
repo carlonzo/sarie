@@ -74,13 +74,33 @@ class TransportPluginTest {
     }
 }
 
-internal const val ANDROID_SDK_DEFAULT = "/home/carlo/Android/Sdk"
-
-// Machine default JDK is 26 and breaks AGP; TestKit forks must always use temurin-21.
-internal const val TEST_JAVA_HOME = "/home/carlo/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS"
-
 // Shared with ConfigurationCacheStoreTest.
-internal fun testJavaHome(): String = System.getenv("JAVA_HOME") ?: TEST_JAVA_HOME
+internal fun testJavaHome(): String =
+    System.getenv("JAVA_HOME")
+        ?: System.getProperty("java.home")
+
+internal fun resolveAndroidSdk(): String {
+    System.getenv("ANDROID_HOME")?.takeIf { it.isNotBlank() }?.let { return it }
+    System.getenv("ANDROID_SDK_ROOT")?.takeIf { it.isNotBlank() }?.let { return it }
+    System.getProperty("android.home")?.takeIf { it.isNotBlank() }?.let { return it }
+    val localProperties = runCatching { repoFile("local.properties") }.getOrNull()
+    if (localProperties?.isFile == true) {
+        val props = java.util.Properties().apply {
+            localProperties.inputStream().use { load(it) }
+        }
+        props.getProperty("sdk.dir")?.takeIf { it.isNotBlank() }?.let { return it }
+    }
+    val userHome = System.getProperty("user.home")
+    val defaultLocations = listOf(
+        File(userHome, "Android/Sdk"),
+        File(userHome, "Library/Android/sdk"),
+        File(userHome, "AppData/Local/Android/Sdk"),
+    )
+    for (candidate in defaultLocations) {
+        if (candidate.isDirectory) return candidate.absolutePath
+    }
+    error("Android SDK not found. Set ANDROID_HOME or configure sdk.dir in local.properties")
+}
 
 private fun fixtureArgs(): List<String> = listOf("assembleDebug", "--console=plain")
 
@@ -105,7 +125,7 @@ internal fun prepareFixture(okhttpVersion: String? = null, fixture: String = "sa
             ),
         )
     }
-    val sdk = System.getenv("ANDROID_HOME") ?: ANDROID_SDK_DEFAULT
+    val sdk = resolveAndroidSdk()
     File(dir, "local.properties").writeText("sdk.dir=${sdk.replace("\\", "\\\\")}\n")
     return dir
 }
