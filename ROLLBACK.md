@@ -15,20 +15,26 @@ Evidence: `BaselineSuite.killSwitchRestoresStock`, `CronetSuite.killSwitchRoutes
 `PolicyEngineTest.kill switch off yields disabled`,
 `PolicyEngineTest.policy disabled yields disabled`.
 
-The switch flips routing only: the bridge stays installed and the engine keeps running.
-Nothing is torn down.
+The switch also governs `CacheHooks`. `SarieBridge.isEnabled()` false makes
+`expectTlsBlock` and `requireHandshake` the stock checks, so a Sarie cache entry (no TLS
+block) reads as a miss and stock refetches with a handshake. The bridge stays installed
+and the engine keeps running. Nothing is torn down.
+
+Evidence: `CronetSuite.killSwitchMissesSarieEntryAndStockRefetchHasHandshake`,
+`CacheHooksTest.enabled hooks skip an exhausted tls block and do not require a handshake`.
 
 ## 2. Uninstalling the plugin (build-time revert to stock)
 
 Remove `id("com.carlonzo.sarie")` from the application module's `plugins` block
 (and the `:bridge` dependency, if you want the classes gone too), then rebuild.
 
-The rewrite is **build-time only**: the plugin transforms exactly
-`okhttp3.internal.connection.ConnectInterceptor.intercept` into a static call to
-`CronetBridge.intercept` inside the produced artifact. Without the plugin, the shipped
-OkHttp bytecode is untouched — no bridge reference remains in `ConnectInterceptor` because
-nothing was ever injected into the published library. Removing the `:bridge` dependency as
-well leaves no `sarie` classes in the APK at all.
+The rewrite is **build-time only**: the plugin transforms exactly the registered targets
+(`ConnectInterceptor.intercept` full replace, `CallServerInterceptor.intercept` prefix,
+and the two cache `isHttps` sites). Without the plugin, the shipped OkHttp bytecode is
+untouched — nothing was ever injected into the published library. Sarie cache entries
+already on disk are left behind; stock OkHttp treats them as misses (the stock TLS-block
+read fails) and refetches. Removing the `:bridge` dependency as well leaves no `sarie`
+classes in the APK at all.
 
 Evidence of the injected shape (and that the fallback inside it is byte-shape identical to
 stock OkHttp): `CronetBridgeTest.fallback bytecode shape - initExchange and copy referenced and ConnectInterceptor absent`.
@@ -40,10 +46,11 @@ applied to:
 
 - `verifyOkHttpPin` — accepts the supported versions (currently 5.4.0 and 5.5.0), warns
   if a newer untested okhttp is resolved, and fails on anything older (including OkHttp 4).
-- `verifyOkHttpFingerprint` — fails if the `ConnectInterceptor.class` inside the
-  `okhttp-android` AAR does not match the recorded SHA-256 fingerprint of that supported
-  version. Skipped (with the same untested warning) when the resolved version is newer
-  than the supported set.
+- `verifyOkHttpFingerprint` — fails if a registered target class (`ConnectInterceptor`,
+  `CallServerInterceptor`, `Cache$Entry`, `CacheStrategy$Factory`) inside the
+  `okhttp-android` AAR or `okhttp-jvm` jar does not match the recorded SHA-256 fingerprint
+  of that supported version. Skipped (with the same untested warning) when the resolved
+  version is newer than the supported set.
 
 Recovery when OkHttp changes:
 
@@ -66,14 +73,19 @@ the structural guard (which hard-fails on shape drift). Older okhttp, including 
 
 ## 4. Engine ownership
 
-The engine is **borrowed, never owned**: `SarieBridge.install` stores a reference to the
-host's ready engine, `uninstall()` drops only that reference, and the bridge never calls
-`engine.shutdown()` or `stopNetLog()` — stopping (or not stopping) the engine is entirely
-the host's decision. Replacing an engine is a plain `install(...)` overwrite of the
-snapshot reference.
+`SarieBridge.install(context, client)` builds an engine and keeps it for the process
+lifetime. `SarieBridge.install(engine)` borrows a host-built engine. Either way
+`uninstall()` drops only the snapshot reference and does **not** call `shutdown()` or
+`stopNetLog()`. Replacing an engine is another `install(...)`. `SarieBridge.uninstall()`
+also makes the cache hooks the stock checks, so later reads of Sarie entries miss
+(section 1).
+
+The directory `<noBackupFilesDir>/sarie-cronet` holds QUIC / alt-svc state for a
+Sarie-built engine. It can be deleted safely: the next `install(context, client)` creates
+it again, and losing it only drops remembered HTTP/3 state.
 
 Evidence: `SarieBridgeTest` (borrowed-engine semantics: shutdown counter stays zero
-across install/uninstall/replace).
+across install/uninstall/replace), `CacheHooksTest.uninstall restores the stock checks`.
 
 ## 5. Per-request opt-out
 

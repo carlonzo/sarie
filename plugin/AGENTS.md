@@ -1,9 +1,10 @@
 # plugin/AGENTS.md
 
 Read this first: this included build (own `settings.gradle.kts` and `gradlew`) contains the
-Gradle plugin that rewrites exactly one OkHttp method at build time and fails closed on
-anything unexpected. Product code lives in `src/main/kotlin/sarie/plugin/`.
-Published as `com.carlonzo.sarie:plugin` (plugin id `com.carlonzo.sarie`).
+Gradle plugin that rewrites exactly the registered OkHttp targets at build time and fails
+closed on anything unexpected. Product code lives in `src/main/kotlin/sarie/plugin/`.
+Published as `com.carlonzo.sarie:plugin` (plugin id `com.carlonzo.sarie`). What those
+rewrites do at runtime is `../COMPATIBILITY.md`; do not duplicate it here.
 
 ## Registration
 
@@ -27,18 +28,27 @@ development).
 
 ## Rewrite pipeline
 
-1. `RecordingMethodVisitor` captures the stock `intercept` instruction stream as javap-style
-   strings (labels, frames, line numbers are dropped).
-2. `GuardSpec.verify` (from `RecipeRegistry.forVersion` / `familyGuard`) checks the pinned
-   stock shape: Kotlin null-check preamble, one `CHECKCAST` to `RealInterceptorChain` in the
-   first 5 instructions, `initExchange$okhttp` / `copy$okhttp$default` / `proceed` each exactly
-   once, ending in `ARETURN`.
-3. Pass: `ConnectInterceptorRewriter.emitTrampoline` emits `ALOAD 1` / `INVOKESTATIC
-   sarie/bridge/CronetBridge.intercept` / `ARETURN` with `COMPUTE_FRAMES`.
-4. Fail: `IllegalStateException` with the problem list and a javap-style dump of the captured
-   instructions. `visitEnd` also fails if `intercept` was never seen.
-5. `isInstrumentable` is EXCLUSIVE to `okhttp3.internal.connection.ConnectInterceptor`.
-   `<clinit>`, `INSTANCE` and the constructor pass through untouched.
+`isInstrumentable` accepts exactly the registered targets (`InstrumentationTargets` /
+`InstrumentTarget`). Every other class passes through. On a target, only the method below is
+rewritten; `<clinit>` and every other method pass through untouched, including
+`Cache.Entry.writeTo` (its own `HttpUrl.isHttps`).
+
+1. `ConnectInterceptor.intercept` — full replace. The stock instruction stream is checked
+   (Kotlin null-check preamble, one `CHECKCAST` to `RealInterceptorChain` in the first 5
+   instructions, `initExchange$okhttp` / `copy$okhttp$default` / `proceed` each exactly once,
+   ending in `ARETURN`), then `ConnectInterceptorRewriter.emitTrampoline` emits `ALOAD 1` /
+   `INVOKESTATIC sarie/bridge/CronetBridge.intercept (Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`
+   / `ARETURN`.
+2. `CallServerInterceptor.intercept` — prefix after the Kotlin `checkNotNullParameter`
+   preamble: `INVOKESTATIC sarie/bridge/CronetBridge.callServer` with that same descriptor,
+   then `DUP` / `IFNULL` into the unchanged stock body.
+3. `Cache$Entry.<init>(Lokio/Source;)V` — the one `HttpUrl.isHttps` becomes `aload 6` /
+   `INVOKESTATIC sarie/bridge/CacheHooks.expectTlsBlock (Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`.
+4. `CacheStrategy$Factory.computeCandidate` — the one `Request.isHttps` becomes
+   `INVOKESTATIC sarie/bridge/CacheHooks.requireHandshake (Lokhttp3/Request;)Z`.
+
+Fail: `IllegalStateException` with the problem list. `visitEnd` also fails if the target
+method was never seen. Each target has its own structural guard.
 
 ## Guards
 
@@ -47,8 +57,9 @@ development).
   `RecipeRegistry.recipes` (today 5.4.0 and 5.5.0) pass; versions newer than the oldest
   supported one are UNTESTED and only warn (structural guard still applies, fingerprint check
   skipped); anything older, including okhttp 4, plus missing or mixed versions fail the build.
-- `VerifyOkHttpFingerprintTask` (`verifyOkHttpFingerprint`): SHA-256-checks
-  `ConnectInterceptor.class` inside the recipe's `okhttp-android` AAR and `okhttp-jvm` jar
+- `VerifyOkHttpFingerprintTask` (`verifyOkHttpFingerprint`): SHA-256-checks each registered
+  target class (`ConnectInterceptor`, `CallServerInterceptor`, `Cache$Entry`,
+  `CacheStrategy$Factory`) inside the recipe's `okhttp-android` AAR and `okhttp-jvm` jar
   against `GoldenFingerprints` (script-generated). Mismatch fails unless the host sets
   `allowUnfingerprinted = true`, which downgrades it to a warning; the structural guard stays
   hard either way.
@@ -77,6 +88,12 @@ TestKit forks must use temurin-21 (see the JDK note in that file).
 
 ## Invariants
 
-- Never instrument any class other than `ConnectInterceptor`.
-- Never touch `<clinit>`, `INSTANCE`, or the constructor.
+- Instrument exactly the registered targets, and only the four methods in the rewrite pipeline.
+- Descriptors stay `CronetBridge.intercept` and `CronetBridge.callServer`
+  `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`, `CacheHooks.expectTlsBlock`
+  `(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`, and `CacheHooks.requireHandshake`
+  `(Lokhttp3/Request;)Z`. `ConnectInterceptor` stays a full replace. `CallServerInterceptor`
+  stays a prefix. The two cache sites each replace one `isHttps`.
+- Never touch `<clinit>`, `INSTANCE`, or a constructor other than the one
+  `Cache$Entry.<init>(Source)` site.
 - Goldens under `plugin/src/test/resources/stock/` are script-generated; never hand-edit them.
