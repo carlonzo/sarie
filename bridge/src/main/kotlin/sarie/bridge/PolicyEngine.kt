@@ -49,7 +49,7 @@ internal fun parseAllowedOrigins(allowed: Set<String>): List<ParsedOrigin>? {
  * 9. explicit proxy or non-baseline proxySelector -> proxy
  * 10. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
  * 11. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
- * 12. dns !== Dns.SYSTEM -> dns
+ * 12. dns !== Dns.SYSTEM and not in bypassableDns -> dns
  * 13. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
  * 14. TLS/trust fingerprint mismatch -> trust (Metis B1)
  * 15. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
@@ -97,7 +97,9 @@ internal object PolicyEngine {
         if (input.hostnameVerifier !== OkHostnameVerifier) {
             return FallbackReason.hostname_verifier
         }
-        if (input.dns !== Dns.SYSTEM) return FallbackReason.dns
+        if (input.dns !== Dns.SYSTEM && input.dns !in snapshot.bypassableDns) {
+            return FallbackReason.dns
+        }
         if (!pinsSatisfied(
                 input.certificatePinner,
                 input.request.url.host,

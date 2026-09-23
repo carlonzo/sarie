@@ -1,6 +1,9 @@
 package sarie.bridge
 
+import java.util.Collections
+import java.util.IdentityHashMap
 import okhttp3.CertificatePinner
+import okhttp3.Dns
 import org.chromium.net.CronetEngine
 
 public class SarieConfig private constructor(builder: Builder) {
@@ -10,6 +13,7 @@ public class SarieConfig private constructor(builder: Builder) {
     public val listener: SarieListener? = builder.listener
     public val logger: SarieLogger? = builder.logger
     public val configure: (CronetEngine.Builder) -> Unit = builder.configure
+    public val bypassableDns: Set<Dns> = builder.bypassableDns.toIdentitySet()
 
     internal val isConfigureSet: Boolean get() = configure !== NOOP_CONFIGURE
 
@@ -22,6 +26,7 @@ public class SarieConfig private constructor(builder: Builder) {
         internal var listener: SarieListener? = null
         internal var logger: SarieLogger? = null
         internal var configure: (CronetEngine.Builder) -> Unit = NOOP_CONFIGURE
+        internal val bypassableDns: MutableList<Dns> = ArrayList()
 
         public constructor()
 
@@ -32,6 +37,7 @@ public class SarieConfig private constructor(builder: Builder) {
             this.listener = config.listener
             this.logger = config.logger
             this.configure = config.configure
+            this.bypassableDns.addAll(config.bypassableDns)
         }
 
         public fun certificatePinner(certificatePinner: CertificatePinner?): Builder = apply {
@@ -58,6 +64,10 @@ public class SarieConfig private constructor(builder: Builder) {
             this.configure = configure
         }
 
+        public fun bypassableDns(dns: Dns): Builder = apply {
+            this.bypassableDns.add(dns)
+        }
+
         public fun build(): SarieConfig = SarieConfig(this)
     }
 
@@ -66,6 +76,13 @@ public class SarieConfig private constructor(builder: Builder) {
 
         @JvmField
         public val DEFAULT: SarieConfig = Builder().build()
+
+        private fun <T : Any> Collection<T>.toIdentitySet(): Set<T> {
+            if (isEmpty()) return emptySet()
+            val set = Collections.newSetFromMap(IdentityHashMap<T, Boolean>(size))
+            set.addAll(this)
+            return Collections.unmodifiableSet(set)
+        }
     }
 }
 

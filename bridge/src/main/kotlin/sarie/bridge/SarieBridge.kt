@@ -225,6 +225,7 @@ public object SarieBridge {
                 installedPins = previous.installedPins,
                 providerName = previous.providerName,
                 providerVersion = previous.providerVersion,
+                bypassableDns = config.bypassableDns,
             )
             publishIfCurrentGeneration(generation, reused)
             return
@@ -238,6 +239,7 @@ public object SarieBridge {
             installedPins = translation.installedPins,
             providerName = chosen.name,
             providerVersion = chosen.version,
+            bypassableDns = config.bypassableDns,
         )
         lastBuilt = snapshot
         publishIfCurrentGeneration(generation, snapshot)
@@ -277,10 +279,11 @@ public object SarieBridge {
         publishIfCurrentGeneration(
             generation,
             RuntimeSnapshot(
-                engine,
-                config.policy,
-                config.mapper,
-                System.currentTimeMillis(),
+                engine = engine,
+                policy = config.policy,
+                mapper = config.mapper,
+                installedAtMillis = System.currentTimeMillis(),
+                bypassableDns = config.bypassableDns,
             ),
         )
     }

@@ -8,6 +8,7 @@ import org.chromium.net.CronetEngine
 import org.chromium.net.UrlRequest
 import android.util.Log
 import okhttp3.CertificatePinner
+import okhttp3.Dns
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -231,5 +232,15 @@ class SarieBridgeTest {
             SarieBridge.install(FakeCronetEngine(), SarieConfig { configure { } })
         }
         assertSame(engine, SarieBridge.snapshot()?.engine)
+    }
+
+    @Test
+    fun `install records bypassable dns on snapshot`() {
+        val dns = Dns { emptyList() }
+        val cfg = SarieConfig { bypassableDns(dns) }
+        SarieBridge.install(FakeCronetEngine(), cfg)
+        val snap = SarieBridge.snapshot()
+        assertNotNull(snap)
+        assertTrue(dns in snap!!.bypassableDns)
     }
 }
