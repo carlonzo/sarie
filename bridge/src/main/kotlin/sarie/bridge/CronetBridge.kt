@@ -78,7 +78,8 @@ import org.chromium.net.UrlRequest
  * EventListener (public Call.addEventListener) that delivers exactly one engine cancel;
  * post-terminal the listener is a no-op and drops its references.
  */
-object CronetBridge {
+@SarieInternalApi
+public object CronetBridge {
 
     private val loggedOnce = AtomicBoolean(false)
     private val listenerLoggedOnce = AtomicBoolean(false)
@@ -95,7 +96,7 @@ object CronetBridge {
 
     @JvmStatic
     @Throws(IOException::class)
-    fun intercept(chain: Interceptor.Chain): Response {
+    public fun intercept(chain: Interceptor.Chain): Response {
         val realChain = chain as RealInterceptorChain
         val snapshot = SarieBridge.snapshot()
         val reason = try {
@@ -137,7 +138,7 @@ object CronetBridge {
      */
     @JvmStatic
     @Throws(IOException::class)
-    fun callServer(chain: Interceptor.Chain): Response? {
+    public fun callServer(chain: Interceptor.Chain): Response? {
         val realChain = chain as RealInterceptorChain
         if (realChain.exchange != null) return null
         val call = realChain.call

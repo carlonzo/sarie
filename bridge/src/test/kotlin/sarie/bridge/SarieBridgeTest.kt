@@ -187,18 +187,6 @@ class SarieBridgeTest {
     }
 
     @Test
-    @Suppress("DEPRECATION")
-    fun `CronetRuntime alias points to SarieBridge`() {
-        val engine = FakeCronetEngine()
-        CronetRuntime.install(engine)
-        assertSame(engine, SarieBridge.snapshot()?.engine)
-        assertSame(engine, CronetRuntime.snapshot()?.engine)
-        assertTrue(CronetRuntime.isEnabled())
-        CronetRuntime.uninstall()
-        assertNull(SarieBridge.snapshot())
-    }
-
-    @Test
     fun `reason enum lists the pre-send denies`() {
         assertEquals(
             listOf(

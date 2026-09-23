@@ -43,7 +43,7 @@ import org.chromium.net.UrlResponseInfo
  * [UrlRequest.followRedirect]); a redirect response surfaces to OkHttp's follow-up logic with an
  * empty body, mirroring [RedirectStrategy.withoutRedirects] upstream.
  */
-class OkHttpBridgeCallback(
+internal class OkHttpBridgeCallback(
     readTimeoutMillis: Long,
     private val onResponseHeadersStart: (() -> Unit)? = null,
 ) : UrlRequest.Callback() {

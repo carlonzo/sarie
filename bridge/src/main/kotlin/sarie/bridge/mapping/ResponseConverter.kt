@@ -38,7 +38,7 @@ import org.chromium.net.UrlResponseInfo
  * sentRequestAtMillis/receivedResponseAtMillis from bridge-owned clocks (upstream leaves both
  * unset); handshake/networkResponse are never fabricated.
  */
-class ResponseConverter {
+internal class ResponseConverter {
 
     /**
      * Creates an OkHttp Response from the bridging callback. Non-blocking once the callback's

@@ -10,25 +10,25 @@ package sarie.bridge
  * allowlist is how you limit it to hosts you have tested. `"*"` is an explicit
  * allow-all token.
  */
-class DefaultPolicy private constructor(builder: Builder) : CronetPolicy {
-    constructor() : this(Builder())
+public class DefaultPolicy private constructor(builder: Builder) : CronetPolicy {
+    public constructor() : this(Builder())
 
-    override val allowedOrigins: Set<String> = builder.allowedOrigins
-    override val allowLoopbackHttps: Boolean = builder.allowLoopbackHttps
-    override val sdkPins: Set<String> = builder.sdkPins
+    public override val allowedOrigins: Set<String> = builder.allowedOrigins
+    public override val allowLoopbackHttps: Boolean = builder.allowLoopbackHttps
+    public override val sdkPins: Set<String> = builder.sdkPins
     private val gate: () -> Boolean = builder.enabled
 
-    override fun enabled(): Boolean = gate()
+    public override fun enabled(): Boolean = gate()
 
-    fun newBuilder(): Builder = Builder(this)
+    public fun newBuilder(): Builder = Builder(this)
 
-    class Builder {
+    public class Builder {
         internal var allowedOrigins: Set<String> = emptySet()
         internal var allowLoopbackHttps: Boolean = false
         internal var sdkPins: Set<String> = emptySet()
         internal var enabled: () -> Boolean = { true }
 
-        constructor()
+        public constructor()
 
         internal constructor(policy: DefaultPolicy) {
             this.allowedOrigins = policy.allowedOrigins
@@ -37,22 +37,22 @@ class DefaultPolicy private constructor(builder: Builder) : CronetPolicy {
             this.enabled = policy.gate
         }
 
-        fun allowedOrigins(allowedOrigins: Set<String>): Builder = apply {
+        public fun allowedOrigins(allowedOrigins: Set<String>): Builder = apply {
             this.allowedOrigins = allowedOrigins.toSet()
         }
 
-        fun allowLoopbackHttps(allowLoopbackHttps: Boolean): Builder = apply {
+        public fun allowLoopbackHttps(allowLoopbackHttps: Boolean): Builder = apply {
             this.allowLoopbackHttps = allowLoopbackHttps
         }
 
-        fun sdkPins(sdkPins: Set<String>): Builder = apply {
+        public fun sdkPins(sdkPins: Set<String>): Builder = apply {
             this.sdkPins = sdkPins.toSet()
         }
 
-        fun enabled(enabled: () -> Boolean): Builder = apply {
+        public fun enabled(enabled: () -> Boolean): Builder = apply {
             this.enabled = enabled
         }
 
-        fun build(): DefaultPolicy = DefaultPolicy(this)
+        public fun build(): DefaultPolicy = DefaultPolicy(this)
     }
 }

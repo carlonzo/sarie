@@ -41,7 +41,7 @@ import org.chromium.net.UploadDataSink
  * Header-phase request-body events. Fired from the upload pump (Cronet's upload thread or
  * the body reader), once each. The callbacks must not block or do I/O.
  */
-class RequestBodyEvents(
+internal class RequestBodyEvents(
     private val onStart: () -> Unit,
     private val onEnd: (Long) -> Unit,
 ) {
@@ -67,7 +67,7 @@ class RequestBodyEvents(
  * Deviation from upstream: no 1 MiB in-memory threshold - the task simplifies to one-shot or
  * unknown length => streaming, otherwise buffered.
  */
-object UploadDataProviders {
+internal object UploadDataProviders {
 
     fun create(
         body: RequestBody,

@@ -22,7 +22,7 @@ import org.chromium.net.CronetProvider
  * Without an install, every request falls back to stock OkHttp (`reason=engine_missing`).
  * The runtime kill switch `okhttp.cronet.enabled=false` does the same without uninstalling.
  */
-object SarieBridge {
+public object SarieBridge {
     private const val KILL_SWITCH_PROPERTY = "okhttp.cronet.enabled"
 
     private val missingProviderLogged = AtomicBoolean(false)
@@ -47,7 +47,7 @@ object SarieBridge {
     /**
      * Builds a Cronet engine with the default configuration and publishes it.
      */
-    fun install(context: Context) {
+    public fun install(context: Context) {
         install(context, SarieConfig.DEFAULT)
     }
 
@@ -65,7 +65,7 @@ object SarieBridge {
      * stays locked while it runs) and only swaps policy and mapper; its pins and configure
      * are ignored, with a warning.
      */
-    fun install(
+    public fun install(
         context: Context,
         config: SarieConfig,
     ) {
@@ -225,7 +225,7 @@ object SarieBridge {
     /**
      * Publishes a borrowed [engine] with the default configuration.
      */
-    fun install(engine: CronetEngine) {
+    public fun install(engine: CronetEngine) {
         install(engine, SarieConfig.DEFAULT)
     }
 
@@ -238,7 +238,7 @@ object SarieBridge {
      * @param config Configuration for routing policy, mapper, and listener. Setting
      *   `certificatePinner` or `configure` throws [IllegalArgumentException].
      */
-    fun install(
+    public fun install(
         engine: CronetEngine,
         config: SarieConfig,
     ) {
@@ -280,7 +280,7 @@ object SarieBridge {
      * Drops the snapshot reference. The engine keeps running; this does not call shutdown.
      * The listener stays, so the fallbacks that follow are still reported.
      */
-    fun uninstall() {
+    public fun uninstall() {
         installGeneration.incrementAndGet()
         current = null
     }
@@ -296,10 +296,10 @@ object SarieBridge {
     internal fun snapshot(): RuntimeSnapshot? = current
 
     /** The engine requests are routed to, or null when nothing is installed. Never shut it down. */
-    val engine: CronetEngine? get() = current?.engine
+    public val engine: CronetEngine? get() = current?.engine
 
     /** Kill switch via system property (default true) plus snapshot presence. */
-    fun isEnabled(): Boolean =
+    public fun isEnabled(): Boolean =
         System.getProperty(KILL_SWITCH_PROPERTY, "true").toBoolean() && current != null
 }
 
@@ -310,15 +310,6 @@ object SarieBridge {
 private fun warmTrustBaseline() {
     runCatching { TrustBaseline.baseline }
 }
-
-/**
- * Backward-compatibility alias for [SarieBridge].
- */
-@Deprecated(
-    message = "Renamed to SarieBridge to match the library name.",
-    replaceWith = ReplaceWith("SarieBridge", "sarie.bridge.SarieBridge"),
-)
-typealias CronetRuntime = SarieBridge
 
 /**
  * Runtime compatibility tripwire: the build-time registry pins verified okhttp versions, but a

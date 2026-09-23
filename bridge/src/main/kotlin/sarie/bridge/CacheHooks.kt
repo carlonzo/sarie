@@ -18,7 +18,8 @@ import okio.BufferedSource
  * Not Cronet callbacks. [expectTlsBlock] may read the cache source; that happens on the
  * call thread inside OkHttp's cache lookup, which is allowed to block.
  */
-object CacheHooks {
+@SarieInternalApi
+public object CacheHooks {
     /**
      * Stock reads a TLS block iff the URL is https. When Sarie is on and the metadata
      * source is already exhausted, the entry has no TLS block and the read must be skipped.
@@ -26,11 +27,11 @@ object CacheHooks {
      */
     @JvmStatic
     @Throws(IOException::class)
-    fun expectTlsBlock(url: HttpUrl, source: BufferedSource): Boolean =
+    public fun expectTlsBlock(url: HttpUrl, source: BufferedSource): Boolean =
         url.isHttps && !(SarieBridge.isEnabled() && source.exhausted())
 
     /** Stock rejects an https cache hit whose handshake is null. Sarie hits are exactly that. */
     @JvmStatic
-    fun requireHandshake(request: Request): Boolean =
+    public fun requireHandshake(request: Request): Boolean =
         request.isHttps && !SarieBridge.isEnabled()
 }

@@ -16,6 +16,7 @@ androidxTestCore = "1.7.0"
 compileSdk = "37"
 minSdk = "24"
 playServicesCronet = "18.1.1"
+bcv = "0.18.2"
 
 [libraries]
 okhttp-min = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttpMin" }
@@ -38,3 +39,4 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 maven-publish = { id = "com.vanniktech.maven.publish", version = "0.37.0" }
+bcv = { id = "org.jetbrains.kotlinx.binary-compatibility-validator", version.ref = "bcv" }

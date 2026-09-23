@@ -33,7 +33,7 @@ import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UrlRequest
 
 /** Converts OkHttp requests to Cronet requests. */
-class RequestConverter(
+internal class RequestConverter(
     private val cronetEngine: CronetEngine,
     private val uploadDataProviderExecutor: Executor,
     private val bodyReaderExecutor: ExecutorService,
@@ -198,7 +198,7 @@ class RequestConverter(
     }
 
     /** Bundles the Cronet request with its in-progress OkHttp response. */
-    class ConvertedRequest internal constructor(
+    internal class ConvertedRequest internal constructor(
         val urlRequest: UrlRequest,
         val callback: OkHttpBridgeCallback,
         private val request: Request,

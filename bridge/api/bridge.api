@@ -1,0 +1,125 @@
+public final class sarie/bridge/CronetOptOut {
+	public static final field INSTANCE Lsarie/bridge/CronetOptOut;
+}
+
+public abstract interface class sarie/bridge/CronetPolicy {
+	public fun enabled ()Z
+	public fun getAllowLoopbackHttps ()Z
+	public abstract fun getAllowedOrigins ()Ljava/util/Set;
+	public fun getSdkPins ()Ljava/util/Set;
+}
+
+public final class sarie/bridge/CronetPolicy$DefaultImpls {
+	public static fun enabled (Lsarie/bridge/CronetPolicy;)Z
+	public static fun getAllowLoopbackHttps (Lsarie/bridge/CronetPolicy;)Z
+	public static fun getSdkPins (Lsarie/bridge/CronetPolicy;)Ljava/util/Set;
+}
+
+public final class sarie/bridge/DefaultPolicy : sarie/bridge/CronetPolicy {
+	public fun <init> ()V
+	public synthetic fun <init> (Lsarie/bridge/DefaultPolicy$Builder;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public fun enabled ()Z
+	public fun getAllowLoopbackHttps ()Z
+	public fun getAllowedOrigins ()Ljava/util/Set;
+	public fun getSdkPins ()Ljava/util/Set;
+	public final fun newBuilder ()Lsarie/bridge/DefaultPolicy$Builder;
+}
+
+public final class sarie/bridge/DefaultPolicy$Builder {
+	public fun <init> ()V
+	public final fun allowLoopbackHttps (Z)Lsarie/bridge/DefaultPolicy$Builder;
+	public final fun allowedOrigins (Ljava/util/Set;)Lsarie/bridge/DefaultPolicy$Builder;
+	public final fun build ()Lsarie/bridge/DefaultPolicy;
+	public final fun enabled (Lkotlin/jvm/functions/Function0;)Lsarie/bridge/DefaultPolicy$Builder;
+	public final fun sdkPins (Ljava/util/Set;)Lsarie/bridge/DefaultPolicy$Builder;
+}
+
+public final class sarie/bridge/FallbackReason : java/lang/Enum {
+	public static final field allowlist Lsarie/bridge/FallbackReason;
+	public static final field cleartext Lsarie/bridge/FallbackReason;
+	public static final field content_encoding Lsarie/bridge/FallbackReason;
+	public static final field disabled Lsarie/bridge/FallbackReason;
+	public static final field dns Lsarie/bridge/FallbackReason;
+	public static final field engine_missing Lsarie/bridge/FallbackReason;
+	public static final field h2_prior_knowledge Lsarie/bridge/FallbackReason;
+	public static final field hostname_verifier Lsarie/bridge/FallbackReason;
+	public static final field pins Lsarie/bridge/FallbackReason;
+	public static final field policy_error Lsarie/bridge/FallbackReason;
+	public static final field proxy Lsarie/bridge/FallbackReason;
+	public static final field socket_factory Lsarie/bridge/FallbackReason;
+	public static final field tag_opt_out Lsarie/bridge/FallbackReason;
+	public static final field trust Lsarie/bridge/FallbackReason;
+	public static final field websocket Lsarie/bridge/FallbackReason;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lsarie/bridge/FallbackReason;
+	public static fun values ()[Lsarie/bridge/FallbackReason;
+}
+
+public abstract interface class sarie/bridge/RequestToUrlRequestMapper {
+	public static final field Companion Lsarie/bridge/RequestToUrlRequestMapper$Companion;
+	public static final field NOOP Lsarie/bridge/RequestToUrlRequestMapper;
+	public abstract fun map (Lokhttp3/Request;Lorg/chromium/net/UrlRequest$Builder;)V
+}
+
+public final class sarie/bridge/RequestToUrlRequestMapper$Companion {
+}
+
+public final class sarie/bridge/SarieBridge {
+	public static final field INSTANCE Lsarie/bridge/SarieBridge;
+	public final fun getEngine ()Lorg/chromium/net/CronetEngine;
+	public final fun install (Landroid/content/Context;)V
+	public final fun install (Landroid/content/Context;Lsarie/bridge/SarieConfig;)V
+	public final fun install (Lorg/chromium/net/CronetEngine;)V
+	public final fun install (Lorg/chromium/net/CronetEngine;Lsarie/bridge/SarieConfig;)V
+	public final fun isEnabled ()Z
+	public final fun uninstall ()V
+}
+
+public final class sarie/bridge/SarieConfig {
+	public static final field Companion Lsarie/bridge/SarieConfig$Companion;
+	public static final field DEFAULT Lsarie/bridge/SarieConfig;
+	public synthetic fun <init> (Lsarie/bridge/SarieConfig$Builder;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getCertificatePinner ()Lokhttp3/CertificatePinner;
+	public final fun getConfigure ()Lkotlin/jvm/functions/Function1;
+	public final fun getListener ()Lsarie/bridge/SarieListener;
+	public final fun getLogger ()Lsarie/bridge/SarieLogger;
+	public final fun getMapper ()Lsarie/bridge/RequestToUrlRequestMapper;
+	public final fun getPolicy ()Lsarie/bridge/CronetPolicy;
+	public final fun newBuilder ()Lsarie/bridge/SarieConfig$Builder;
+}
+
+public final class sarie/bridge/SarieConfig$Builder {
+	public fun <init> ()V
+	public final fun build ()Lsarie/bridge/SarieConfig;
+	public final fun certificatePinner (Lokhttp3/CertificatePinner;)Lsarie/bridge/SarieConfig$Builder;
+	public final fun configure (Lkotlin/jvm/functions/Function1;)Lsarie/bridge/SarieConfig$Builder;
+	public final fun listener (Lsarie/bridge/SarieListener;)Lsarie/bridge/SarieConfig$Builder;
+	public final fun logger (Lsarie/bridge/SarieLogger;)Lsarie/bridge/SarieConfig$Builder;
+	public final fun mapper (Lsarie/bridge/RequestToUrlRequestMapper;)Lsarie/bridge/SarieConfig$Builder;
+	public final fun policy (Lsarie/bridge/CronetPolicy;)Lsarie/bridge/SarieConfig$Builder;
+}
+
+public final class sarie/bridge/SarieConfig$Companion {
+}
+
+public final class sarie/bridge/SarieConfigKt {
+	public static final fun SarieConfig (Lkotlin/jvm/functions/Function1;)Lsarie/bridge/SarieConfig;
+}
+
+public abstract interface annotation class sarie/bridge/SarieInternalApi : java/lang/annotation/Annotation {
+}
+
+public abstract interface class sarie/bridge/SarieListener {
+	public fun onFinished (Lokhttp3/Call;Lorg/chromium/net/RequestFinishedInfo;)V
+	public fun onRouted (Lokhttp3/Call;Lsarie/bridge/FallbackReason;)V
+}
+
+public final class sarie/bridge/SarieListener$DefaultImpls {
+	public static fun onFinished (Lsarie/bridge/SarieListener;Lokhttp3/Call;Lorg/chromium/net/RequestFinishedInfo;)V
+	public static fun onRouted (Lsarie/bridge/SarieListener;Lokhttp3/Call;Lsarie/bridge/FallbackReason;)V
+}
+
+public abstract interface class sarie/bridge/SarieLogger {
+	public abstract fun log (ILjava/lang/String;Ljava/lang/Throwable;)V
+}
+
