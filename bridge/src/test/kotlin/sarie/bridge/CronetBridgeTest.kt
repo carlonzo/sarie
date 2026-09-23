@@ -190,14 +190,14 @@ class CronetBridgeTest {
     private val mapper = RequestToUrlRequestMapper { _, _ -> }
 
     private val routes = object : SarieListener {
-        val reasons = mutableListOf<Metrics.Reason?>()
-        override fun onRouted(call: Call, reason: Metrics.Reason?) {
+        val reasons = mutableListOf<FallbackReason?>()
+        override fun onRouted(call: Call, reason: FallbackReason?) {
             reasons += reason
         }
         fun clear() = reasons.clear()
         fun cronetCount() = reasons.count { it == null }
         fun fallbackCount() = reasons.count { it != null }
-        fun lastReason(): Metrics.Reason? = reasons.lastOrNull()
+        fun lastReason(): FallbackReason? = reasons.lastOrNull()
     }
 
     @Before
@@ -322,7 +322,7 @@ class CronetBridgeTest {
 
         assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
-        assertEquals(Metrics.Reason.allowlist, routes.lastReason())
+        assertEquals(FallbackReason.allowlist, routes.lastReason())
         assertEquals(fallbacksBefore + 1, routes.fallbackCount())
         assertTrue(
             "fallback must never touch the Cronet engine",
@@ -728,13 +728,46 @@ class CronetBridgeTest {
         install(engine, "example.com")
         val denied = fallbackChain(OkHttpClient(), "https://other.example/")
         assertThrows(IOException::class.java) { CronetBridge.intercept(denied) }
-        assertEquals(Metrics.Reason.allowlist, routes.lastReason())
+        assertEquals(FallbackReason.allowlist, routes.lastReason())
 
         engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
         val (_, allowed) = cronetChain(OkHttpClient(), "https://example.com/")
         CronetBridge.intercept(allowed).close()
         assertNull(routes.lastReason())
         assertEquals(1, routes.cronetCount())
+    }
+
+    @Test
+    fun `after uninstall the listener still hears engine_missing`() {
+        install(ScriptedCronetEngine(), "example.com")
+        SarieBridge.uninstall()
+        val closedPort = ServerSocket(0).use { it.localPort }
+        val chain = fallbackChain(OkHttpClient(), "https://127.0.0.2:$closedPort/")
+
+        assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
+
+        assertEquals(FallbackReason.engine_missing, routes.lastReason())
+    }
+
+    @Test
+    fun `a throwing policy fails closed and reports policy_error`() {
+        val engine = ScriptedCronetEngine()
+        SarieBridge.install(
+            engine,
+            object : CronetPolicy {
+                override val allowedOrigins: Set<String> = emptySet()
+                override fun enabled(): Boolean = throw IllegalStateException("host policy")
+            },
+            mapper,
+            routes,
+        )
+        val closedPort = ServerSocket(0).use { it.localPort }
+        val chain = fallbackChain(OkHttpClient(), "https://127.0.0.2:$closedPort/")
+
+        assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
+
+        assertEquals(FallbackReason.policy_error, routes.lastReason())
+        assertTrue(engine.builders.isEmpty())
     }
 
     @Test
@@ -748,7 +781,7 @@ class CronetBridgeTest {
             },
             mapper,
             object : SarieListener {
-                override fun onRouted(call: Call, reason: Metrics.Reason?) {
+                override fun onRouted(call: Call, reason: FallbackReason?) {
                     throw IllegalStateException("host listener")
                 }
             },

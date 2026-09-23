@@ -4,7 +4,6 @@ package sarie.bridge
 
 import sarie.bridge.mapping.OkHttpBridgeCallback
 import sarie.bridge.mapping.RequestBodyEvents
-
 import java.io.IOException
 import java.net.ProtocolException
 import java.net.SocketTimeoutException
@@ -105,6 +104,7 @@ object CronetBridge {
             PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snapshot)
         } catch (t: Throwable) {
             logOnce(t)
+            notifyRouted(realChain.call, FallbackReason.policy_error)
             return stockFallback(realChain)
         }
         if (reason != null) {
@@ -354,8 +354,8 @@ object CronetBridge {
         }.buffer()
     }
 
-    private fun notifyRouted(call: Call, reason: Metrics.Reason?) {
-        val listener = SarieBridge.snapshot()?.listener ?: return
+    private fun notifyRouted(call: Call, reason: FallbackReason?) {
+        val listener = SarieBridge.listener ?: return
         try {
             listener.onRouted(call, reason)
         } catch (t: Throwable) {

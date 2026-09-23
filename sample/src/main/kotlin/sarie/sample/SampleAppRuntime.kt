@@ -8,7 +8,7 @@ import okhttp3.OkHttpClient
 import org.chromium.net.CronetEngine
 import org.chromium.net.RequestFinishedInfo
 import sarie.bridge.DefaultPolicy
-import sarie.bridge.Metrics
+import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
 import sarie.bridge.SarieListener
 
@@ -65,7 +65,7 @@ object SampleAppRuntime {
                 }
             }
         }
-        val engine = SarieBridge.snapshot()?.engine
+        val engine = SarieBridge.engine
             ?: error("SarieBridge.install did not publish an engine")
         if (netLog) {
             // Unique per engine: several suite engines may capture netlogs in one run.
@@ -151,10 +151,10 @@ object SampleAppRuntime {
      */
     class RouteLog : SarieListener {
         private val lock = Any()
-        private val reasons = mutableListOf<Metrics.Reason?>()
+        private val reasons = mutableListOf<FallbackReason?>()
         private val finished = mutableListOf<RequestFinishedInfo>()
 
-        override fun onRouted(call: Call, reason: Metrics.Reason?) {
+        override fun onRouted(call: Call, reason: FallbackReason?) {
             synchronized(lock) { reasons += reason }
         }
 
@@ -174,7 +174,7 @@ object SampleAppRuntime {
 
         fun fallbackCount(): Int = synchronized(lock) { reasons.count { it != null } }
 
-        fun lastReason(): Metrics.Reason? = synchronized(lock) { reasons.lastOrNull() }
+        fun lastReason(): FallbackReason? = synchronized(lock) { reasons.lastOrNull() }
 
         fun finishedInfos(): List<RequestFinishedInfo> = synchronized(lock) { finished.toList() }
 

@@ -221,7 +221,7 @@ System.setProperty("okhttp.cronet.enabled", "false")
 
 ## Metrics
 
-Pass an optional `SarieListener` to `install`. `onRouted` runs on the caller thread before any I/O. The `reason` is null when the call is going to Cronet, and a `Metrics.Reason` when it is going to stock OkHttp. The `Call` is the correlation key: tags stay on `call.request()`.
+Pass an optional `SarieListener` to `install`. `onRouted` runs on the caller thread before any I/O. The `reason` is null when the call is going to Cronet, and a `FallbackReason` when it is going to stock OkHttp. The `Call` is the correlation key: tags stay on `call.request()`.
 
 `onFinished` runs on Sarie's listener thread, once per Cronet `UrlRequest` (a transport retry reports twice). The argument is Cronet's `RequestFinishedInfo`: wire `receivedByteCount` and `sentByteCount`, DNS / connect / SSL / TTFB timestamps, `socketReused`, and the failure. Cronet has already decoded the body, so `receivedByteCount` is smaller than the string you read. A provider that rejects `setRequestFinishedListener` (some HttpEngine builds) skips `onFinished` for that engine.
 
@@ -229,7 +229,7 @@ There are no process-wide counters. Count `onRouted` and `onFinished` in the lis
 
 ```kotlin
 SarieBridge.install(context, client, listener = object : SarieListener {
-    override fun onRouted(call: Call, reason: Metrics.Reason?) {
+    override fun onRouted(call: Call, reason: FallbackReason?) {
         val operation = call.request().tag(Operation::class)
     }
 

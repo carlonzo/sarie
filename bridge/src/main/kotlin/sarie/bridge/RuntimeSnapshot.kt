@@ -13,8 +13,11 @@ import sarie.bridge.mapping.ResponseConverter
  *
  * [installedPins] is empty for a borrowed [SarieBridge.install] engine. [providerName] and
  * [providerVersion] are set only for the Sarie-built path.
+ *
+ * A plain class, not a data class: the derived fields are bound to [engine] and [policy], and a
+ * `copy` that changed either would silently keep stale ones.
  */
-data class RuntimeSnapshot(
+internal class RuntimeSnapshot(
     val engine: CronetEngine,
     val policy: CronetPolicy,
     val mapper: RequestToUrlRequestMapper,
@@ -23,19 +26,13 @@ data class RuntimeSnapshot(
     val installedPins: Set<CertificatePinner.Pin> = emptySet(),
     val providerName: String? = null,
     val providerVersion: String? = null,
-    /**
-     * Null admits every origin (empty allowlist or `"*"`). Parsed once from
-     * [CronetPolicy.allowedOrigins].
-     */
-    val originRules: List<ParsedOrigin>? = parseAllowedOrigins(policy.allowedOrigins),
-    val responseConverter: ResponseConverter = ResponseConverter(),
-    val requestConverter: RequestConverter = RequestConverter(
-        engine,
-        CronetUploadExecutor,
-        CronetExecutor,
-        responseConverter,
-    ),
-    val listener: SarieListener? = null,
+) {
+    /** Null admits every origin (empty allowlist or `"*"`). Parsed once from [policy]. */
+    val originRules: List<ParsedOrigin>? = parseAllowedOrigins(policy.allowedOrigins)
+
+    val requestConverter: RequestConverter =
+        RequestConverter(engine, CronetUploadExecutor, CronetExecutor, ResponseConverter())
+
     /** Set when this engine's provider rejects [org.chromium.net.UrlRequest.Builder.setRequestFinishedListener]. */
-    internal val finishedListenerUnsupported: AtomicBoolean = AtomicBoolean(false),
-)
+    val finishedListenerUnsupported: AtomicBoolean = AtomicBoolean(false)
+}

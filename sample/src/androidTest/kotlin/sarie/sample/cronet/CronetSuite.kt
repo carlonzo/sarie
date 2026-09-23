@@ -2,7 +2,7 @@ package sarie.sample.cronet
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import sarie.bridge.Metrics
+import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
 import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
@@ -130,7 +130,7 @@ class CronetSuite {
         )
     }
 
-    private fun assertStockServed(reason: Metrics.Reason) {
+    private fun assertStockServed(reason: FallbackReason) {
         val routes = SampleAppRuntime.routes
         assertEquals(0, routes.cronetCount())
         assertTrue(
@@ -332,7 +332,7 @@ class CronetSuite {
                 response.header("Content-Encoding"),
             )
             val body = response.body.string()
-            assertEquals("gzip-payload-ok", body)
+            assertEquals("gzip-payload-ok\n".repeat(256), body)
             assertTrue(SampleAppRuntime.routes.awaitFinished(1))
             val wire = SampleAppRuntime.routes.finishedInfos().first().metrics.receivedByteCount
             assertNotNull(wire)
@@ -410,7 +410,7 @@ class CronetSuite {
                 echoed.contains("Accept-Encoding: [identity]"),
             )
         }
-        assertStockServed(Metrics.Reason.content_encoding)
+        assertStockServed(FallbackReason.content_encoding)
     }
 
     @Test
@@ -502,7 +502,7 @@ class CronetSuite {
         }
         // PolicyEngine records the deny as reason=disabled (kill-switch rule precedes
         // cleartext/allowlist in the rule order).
-        assertStockServed(Metrics.Reason.disabled)
+        assertStockServed(FallbackReason.disabled)
     }
 
     @Test
@@ -692,7 +692,7 @@ class CronetSuite {
                 assertNotNull(response.handshake)
             }
             assertTrue(SampleAppRuntime.routes.fallbackCount() >= 1)
-            assertEquals(Metrics.Reason.disabled, SampleAppRuntime.routes.lastReason())
+            assertEquals(FallbackReason.disabled, SampleAppRuntime.routes.lastReason())
             client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
                 assertEquals(200, response.code)
                 assertNotNull(response.cacheResponse)
@@ -753,12 +753,15 @@ class CronetSuite {
 
     @Test
     fun engineMissingFallsBackStock() {
-        // No install: the trampoline finds no snapshot -> exact-stock fallback.
+        // Install (which registers the listener), then drop the snapshot: the trampoline finds
+        // no engine -> exact-stock fallback, still reported to the listener.
+        installCronet(quicHintHost = null)
+        SarieBridge.uninstall()
         OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertEquals("ok", response.body.string())
         }
-        assertStockServed(Metrics.Reason.engine_missing)
+        assertStockServed(FallbackReason.engine_missing)
     }
 
     @Test
@@ -844,7 +847,7 @@ class CronetSuite {
         } catch (_: IOException) {
             // Stock pin check or connect failure. The routing reason is what this test locks.
         }
-        assertStockServed(Metrics.Reason.pins)
+        assertStockServed(FallbackReason.pins)
     }
 
     @Test

@@ -8,7 +8,7 @@ import okhttp3.Request
 import okhttp3.internal.tls.OkHostnameVerifier
 
 /** One allowlist entry, parsed once when the snapshot is built. */
-class ParsedOrigin(val host: String, val port: Int)
+internal class ParsedOrigin(val host: String, val port: Int)
 
 /**
  * Empty set or `"*"` admits every origin (`null`). Other entries are `"host"` (port 443)
@@ -35,7 +35,7 @@ internal fun parseAllowedOrigins(allowed: Set<String>): List<ParsedOrigin>? {
 
 /**
  * Pure pre-send routing decision over [PolicyInput]. Never performs I/O and never records
- * metrics. Returns null to allow; otherwise the fallback [Metrics.Reason].
+ * metrics. Returns null to allow; otherwise the fallback [FallbackReason].
  *
  * Rule order (first hit wins):
  * 1. snapshot missing -> engine_missing
@@ -64,40 +64,40 @@ internal fun parseAllowedOrigins(allowed: Set<String>): List<ParsedOrigin>? {
  * OkHttp's cache is not a deny. Hits and 304 revalidation stay on OkHttp's chain.
  * Network interceptors are not a deny. They run on OkHttp's own chain before the Cronet hop.
  */
-object PolicyEngine {
+internal object PolicyEngine {
 
     /** Cached: evaluating `::class` allocates a [kotlin.reflect.KClass] on every use. */
     private val optOutClass = CronetOptOut::class
 
-    fun shouldHandle(input: PolicyInput, snapshot: RuntimeSnapshot?): Metrics.Reason? {
-        if (snapshot == null) return Metrics.Reason.engine_missing
-        if (!SarieBridge.isEnabled()) return Metrics.Reason.disabled
-        if (!snapshot.policy.enabled()) return Metrics.Reason.disabled
-        if (input.isCanceled) return Metrics.Reason.engine_missing
+    fun shouldHandle(input: PolicyInput, snapshot: RuntimeSnapshot?): FallbackReason? {
+        if (snapshot == null) return FallbackReason.engine_missing
+        if (!SarieBridge.isEnabled()) return FallbackReason.disabled
+        if (!snapshot.policy.enabled()) return FallbackReason.disabled
+        if (input.isCanceled) return FallbackReason.engine_missing
         if (input.request.tag(optOutClass) != null) {
-            return Metrics.Reason.tag_opt_out
+            return FallbackReason.tag_opt_out
         }
-        if (!input.request.url.isHttps) return Metrics.Reason.cleartext
-        if (input.forWebSocket) return Metrics.Reason.websocket
+        if (!input.request.url.isHttps) return FallbackReason.cleartext
+        if (input.forWebSocket) return FallbackReason.websocket
         val protocols = input.protocols
         var protocolIndex = 0
         while (protocolIndex < protocols.size) {
             if (protocols[protocolIndex] == Protocol.H2_PRIOR_KNOWLEDGE) {
-                return Metrics.Reason.h2_prior_knowledge
+                return FallbackReason.h2_prior_knowledge
             }
             protocolIndex++
         }
         val base = TrustBaseline.baseline
         if (input.proxy != null || input.proxySelector !== base.proxySelector) {
-            return Metrics.Reason.proxy
+            return FallbackReason.proxy
         }
         if (input.socketFactory.javaClass != base.socketFactoryClass) {
-            return Metrics.Reason.socket_factory
+            return FallbackReason.socket_factory
         }
         if (input.hostnameVerifier !== OkHostnameVerifier) {
-            return Metrics.Reason.hostname_verifier
+            return FallbackReason.hostname_verifier
         }
-        if (input.dns !== Dns.SYSTEM) return Metrics.Reason.dns
+        if (input.dns !== Dns.SYSTEM) return FallbackReason.dns
         if (!pinsSatisfied(
                 input.certificatePinner,
                 input.request.url.host,
@@ -105,15 +105,15 @@ object PolicyEngine {
                 snapshot.installedPins,
             )
         ) {
-            return Metrics.Reason.pins
+            return FallbackReason.pins
         }
-        if (trustMismatched(input)) return Metrics.Reason.trust
-        if (contentEncodingDenied(input)) return Metrics.Reason.content_encoding
+        if (trustMismatched(input)) return FallbackReason.trust
+        if (contentEncodingDenied(input)) return FallbackReason.content_encoding
         if (isLoopback(input.request.url.host) && !snapshot.policy.allowLoopbackHttps) {
-            return Metrics.Reason.cleartext
+            return FallbackReason.cleartext
         }
         if (!originAllowed(snapshot.originRules, input.request.url.host, input.request.url.port)) {
-            return Metrics.Reason.allowlist
+            return FallbackReason.allowlist
         }
         return null
     }

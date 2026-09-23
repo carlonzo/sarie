@@ -64,7 +64,9 @@ object SarieBridge {
         listener: SarieListener? = null,
         configure: (CronetEngine.Builder) -> Unit = {},
     ) {
-        TrustBaseline.baseline
+        // Before the provider lookup: a failed install still reports engine_missing.
+        this.listener = listener
+        warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
         val chosen = selectCronetProvider(
             CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) },
@@ -106,14 +108,16 @@ object SarieBridge {
                 "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
                     "configure from this install are ignored (${e.message}).",
             )
-            current = previous.copy(
+            current = RuntimeSnapshot(
+                engine = previous.engine,
                 policy = policy,
                 mapper = mapper,
                 installedAtMillis = System.currentTimeMillis(),
-                originRules = parseAllowedOrigins(policy.allowedOrigins),
-                listener = listener,
+                sarieBuilt = true,
+                installedPins = previous.installedPins,
+                providerName = previous.providerName,
+                providerVersion = previous.providerVersion,
             )
-            if (listener != null) RequestFinishedExecutor.executor
             return
         }
         val snapshot = RuntimeSnapshot(
@@ -125,11 +129,9 @@ object SarieBridge {
             installedPins = translation.installedPins,
             providerName = chosen.name,
             providerVersion = chosen.version,
-            listener = listener,
         )
         lastBuilt = snapshot
         current = snapshot
-        if (listener != null) RequestFinishedExecutor.executor
     }
 
     /**
@@ -152,28 +154,49 @@ object SarieBridge {
         mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
         listener: SarieListener? = null,
     ) {
-        TrustBaseline.baseline
+        this.listener = listener
+        warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
         current = RuntimeSnapshot(
             engine,
             policy,
             mapper,
             System.currentTimeMillis(),
-            listener = listener,
         )
-        if (listener != null) RequestFinishedExecutor.executor
     }
 
-    /** Drops the snapshot reference. The engine keeps running; this does not call shutdown. */
+    /**
+     * The listener from the last [install], kept apart from the snapshot so it also hears
+     * `engine_missing`: an install that found no provider, and calls after [uninstall].
+     */
+    @Volatile
+    internal var listener: SarieListener? = null
+        private set
+
+    /**
+     * Drops the snapshot reference. The engine keeps running; this does not call shutdown.
+     * The listener stays, so the fallbacks that follow are still reported.
+     */
     fun uninstall() {
         current = null
     }
 
-    fun snapshot(): RuntimeSnapshot? = current
+    internal fun snapshot(): RuntimeSnapshot? = current
+
+    /** The engine requests are routed to, or null when nothing is installed. Never shut it down. */
+    val engine: CronetEngine? get() = current?.engine
 
     /** Kill switch via system property (default true) plus snapshot presence. */
     fun isEnabled(): Boolean =
         System.getProperty(KILL_SWITCH_PROPERTY, "true").toBoolean() && current != null
+}
+
+/**
+ * Pays the platform-CA hash on the install thread instead of the first request. A failure here
+ * is left for the policy, which fails closed to stock OkHttp; install itself never throws for it.
+ */
+private fun warmTrustBaseline() {
+    runCatching { TrustBaseline.baseline }
 }
 
 /**

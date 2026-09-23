@@ -150,8 +150,17 @@ class PolicyEngineTest {
         override fun enabled(): Boolean = enabled
     }
 
-    private fun snap(policy: CronetPolicy = policy("example.com")): RuntimeSnapshot =
-        RuntimeSnapshot(engine, policy, mapper, System.currentTimeMillis())
+    private fun snap(
+        policy: CronetPolicy = policy("example.com"),
+        installedPins: Set<CertificatePinner.Pin>? = null,
+    ): RuntimeSnapshot = RuntimeSnapshot(
+        engine,
+        policy,
+        mapper,
+        System.currentTimeMillis(),
+        sarieBuilt = installedPins != null,
+        installedPins = installedPins.orEmpty(),
+    )
 
     /** Builds a REAL chain through the suppressed internal constructor and extracts PolicyInput. */
     private fun inputFor(
@@ -186,7 +195,7 @@ class PolicyEngineTest {
     private fun decision(
         input: PolicyInput = inputFor(),
         snapshot: RuntimeSnapshot? = snap(),
-    ): Metrics.Reason? = PolicyEngine.shouldHandle(input, snapshot)
+    ): FallbackReason? = PolicyEngine.shouldHandle(input, snapshot)
 
     @Before
     fun setUp() {
@@ -208,7 +217,7 @@ class PolicyEngineTest {
     @Test
     fun `null snapshot yields engine_missing`() {
         val d = PolicyEngine.shouldHandle(inputFor(), null)
-        assertEquals(Metrics.Reason.engine_missing, d)
+        assertEquals(FallbackReason.engine_missing, d)
     }
 
     @Test
@@ -216,7 +225,7 @@ class PolicyEngineTest {
         try {
             System.setProperty("okhttp.cronet.enabled", "false")
             val d = decision()
-            assertEquals(Metrics.Reason.disabled, d)
+            assertEquals(FallbackReason.disabled, d)
         } finally {
             System.clearProperty("okhttp.cronet.enabled")
         }
@@ -225,13 +234,13 @@ class PolicyEngineTest {
     @Test
     fun `policy disabled yields disabled`() {
         val d = decision(snapshot = snap(policy("example.com", enabled = false)))
-        assertEquals(Metrics.Reason.disabled, d)
+        assertEquals(FallbackReason.disabled, d)
     }
 
     @Test
     fun `canceled call yields engine_missing (canceled is not a routing concern)`() {
         val d = decision(input = inputFor(canceled = true))
-        assertEquals(Metrics.Reason.engine_missing, d)
+        assertEquals(FallbackReason.engine_missing, d)
     }
 
     @Test
@@ -243,19 +252,19 @@ class PolicyEngineTest {
         val call = client.newCall(request) as RealCall
         val chain = RealInterceptorChain(call, emptyList(), 0, null, request, client)
         val d = PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snap())
-        assertEquals(Metrics.Reason.tag_opt_out, d)
+        assertEquals(FallbackReason.tag_opt_out, d)
     }
 
     @Test
     fun `cleartext scheme yields cleartext`() {
         val d = decision(input = inputFor(url = "http://example.com/"))
-        assertEquals(Metrics.Reason.cleartext, d)
+        assertEquals(FallbackReason.cleartext, d)
     }
 
     @Test
     fun `websocket call yields websocket`() {
         val d = decision(input = inputFor(forWebSocket = true))
-        assertEquals(Metrics.Reason.websocket, d)
+        assertEquals(FallbackReason.websocket, d)
     }
 
     @Test
@@ -282,7 +291,7 @@ class PolicyEngineTest {
             .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
             .build()
         val d = decision(input = inputFor(client = h2pk))
-        assertEquals(Metrics.Reason.h2_prior_knowledge, d)
+        assertEquals(FallbackReason.h2_prior_knowledge, d)
     }
 
     @Test
@@ -303,7 +312,7 @@ class PolicyEngineTest {
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("192.0.2.1", 8080)))
             .build()
         val d = decision(input = inputFor(client = proxied))
-        assertEquals(Metrics.Reason.proxy, d)
+        assertEquals(FallbackReason.proxy, d)
     }
 
     @Test
@@ -312,7 +321,7 @@ class PolicyEngineTest {
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("192.0.2.1", 8080)))
             .build()
         val d = decision(input = inputFor(client = proxied))
-        assertEquals(Metrics.Reason.proxy, d)
+        assertEquals(FallbackReason.proxy, d)
     }
 
     @Test
@@ -324,7 +333,7 @@ class PolicyEngineTest {
             })
             .build()
         val d = decision(input = inputFor(client = customSelector))
-        assertEquals(Metrics.Reason.proxy, d)
+        assertEquals(FallbackReason.proxy, d)
     }
 
     @Test
@@ -333,7 +342,7 @@ class PolicyEngineTest {
             .socketFactory(FakePlainSocketFactory())
             .build()
         val d = decision(input = inputFor(client = customSockets))
-        assertEquals(Metrics.Reason.socket_factory, d)
+        assertEquals(FallbackReason.socket_factory, d)
     }
 
     @Test
@@ -342,7 +351,7 @@ class PolicyEngineTest {
             .hostnameVerifier { _, _ -> true }
             .build()
         val d = decision(input = inputFor(client = customVerifier))
-        assertEquals(Metrics.Reason.hostname_verifier, d)
+        assertEquals(FallbackReason.hostname_verifier, d)
     }
 
     @Test
@@ -351,7 +360,7 @@ class PolicyEngineTest {
             .dns { throw UnsupportedOperationException("not called") }
             .build()
         val d = decision(input = inputFor(client = custom))
-        assertEquals(Metrics.Reason.dns, d)
+        assertEquals(FallbackReason.dns, d)
     }
 
     @Test
@@ -370,7 +379,7 @@ class PolicyEngineTest {
                     .build(),
             )
             .build()
-        assertEquals(Metrics.Reason.dns, decision(input = inputFor(client = client)))
+        assertEquals(FallbackReason.dns, decision(input = inputFor(client = client)))
     }
 
     @Test
@@ -383,7 +392,7 @@ class PolicyEngineTest {
             )
             .build()
         val d = decision(input = inputFor(client = pinned))
-        assertEquals(Metrics.Reason.pins, d)
+        assertEquals(FallbackReason.pins, d)
     }
 
     @Test
@@ -400,7 +409,7 @@ class PolicyEngineTest {
             override val sdkPins: Set<String> = setOf("example.com")
         }
         val d = decision(input = inputFor(client = pinned), snapshot = snap(withSdkPins))
-        assertEquals(Metrics.Reason.pins, d)
+        assertEquals(FallbackReason.pins, d)
     }
 
     @Test
@@ -424,7 +433,7 @@ class PolicyEngineTest {
         val installed = translatePins(pinner.pins).installedPins
         val d = decision(
             input = inputFor(client = client),
-            snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
+            snapshot = snap(installedPins = installed),
         )
         assertNull(d)
     }
@@ -441,9 +450,9 @@ class PolicyEngineTest {
             .build()
         val d = decision(
             input = inputFor(client = derived),
-            snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
+            snapshot = snap(installedPins = installed),
         )
-        assertEquals(Metrics.Reason.pins, d)
+        assertEquals(FallbackReason.pins, d)
     }
 
     @Test
@@ -454,9 +463,9 @@ class PolicyEngineTest {
         ).installedPins
         val d = decision(
             input = inputFor(client = OkHttpClient()),
-            snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
+            snapshot = snap(installedPins = installed),
         )
-        assertEquals(Metrics.Reason.pins, d)
+        assertEquals(FallbackReason.pins, d)
     }
 
     @Test
@@ -470,10 +479,9 @@ class PolicyEngineTest {
         val client = OkHttpClient.Builder().certificatePinner(pinner).build()
         val d = decision(
             input = inputFor(client = client, url = "https://a.example.com/"),
-            snapshot = snap(policy("a.example.com"))
-                .copy(sarieBuilt = true, installedPins = translatePins(pinner.pins).installedPins),
+            snapshot = snap(policy("a.example.com"), installedPins = translatePins(pinner.pins).installedPins),
         )
-        assertEquals(Metrics.Reason.pins, d)
+        assertEquals(FallbackReason.pins, d)
     }
 
     @Test
@@ -484,9 +492,9 @@ class PolicyEngineTest {
             .build()
         val d = decision(
             input = inputFor(client = client, url = "https://a.example.com/"),
-            snapshot = snap(policy("a.example.com")).copy(sarieBuilt = true, installedPins = emptySet()),
+            snapshot = snap(policy("a.example.com"), installedPins = emptySet()),
         )
-        assertEquals(Metrics.Reason.pins, d)
+        assertEquals(FallbackReason.pins, d)
     }
 
     @Test
@@ -497,7 +505,7 @@ class PolicyEngineTest {
         val installed = translatePins(pinner.pins).installedPins
         val d = decision(
             input = inputFor(client = client, url = "https://a.example.com/"),
-            snapshot = snap(policy("a.example.com")).copy(sarieBuilt = true, installedPins = installed),
+            snapshot = snap(policy("a.example.com"), installedPins = installed),
         )
         assertNull(d)
     }
@@ -508,7 +516,7 @@ class PolicyEngineTest {
             .sslSocketFactory(FakeSSLSocketFactory(), FakeTrustManager())
             .build()
         val d = decision(input = inputFor(client = customTls))
-        assertEquals(Metrics.Reason.trust, d)
+        assertEquals(FallbackReason.trust, d)
     }
 
     @Test
@@ -534,7 +542,7 @@ class PolicyEngineTest {
         )
 
         val d = decision(input = inputFor(client = client))
-        assertEquals(Metrics.Reason.trust, d)
+        assertEquals(FallbackReason.trust, d)
     }
 
     @Test
@@ -545,7 +553,7 @@ class PolicyEngineTest {
             .header("Accept-Encoding", "gzip")
             .build()
         val d = decision(input = chainInput(original = request))
-        assertEquals(Metrics.Reason.content_encoding, d)
+        assertEquals(FallbackReason.content_encoding, d)
     }
 
     @Test
@@ -553,11 +561,11 @@ class PolicyEngineTest {
         val original = Request.Builder().url("https://example.com/").build()
         val atSwap = original.newBuilder().header("Accept-Encoding", "identity").build()
         val d = decision(input = chainInput(original = original, atSwap = atSwap))
-        assertEquals(Metrics.Reason.content_encoding, d)
+        assertEquals(FallbackReason.content_encoding, d)
 
         val quality = original.newBuilder().header("Accept-Encoding", "identity;q=1, br").build()
         assertEquals(
-            Metrics.Reason.content_encoding,
+            FallbackReason.content_encoding,
             decision(input = chainInput(original = original, atSwap = quality)),
         )
     }
@@ -593,14 +601,14 @@ class PolicyEngineTest {
             .header("Accept-Encoding", "identity")
             .build()
         assertEquals(
-            Metrics.Reason.trust,
+            FallbackReason.trust,
             decision(input = chainInput(client = customTls, original = owned)),
         )
 
         val original = Request.Builder().url("https://localhost/").build()
         val atSwap = original.newBuilder().header("Accept-Encoding", "identity").build()
         assertEquals(
-            Metrics.Reason.content_encoding,
+            FallbackReason.content_encoding,
             decision(
                 input = chainInput(original = original, atSwap = atSwap),
                 snapshot = snap(policy("localhost")),
@@ -611,10 +619,10 @@ class PolicyEngineTest {
     @Test
     fun `loopback https denied yields cleartext (cleartext reason reused for loopback)`() {
         val d = decision(input = inputFor(url = "https://localhost/"), snapshot = snap(policy("localhost")))
-        assertEquals(Metrics.Reason.cleartext, d)
+        assertEquals(FallbackReason.cleartext, d)
 
         val d2 = decision(input = inputFor(url = "https://10.0.2.2/"), snapshot = snap(policy("10.0.2.2")))
-        assertEquals(Metrics.Reason.cleartext, d2)
+        assertEquals(FallbackReason.cleartext, d2)
     }
 
     @Test
@@ -645,7 +653,7 @@ class PolicyEngineTest {
     @Test
     fun `origin not allowlisted yields allowlist`() {
         val d = decision(input = inputFor(url = "https://other.com/"))
-        assertEquals(Metrics.Reason.allowlist, d)
+        assertEquals(FallbackReason.allowlist, d)
     }
 
     @Test
@@ -661,13 +669,13 @@ class PolicyEngineTest {
         val tagged = request.newBuilder().tag(CronetOptOut::class.java, CronetOptOut).build()
         val call = client.newCall(tagged) as RealCall
         val chain = RealInterceptorChain(call, emptyList(), 0, null, tagged, client)
-        assertEquals(Metrics.Reason.tag_opt_out, PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snap()))
+        assertEquals(FallbackReason.tag_opt_out, PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snap()))
 
         val cached = OkHttpClient.Builder()
             .cache(Cache(Files.createTempDirectory("policy-cache").toFile(), 1024L * 1024))
             .build()
         val d = decision(input = inputFor(client = cached, forWebSocket = true))
-        assertEquals(Metrics.Reason.websocket, d)
+        assertEquals(FallbackReason.websocket, d)
     }
 
     // --- allowlist port semantics ---
@@ -682,12 +690,12 @@ class PolicyEngineTest {
         assertNull(decision(input = inputFor(url = "https://10.0.2.2:8443/"), snapshot = snap(p)))
         // No entry covers 9443 -> default-deny.
         assertEquals(
-            Metrics.Reason.allowlist,
+            FallbackReason.allowlist,
             decision(input = inputFor(url = "https://10.0.2.2:9443/"), snapshot = snap(p)),
         )
         // Bare "example.com" (443 only) does not cover 8443.
         assertEquals(
-            Metrics.Reason.allowlist,
+            FallbackReason.allowlist,
             decision(
                 input = inputFor(url = "https://example.com:8443/"),
                 snapshot = snap(policy("example.com")),

@@ -27,7 +27,7 @@ import okhttp3.internal.http.RealInterceptorChain
  * [originalRequest] is [RealCall.originalRequest] (the app's request, before interceptors add
  * `Accept-Encoding`). `dns` is [Interceptor.Chain.dns].
  */
-data class PolicyInput(
+internal class PolicyInput(
     val request: Request,
     val originalRequest: Request,
     val isCanceled: Boolean,

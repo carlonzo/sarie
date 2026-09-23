@@ -17,9 +17,9 @@ import okhttp3.OkHttpClient
  * CLASSES plus an acceptedIssuers SHA-256 fingerprint, and trust verdicts are memoized per
  * [X509TrustManager] instance in a synchronized map capped at 1024 entries (clear-on-overflow).
  */
-object TrustBaseline {
+internal object TrustBaseline {
 
-    data class Baseline(
+    class Baseline(
         val sslFactoryClass: Class<*>,
         val trustManagerClass: Class<*>,
         val trustFingerprint: String,
@@ -29,7 +29,7 @@ object TrustBaseline {
         val socketFactoryClass: Class<*>,
     )
 
-    data class Verdict(val managerClass: Class<*>, val fingerprint: String)
+    class Verdict(val managerClass: Class<*>, val fingerprint: String)
 
     internal val baseline: Baseline by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val stock = OkHttpClient()

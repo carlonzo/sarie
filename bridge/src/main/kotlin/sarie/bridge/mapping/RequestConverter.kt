@@ -23,6 +23,8 @@ import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.logging.Level
 import java.util.logging.Logger
 import okhttp3.Call
 import okhttp3.Request
@@ -159,13 +161,21 @@ class RequestConverter(
         snapshot: RuntimeSnapshot?,
         call: Call?,
     ) {
-        val listener = snapshot?.listener ?: return
-        if (call == null || snapshot.finishedListenerUnsupported.get()) return
+        val listener = SarieBridge.listener ?: return
+        if (snapshot == null || call == null || snapshot.finishedListenerUnsupported.get()) return
         val attached = runCatching {
             builder.setRequestFinishedListener(
                 object : RequestFinishedInfo.Listener(RequestFinishedExecutor.executor) {
                     override fun onRequestFinished(info: RequestFinishedInfo) {
-                        listener.onFinished(call, info)
+                        // Host code on Sarie's executor thread: an escaped throw would reach the
+                        // uncaught-exception handler and kill the process.
+                        try {
+                            listener.onFinished(call, info)
+                        } catch (t: Throwable) {
+                            if (finishedThrewLogged.compareAndSet(false, true)) {
+                                logger.log(Level.WARNING, "SarieListener.onFinished threw", t)
+                            }
+                        }
                     }
                 },
             )
@@ -200,6 +210,7 @@ class RequestConverter(
         private const val CONTENT_TYPE_HEADER_NAME = "Content-Type"
         private const val CONTENT_TYPE_HEADER_DEFAULT_VALUE = "application/octet-stream"
         private val logger = Logger.getLogger("CronetTransportForOkHttp")
+        private val finishedThrewLogged = AtomicBoolean(false)
         private val DIRECT_EXECUTOR = Executor { it.run() }
     }
 }

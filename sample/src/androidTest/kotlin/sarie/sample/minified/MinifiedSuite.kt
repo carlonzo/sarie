@@ -1,6 +1,6 @@
 package sarie.sample.minified
 
-import sarie.bridge.Metrics
+import sarie.bridge.FallbackReason
 import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
 import java.util.concurrent.CountDownLatch
@@ -77,7 +77,7 @@ class MinifiedSuite {
         )
     }
 
-    private fun assertFallbackOnly(expectedReason: Metrics.Reason) {
+    private fun assertFallbackOnly(expectedReason: FallbackReason) {
         val routes = SampleAppRuntime.routes
         assertEquals(0, routes.cronetCount())
         assertTrue(
@@ -160,7 +160,7 @@ class MinifiedSuite {
         ws.cancel()
         // The upgrade is cleartext, so the stock fallback served it natively (the cleartext
         // rule precedes the websocket rule in the policy order).
-        assertFallbackOnly(Metrics.Reason.cleartext)
+        assertFallbackOnly(FallbackReason.cleartext)
     }
 
     @Test
@@ -172,7 +172,7 @@ class MinifiedSuite {
             assertEquals(200, response.code)
             assertEquals("cleartext-ok", response.body.string())
         }
-        assertFallbackOnly(Metrics.Reason.cleartext)
+        assertFallbackOnly(FallbackReason.cleartext)
     }
 
     @Test
@@ -234,6 +234,6 @@ class MinifiedSuite {
             assertEquals(200, response.code)
             assertEquals("ok", response.body.string())
         }
-        assertFallbackOnly(Metrics.Reason.disabled)
+        assertFallbackOnly(FallbackReason.disabled)
     }
 }

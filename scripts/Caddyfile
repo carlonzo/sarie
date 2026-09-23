@@ -76,12 +76,17 @@
 		}
 	}
 
+	# 256 x "gzip-payload-ok\n" (4096 bytes): compressible enough that the gzip wire size
+	# is well below the decoded length (CronetSuite asserts receivedByteCount < body).
 	handle /compress/gzip {
 		encode {
 			gzip
 			minimum_length 1
 		}
-		respond "gzip-payload-ok" 200
+		rewrite * /gzip.txt
+		file_server {
+			root scripts/www
+		}
 	}
 
 	# Standard Caddy has no brotli encoder: serve a pre-compressed body with an

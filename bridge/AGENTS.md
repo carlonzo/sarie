@@ -41,7 +41,7 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   must stay). The callback translates Cronet's async callbacks into a synchronous header
   future plus a streaming body source.
 - `PolicyEngine.kt`, `PolicyInput.kt`, `TrustBaseline.kt`: pre-send routing.
-  `shouldHandle` returns `Metrics.Reason?` (null allows). Rule order is the `PolicyEngine`
+  `shouldHandle` returns `FallbackReason?` (null allows). Rule order is the `PolicyEngine`
   doc comment (authenticators, OkHttp's cache, and network interceptors are not denies).
   Includes a TLS check on the trust manager's `acceptedIssuers` fingerprint, not just its
   class. Allowlist entries are parsed once onto `RuntimeSnapshot.originRules`. The platform
@@ -64,10 +64,10 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   executors on purpose. Cronet posts `UploadDataProvider.read()` onto the upload executor
   while the provider submits body work to the reader executor; one shared thread
   self-deadlocks until write timeout.
-- `Metrics.kt`: `Reason`, the pre-send deny enum delivered to `SarieListener.onRouted`.
+- `FallbackReason.kt`: the pre-send deny enum delivered to `SarieListener.onRouted`.
 - `SarieListener.kt`: optional `onRouted` / `onFinished`. `onFinished` runs on
   `RequestFinishedExecutor`, not `CronetExecutor`.
-- `RequestToUrlRequestMapper.kt`, `BridgePlaceholders.kt`, `VerifiedOkHttpVersions.kt`:
+- `RequestToUrlRequestMapper.kt`, `VerifiedOkHttpVersions.kt`:
   optional `UrlRequest.Builder` hook (default no-op) and generated support.
 
 ## Invariants
@@ -93,7 +93,7 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
 
 - `CronetBridgeTest`: trampoline bytecode shape, the 3 cancel interleavings, 407 rejection,
   fallback behavior.
-- `PolicyEngineTest`: every `Metrics.Reason` and the full rule order.
+- `PolicyEngineTest`: every `FallbackReason` and the full rule order.
 - `UploadPumpWedgeTest`, `mapping/UploadDataProvidersTest`: upload pump behavior including
   mid-upload abandonment on a real single-thread executor.
 - `mapping/*ConverterTest`: protocol mapping (including `h3`/`quic` -> `Protocol.HTTP_3`) and

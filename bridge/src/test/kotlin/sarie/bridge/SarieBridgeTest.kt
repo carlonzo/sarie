@@ -174,9 +174,9 @@ class SarieBridgeTest {
             listOf(
                 "disabled", "engine_missing", "tag_opt_out", "allowlist", "cleartext", "websocket",
                 "h2_prior_knowledge", "proxy", "socket_factory", "hostname_verifier", "pins",
-                "trust", "dns", "content_encoding",
+                "trust", "dns", "content_encoding", "policy_error",
             ),
-            Metrics.Reason.values().map { it.name },
+            FallbackReason.values().map { it.name },
         )
     }
 }
