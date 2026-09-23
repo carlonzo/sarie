@@ -466,6 +466,38 @@ class PolicyEngineTest {
     }
 
     @Test
+    fun `client without pins falls back when the engine pins the host`() {
+        val sha = "sha256/" + ByteArray(32) { 4 }.toByteString().base64()
+        val installed = translatePins(
+            CertificatePinner.Builder().add("example.com", sha).build().pins,
+        ).installedPins
+        val d = decision(
+            input = inputFor(client = OkHttpClient()),
+            snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
+        )
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.pins, d.reason)
+    }
+
+    @Test
+    fun `pins from overlapping patterns fall back`() {
+        val exact = "sha256/" + ByteArray(32) { 4 }.toByteString().base64()
+        val wide = "sha256/" + ByteArray(32) { 6 }.toByteString().base64()
+        val pinner = CertificatePinner.Builder()
+            .add("a.example.com", exact)
+            .add("**.example.com", wide)
+            .build()
+        val client = OkHttpClient.Builder().certificatePinner(pinner).build()
+        val d = decision(
+            input = inputFor(client = client, url = "https://a.example.com/"),
+            snapshot = snap(policy("a.example.com"))
+                .copy(sarieBuilt = true, installedPins = translatePins(pinner.pins).installedPins),
+        )
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.pins, d.reason)
+    }
+
+    @Test
     fun `single label wildcard pin is denied on a sarie-built engine`() {
         val sha = "sha256/" + ByteArray(32) { 4 }.toByteString().base64()
         val client = OkHttpClient.Builder()

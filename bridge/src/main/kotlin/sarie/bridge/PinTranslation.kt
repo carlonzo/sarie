@@ -84,8 +84,12 @@ internal fun translatePins(pins: Set<CertificatePinner.Pin>): PinTranslation {
 
 /**
  * Allow a pinned host only when this Sarie-built engine installed exactly those pins and none of
- * them came from a `*.` pattern. Hosts with no matching pins are unaffected. A borrowed engine
- * has no installed pins, so any match denies.
+ * them came from a `*.` pattern. A borrowed engine has no installed pins, so any match denies.
+ *
+ * A client with no pins for the host is denied when the engine pins it: Cronet would enforce pins
+ * that client never configured. Pins from more than one pattern (`api.example.com` plus
+ * `**.example.com`) are denied too: OkHttp accepts a match from any of them, Chromium checks only
+ * the most specific entry.
  */
 internal fun pinsSatisfied(
     pinner: CertificatePinner,
@@ -94,9 +98,10 @@ internal fun pinsSatisfied(
     installedPins: Set<CertificatePinner.Pin>,
 ): Boolean {
     val matching = pinner.findMatchingPins(host)
-    if (matching.isEmpty()) return true
+    val installedForHost = installedPins.filter { it.matchesHostname(host) }.toSet()
+    if (matching.isEmpty()) return installedForHost.isEmpty()
     if (!sarieBuilt) return false
     if (matching.any { isSingleLabelWildcard(it.pattern) }) return false
-    val installedForHost = installedPins.filter { it.matchesHostname(host) }.toSet()
+    if (matching.distinctBy { it.pattern }.size > 1) return false
     return matching.toSet() == installedForHost
 }
