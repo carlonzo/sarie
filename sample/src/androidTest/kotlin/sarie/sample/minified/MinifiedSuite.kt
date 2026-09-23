@@ -43,7 +43,7 @@ class MinifiedSuite {
 
     @Before
     fun setUp() {
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
         server = MockWebServer()
         server.start()
     }
@@ -54,7 +54,7 @@ class MinifiedSuite {
         // Stops the engine and wipes the Sarie storage dir (persisted QUIC state).
         SampleAppRuntime.reset()
         installedEngine = null
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
     }
 
     /** Installs the cronet-mode runtime with an isolated engine (fresh storage dir). */
@@ -68,21 +68,23 @@ class MinifiedSuite {
         installedEngine = SampleAppRuntime.lastEngine
     }
 
-    private fun assertCronetServed(minCount: Long = 1) {
-        assertTrue("expected the cronet path, cronet=${Metrics.cronet.get()}", Metrics.cronet.get() >= minCount)
+    private fun assertCronetServed(minCount: Int = 1) {
+        val routes = SampleAppRuntime.routes
+        assertTrue("expected the cronet path, cronet=${routes.cronetCount()}", routes.cronetCount() >= minCount)
         assertNull(
-            "cronet-path request recorded a fallback reason: ${Metrics.lastReason}",
-            Metrics.lastReason,
+            "cronet-path request recorded a fallback reason: ${routes.lastReason()}",
+            routes.lastReason(),
         )
     }
 
     private fun assertFallbackOnly(expectedReason: Metrics.Reason) {
-        assertEquals(0, Metrics.cronet.get())
+        val routes = SampleAppRuntime.routes
+        assertEquals(0, routes.cronetCount())
         assertTrue(
-            "expected at least one fallback, got ${Metrics.okhttpFallback.get()}",
-            Metrics.okhttpFallback.get() >= 1,
+            "expected at least one fallback, got ${routes.fallbackCount()}",
+            routes.fallbackCount() >= 1,
         )
-        assertEquals(expectedReason, Metrics.lastReason)
+        assertEquals(expectedReason, routes.lastReason())
     }
 
     @Test

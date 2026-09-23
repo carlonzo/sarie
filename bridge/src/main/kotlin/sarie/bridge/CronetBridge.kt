@@ -37,8 +37,8 @@ import org.chromium.net.UrlRequest
  * Trampoline target for the rewritten ConnectInterceptor (descriptor
  * `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`).
  *
- * Routing: re-evaluates [PolicyEngine] on the effective chain configuration (defensive — the
- * trampoline does not call [shouldHandle] first). Allow -> Cronet path; deny -> exact-stock
+ * Routing: re-evaluates [PolicyEngine] on the effective chain configuration. Allow -> Cronet
+ * path; deny -> exact-stock
  * fallback (`initExchange` + `copy` + `proceed`, never the rewritten ConnectInterceptor method
  * itself, which would recurse into this bridge).
  *
@@ -74,7 +74,7 @@ import org.chromium.net.UrlRequest
  * way). A pinning failure (`NetworkException.cronetInternalErrorCode == -150`) is mapped to
  * [SSLPeerUnverifiedException] before that decision and is not retried; the call is not handed
  * to stock after Cronet has started. Bodyless methods have no request body, so re-running the
- * converter has no replay hazard. Each retry is counted in [Metrics.retries].
+ * converter has no replay hazard.
  *
  * Cancellation: 5-step ordered protocol (Metis B3) — pre-start checks plus a per-call
  * EventListener (public Call.addEventListener) that delivers exactly one engine cancel;
@@ -84,6 +84,7 @@ object CronetBridge {
 
     private val logger = Logger.getLogger(CronetBridge::class.java.name)
     private val loggedOnce = AtomicBoolean(false)
+    private val listenerLoggedOnce = AtomicBoolean(false)
 
     private const val CANCELED_MESSAGE = "Canceled"
     private const val PROXY_AUTH_MESSAGE =
@@ -95,15 +96,6 @@ object CronetBridge {
     /** Methods safe to retry once on a pre-headers transport failure (RFC idempotent). */
     private val IDEMPOTENT_METHODS = setOf("GET", "HEAD", "OPTIONS")
 
-    /** Never throws: any policy failure fails closed to stock OkHttp. */
-    @JvmStatic
-    fun shouldHandle(chain: Interceptor.Chain): Boolean = try {
-        PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), SarieBridge.snapshot()) == null
-    } catch (t: Throwable) {
-        logOnce(t)
-        false
-    }
-
     @JvmStatic
     @Throws(IOException::class)
     fun intercept(chain: Interceptor.Chain): Response {
@@ -113,15 +105,14 @@ object CronetBridge {
             PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snapshot)
         } catch (t: Throwable) {
             logOnce(t)
-            Metrics.record(Metrics.Path.FALLBACK, null)
             return stockFallback(realChain)
         }
         if (reason != null) {
-            Metrics.record(Metrics.Path.FALLBACK, reason)
+            notifyRouted(realChain.call, reason)
             return stockFallback(realChain)
         }
-        Metrics.record(Metrics.Path.CRONET, null)
         val call = realChain.call
+        notifyRouted(call, null)
         // No exchange: OkHttp runs network interceptors and lands in callServer.
         RoutedCycle.open(call, realChain.request.url)
         return try {
@@ -217,6 +208,7 @@ object CronetBridge {
                         onEnd = events::requestBodyEnd,
                     ),
                     onResponseHeadersStart = { events.responseHeadersStart() },
+                    call = call,
                 )
             } catch (e: IOException) {
                 events.requestFailed(e)
@@ -255,7 +247,6 @@ object CronetBridge {
                     CallRegistry.unregister(call)
                     if (!retried && isRetryable(e, call, request)) {
                         retried = true
-                        Metrics.retries.incrementAndGet()
                         continue
                     }
                     throw e
@@ -361,6 +352,17 @@ object CronetBridge {
                 super.close()
             }
         }.buffer()
+    }
+
+    private fun notifyRouted(call: Call, reason: Metrics.Reason?) {
+        val listener = SarieBridge.snapshot()?.listener ?: return
+        try {
+            listener.onRouted(call, reason)
+        } catch (t: Throwable) {
+            if (listenerLoggedOnce.compareAndSet(false, true)) {
+                logger.log(Level.WARNING, "SarieListener.onRouted threw; routing continues", t)
+            }
+        }
     }
 
     private fun logOnce(t: Throwable) {

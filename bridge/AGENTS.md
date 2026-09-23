@@ -21,7 +21,7 @@ null (allow):
             -> OkHttpBridgeCallback -> ResponseConverter -> streaming Response
 deny:
   stockFallback: initExchange + copy(exchange=) + proceed
-  + Metrics.record(Path.FALLBACK, reason)
+  SarieListener.onRouted on both branches (null reason on allow)
 ```
 
 Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` and
@@ -64,8 +64,9 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   executors on purpose. Cronet posts `UploadDataProvider.read()` onto the upload executor
   while the provider submits body work to the reader executor; one shared thread
   self-deadlocks until write timeout.
-- `Metrics.kt`: `Path` (CRONET/FALLBACK) and `Reason` counters. Tests assert on it; keep
-  reasons stable.
+- `Metrics.kt`: `Reason`, the pre-send deny enum delivered to `SarieListener.onRouted`.
+- `SarieListener.kt`: optional `onRouted` / `onFinished`. `onFinished` runs on
+  `RequestFinishedExecutor`, not `CronetExecutor`.
 - `RequestToUrlRequestMapper.kt`, `BridgePlaceholders.kt`, `VerifiedOkHttpVersions.kt`:
   optional `UrlRequest.Builder` hook (default no-op) and generated support.
 
@@ -78,7 +79,7 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
     (`CallServerInterceptor` prefix).
   - `CacheHooks.expectTlsBlock` `(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`.
   - `CacheHooks.requireHandshake` `(Lokhttp3/Request;)Z`.
-  `CronetBridge.shouldHandle` stays `@JvmStatic` too.
+
 - Callback overrides in `OkHttpBridgeCallback` stay CPU-only (they run under
   `allowDirectExecutor()` on Cronet's threads). `CacheHooks` is not a Cronet callback.
 - Never call `shutdown()` on an engine this bridge built or borrowed.

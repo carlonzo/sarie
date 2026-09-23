@@ -191,7 +191,6 @@ class PolicyEngineTest {
     @Before
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
-        Metrics.resetForTest()
         TrustBaseline.clearMemoForTest()
         // isEnabled() requires a snapshot present in SarieBridge itself.
         SarieBridge.install(engine, policy("example.com"), mapper)
@@ -201,7 +200,6 @@ class PolicyEngineTest {
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
         SarieBridge.uninstall()
-        Metrics.resetForTest()
         TrustBaseline.clearMemoForTest()
     }
 
@@ -267,7 +265,6 @@ class PolicyEngineTest {
             .build()
         val d = decision(input = inputFor(client = cached))
         assertNull(d)
-        assertEquals("cache", Metrics.Reason.cache.name)
     }
 
     @Test
@@ -277,7 +274,6 @@ class PolicyEngineTest {
             .build()
         val d = decision(input = inputFor(client = withNetInterceptor))
         assertNull(d)
-        assertEquals("network_interceptors", Metrics.Reason.network_interceptors.name)
     }
 
     @Test
@@ -727,19 +723,9 @@ class PolicyEngineTest {
 
     @Test
     fun `protocols and engine_cold are never routing reasons`() {
-        val d = decision(input = inputFor(client = OkHttpClient.Builder().build()))
-        assertNull(d)
-        assertEquals("protocols", Metrics.Reason.protocols.name)
-        assertEquals("engine_cold", Metrics.Reason.engine_cold.name)
-        assertEquals("dns", Metrics.Reason.dns.name)
-        assertEquals("content_encoding", Metrics.Reason.content_encoding.name)
-        // Retired name stays; a custom authenticator must not produce it.
-        assertEquals("authenticator", Metrics.Reason.authenticator.name)
+        assertNull(decision(input = inputFor(client = OkHttpClient.Builder().build())))
         val auth = OkHttpClient.Builder().authenticator { _, _ -> null }.build()
-        assertNotEquals(
-            Metrics.Reason.authenticator,
-            decision(input = inputFor(client = auth)),
-        )
+        assertNull(decision(input = inputFor(client = auth)))
     }
 
     @Test

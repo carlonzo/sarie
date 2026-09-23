@@ -2,8 +2,11 @@ package sarie.bridge.mapping
 
 import sarie.bridge.RequestToUrlRequestMapper
 import sarie.bridge.SarieBridge
+import sarie.bridge.SarieListener
 import java.util.concurrent.Executor
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okio.BufferedSink
@@ -58,6 +61,33 @@ class RequestConverterTest {
         val builder = Request.Builder().url("https://example.com/a")
         headers.forEach { (name, value) -> builder.addHeader(name, value) }
         return builder.build()
+    }
+
+    @Test
+    fun `finished listener is attached only when a listener is installed`() {
+        val request = get()
+        val call = OkHttpClient().newCall(request)
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertNull(engine.builders.single().finishedListener)
+
+        SarieBridge.install(engine, listener = object : SarieListener {})
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertNotNull(engine.builders.last().finishedListener)
+    }
+
+    @Test
+    fun `rejected finished listener does not fail convert`() {
+        val request = get()
+        val call: Call = OkHttpClient().newCall(request)
+        SarieBridge.install(engine, listener = object : SarieListener {})
+        engine.rejectFinishedListener = true
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertTrue(engine.builders.single().cacheDisabled)
+        assertNull(engine.builders.single().finishedListener)
+
+        engine.rejectFinishedListener = false
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertNull(engine.builders.last().finishedListener)
     }
 
     @Test

@@ -61,6 +61,7 @@ object SarieBridge {
         client: OkHttpClient? = null,
         policy: CronetPolicy = DefaultPolicy(),
         mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
+        listener: SarieListener? = null,
         configure: (CronetEngine.Builder) -> Unit = {},
     ) {
         TrustBaseline.baseline
@@ -110,7 +111,9 @@ object SarieBridge {
                 mapper = mapper,
                 installedAtMillis = System.currentTimeMillis(),
                 originRules = parseAllowedOrigins(policy.allowedOrigins),
+                listener = listener,
             )
+            if (listener != null) RequestFinishedExecutor.executor
             return
         }
         val snapshot = RuntimeSnapshot(
@@ -122,9 +125,11 @@ object SarieBridge {
             installedPins = translation.installedPins,
             providerName = chosen.name,
             providerVersion = chosen.version,
+            listener = listener,
         )
         lastBuilt = snapshot
         current = snapshot
+        if (listener != null) RequestFinishedExecutor.executor
     }
 
     /**
@@ -145,10 +150,18 @@ object SarieBridge {
         engine: CronetEngine,
         policy: CronetPolicy = DefaultPolicy(),
         mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
+        listener: SarieListener? = null,
     ) {
         TrustBaseline.baseline
         warnIfUnverified(OkHttp.VERSION)
-        current = RuntimeSnapshot(engine, policy, mapper, System.currentTimeMillis())
+        current = RuntimeSnapshot(
+            engine,
+            policy,
+            mapper,
+            System.currentTimeMillis(),
+            listener = listener,
+        )
+        if (listener != null) RequestFinishedExecutor.executor
     }
 
     /** Drops the snapshot reference. The engine keeps running; this does not call shutdown. */

@@ -16,15 +16,19 @@
 // Ported from google/cronet-transport-for-okhttp@eda650fbc9b5279b6219160c2a0b210b28303fd7
 package sarie.bridge.mapping
 
+import sarie.bridge.RequestFinishedExecutor
+import sarie.bridge.RuntimeSnapshot
 import sarie.bridge.SarieBridge
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.logging.Logger
+import okhttp3.Call
 import okhttp3.Request
 import okhttp3.Response
 import org.chromium.net.CronetEngine
+import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UrlRequest
 
 /** Converts OkHttp requests to Cronet requests. */
@@ -51,6 +55,7 @@ class RequestConverter(
         writeTimeoutMillis: Long,
         requestBodyEvents: RequestBodyEvents? = null,
         onResponseHeadersStart: (() -> Unit)? = null,
+        call: Call? = null,
     ): ConvertedRequest {
         val callback = OkHttpBridgeCallback(readTimeoutMillis, onResponseHeadersStart)
 
@@ -141,10 +146,38 @@ class RequestConverter(
             builder.addHeader(group.name, group.values.joinToString(separator))
         }
 
-        SarieBridge.snapshot()?.mapper?.map(okHttpRequest, builder)
+        val snapshot = SarieBridge.snapshot()
+        snapshot?.mapper?.map(okHttpRequest, builder)
+        attachFinishedListener(builder, snapshot, call)
         builder.disableCache()
 
         return ConvertedRequest(builder.build(), callback, okHttpRequest, responseConverter)
+    }
+
+    private fun attachFinishedListener(
+        builder: UrlRequest.Builder,
+        snapshot: RuntimeSnapshot?,
+        call: Call?,
+    ) {
+        val listener = snapshot?.listener ?: return
+        if (call == null || snapshot.finishedListenerUnsupported.get()) return
+        val attached = runCatching {
+            builder.setRequestFinishedListener(
+                object : RequestFinishedInfo.Listener(RequestFinishedExecutor.executor) {
+                    override fun onRequestFinished(info: RequestFinishedInfo) {
+                        listener.onFinished(call, info)
+                    }
+                },
+            )
+        }
+        if (attached.isFailure &&
+            snapshot.finishedListenerUnsupported.compareAndSet(false, true)
+        ) {
+            logger.warning(
+                "Cronet provider rejected setRequestFinishedListener; onFinished will be skipped " +
+                    "for this engine (${attached.exceptionOrNull()?.message})",
+            )
+        }
     }
 
     /** Bundles the Cronet request with its in-progress OkHttp response. */

@@ -40,6 +40,7 @@ import org.chromium.net.UrlResponseInfo
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -47,8 +48,8 @@ import org.junit.Test
 
 /**
  * Bridge-glue tests for [CronetBridge]: bytecode shape of the exact-stock fallback, the Cronet
- * path over scripted cronet-api doubles, the three release-blocker cancel interleavings, the
- * 407 guard, and the never-throwing [CronetBridge.shouldHandle].
+ * path over scripted cronet-api doubles, the three release-blocker cancel interleavings, and the
+ * 407 guard.
  */
 class CronetBridgeTest {
 
@@ -188,10 +189,21 @@ class CronetBridgeTest {
 
     private val mapper = RequestToUrlRequestMapper { _, _ -> }
 
+    private val routes = object : SarieListener {
+        val reasons = mutableListOf<Metrics.Reason?>()
+        override fun onRouted(call: Call, reason: Metrics.Reason?) {
+            reasons += reason
+        }
+        fun clear() = reasons.clear()
+        fun cronetCount() = reasons.count { it == null }
+        fun fallbackCount() = reasons.count { it != null }
+        fun lastReason(): Metrics.Reason? = reasons.lastOrNull()
+    }
+
     @Before
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
-        Metrics.resetForTest()
+        routes.clear()
         CallRegistry.clearForTest()
         RoutedCycle.clearForTest()
     }
@@ -200,7 +212,7 @@ class CronetBridgeTest {
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
         SarieBridge.uninstall()
-        Metrics.resetForTest()
+        routes.clear()
         CallRegistry.clearForTest()
         RoutedCycle.clearForTest()
     }
@@ -212,6 +224,7 @@ class CronetBridgeTest {
                 override val allowedOrigins: Set<String> = origins.toSet()
             },
             mapper,
+            routes,
         )
     }
 
@@ -305,12 +318,12 @@ class CronetBridgeTest {
         install(engine, "example.com")
         val closedPort = ServerSocket(0).use { it.localPort }
         val chain = fallbackChain(OkHttpClient(), "https://127.0.0.2:$closedPort/")
-        val fallbacksBefore = Metrics.okhttpFallback.get()
+        val fallbacksBefore = routes.fallbackCount()
 
         assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
-        assertEquals(Metrics.Reason.allowlist, Metrics.lastReason)
-        assertEquals(fallbacksBefore + 1, Metrics.okhttpFallback.get())
+        assertEquals(Metrics.Reason.allowlist, routes.lastReason())
+        assertEquals(fallbacksBefore + 1, routes.fallbackCount())
         assertTrue(
             "fallback must never touch the Cronet engine",
             engine.builders.isEmpty(),
@@ -332,13 +345,14 @@ class CronetBridgeTest {
         )
         install(engine, "example.com")
         val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
-        val cronetBefore = Metrics.cronet.get()
+        val cronetBefore = routes.cronetCount()
 
         val response = CronetBridge.intercept(chain)
 
         assertEquals(Protocol.HTTP_3, response.protocol)
         assertEquals(200, response.code)
-        assertEquals(cronetBefore + 1, Metrics.cronet.get())
+        assertEquals(cronetBefore + 1, routes.cronetCount())
+        assertNull(routes.lastReason())
         assertEquals(1, CallRegistry.activeCount())
 
         val fake = engine.builtRequests.single()
@@ -470,7 +484,6 @@ class CronetBridgeTest {
         )
         // Not retryable: one attempt, no transport-failure retry.
         assertEquals(1, engine.builtRequests.size)
-        assertEquals(0, Metrics.retries.get())
         // Closing the body quietly cancels the still-unfinished engine request.
         assertEquals(1, engine.builtRequests.single().cancelCalls)
         assertEquals(0, CallRegistry.activeCount())
@@ -491,7 +504,6 @@ class CronetBridgeTest {
         )
         install(engine, "example.com")
         val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
-        val retriesBefore = Metrics.retries.get()
 
         val response = CronetBridge.intercept(chain)
 
@@ -500,7 +512,6 @@ class CronetBridgeTest {
         engine.builtRequests.forEach { assertEquals(1, it.startCalls) }
         // Closing the unread body cancels attempt 2 and unregisters.
         response.body.close()
-        assertEquals(retriesBefore + 1, Metrics.retries.get())
         assertEquals(0, CallRegistry.activeCount())
     }
 
@@ -510,7 +521,6 @@ class CronetBridgeTest {
         engine.preHeaderFailures = 2
         install(engine, "example.com")
         val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
-        val retriesBefore = Metrics.retries.get()
 
         val thrown = assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
@@ -518,7 +528,6 @@ class CronetBridgeTest {
         // (it is an IOException), which is exactly what the retry predicate matches on.
         assertTrue("expected the CronetException to surface", thrown is FakeCronetException)
         assertEquals(2, engine.builtRequests.size)
-        assertEquals(retriesBefore + 1, Metrics.retries.get())
         assertEquals(0, CallRegistry.activeCount())
     }
 
@@ -540,7 +549,6 @@ class CronetBridgeTest {
 
         assertEquals("Certificate pinning failure!", thrown.message)
         assertEquals(1, engine.builtRequests.size)
-        assertEquals(0, Metrics.retries.get())
     }
 
     @Test
@@ -558,7 +566,6 @@ class CronetBridgeTest {
         assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
         assertEquals(1, engine.builtRequests.size)
-        assertEquals(0, Metrics.retries.get())
     }
 
     @Test
@@ -578,7 +585,6 @@ class CronetBridgeTest {
         assertTrue("expected IOException but was $thrown", thrown is IOException)
         assertEquals("Canceled", thrown.message)
         assertEquals(1, engine.builtRequests.size)
-        assertEquals(0, Metrics.retries.get())
         assertEquals(0, CallRegistry.activeCount())
     }
 
@@ -593,7 +599,6 @@ class CronetBridgeTest {
         assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
         assertEquals(1, engine.builtRequests.size)
-        assertEquals(0, Metrics.retries.get())
     }
 
     // --- network-interceptor checks RealInterceptorChain skips when exchange is null ---
@@ -717,19 +722,40 @@ class CronetBridgeTest {
         return chain
     }
 
-    // --- shouldHandle never throws ---
-
     @Test
-    fun `shouldHandle returns false without throwing when no snapshot is installed`() {
-        SarieBridge.uninstall()
-        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
-        assertFalse(CronetBridge.shouldHandle(chain))
+    fun `onRouted reports the deny reason and null on the Cronet path`() {
+        val engine = ScriptedCronetEngine()
+        install(engine, "example.com")
+        val denied = fallbackChain(OkHttpClient(), "https://other.example/")
+        assertThrows(IOException::class.java) { CronetBridge.intercept(denied) }
+        assertEquals(Metrics.Reason.allowlist, routes.lastReason())
+
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
+        val (_, allowed) = cronetChain(OkHttpClient(), "https://example.com/")
+        CronetBridge.intercept(allowed).close()
+        assertNull(routes.lastReason())
+        assertEquals(1, routes.cronetCount())
     }
 
     @Test
-    fun `shouldHandle allows allowlisted https origin`() {
-        install(ScriptedCronetEngine(), "example.com")
+    fun `throwing onRouted still returns the response`() {
+        val engine = ScriptedCronetEngine()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
+        SarieBridge.install(
+            engine,
+            object : CronetPolicy {
+                override val allowedOrigins: Set<String> = setOf("example.com")
+            },
+            mapper,
+            object : SarieListener {
+                override fun onRouted(call: Call, reason: Metrics.Reason?) {
+                    throw IllegalStateException("host listener")
+                }
+            },
+        )
         val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
-        assertTrue(CronetBridge.shouldHandle(chain))
+        val response = CronetBridge.intercept(chain)
+        assertEquals(200, response.code)
+        response.close()
     }
 }

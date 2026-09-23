@@ -59,12 +59,10 @@ internal fun parseAllowedOrigins(allowed: Set<String>): List<ParsedOrigin>? {
  * 17. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
  * 18. else allow
  *
- * Authenticators are not a routing rule. [Metrics.Reason.authenticator] is retired and is never
- * produced. A 401 is returned so OkHttp calls authenticator.authenticate(route = null, response).
+ * Authenticators are not a routing rule. A 401 is returned so OkHttp calls
+ * authenticator.authenticate(route = null, response).
  * OkHttp's cache is not a deny. Hits and 304 revalidation stay on OkHttp's chain.
- * [Metrics.Reason.cache] stays as a retired constant and is never produced.
  * Network interceptors are not a deny. They run on OkHttp's own chain before the Cronet hop.
- * [Metrics.Reason.network_interceptors] stays as a retired constant and is never produced.
  */
 object PolicyEngine {
 

@@ -1,6 +1,5 @@
 package sarie.sample
 
-import sarie.bridge.Metrics
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import okhttp3.EventListener
@@ -176,9 +175,15 @@ internal object NetworkParity {
         error("unreachable")
     }
 
-    private fun assertCronetServed(minCount: Long = 1) {
-        assertTrue("expected the cronet path, cronet=${Metrics.cronet.get()}", Metrics.cronet.get() >= minCount)
-        assertNull("cronet-path request recorded a fallback reason: ${Metrics.lastReason}", Metrics.lastReason)
+    private fun assertCronetServed(minCount: Int = 1) {
+        assertTrue(
+            "expected the cronet path, cronet=${SampleAppRuntime.routes.cronetCount()}",
+            SampleAppRuntime.routes.cronetCount() >= minCount,
+        )
+        assertNull(
+            "cronet-path request recorded a fallback reason: ${SampleAppRuntime.routes.lastReason()}",
+            SampleAppRuntime.routes.lastReason(),
+        )
     }
 
     /**

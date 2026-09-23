@@ -1,5 +1,6 @@
 package sarie.bridge
 
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.CertificatePinner
 import org.chromium.net.CronetEngine
 import sarie.bridge.mapping.RequestConverter
@@ -34,4 +35,7 @@ data class RuntimeSnapshot(
         CronetExecutor,
         responseConverter,
     ),
+    val listener: SarieListener? = null,
+    /** Set when this engine's provider rejects [org.chromium.net.UrlRequest.Builder.setRequestFinishedListener]. */
+    internal val finishedListenerUnsupported: AtomicBoolean = AtomicBoolean(false),
 )

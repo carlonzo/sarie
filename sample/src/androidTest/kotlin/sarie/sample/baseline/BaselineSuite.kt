@@ -36,7 +36,7 @@ class BaselineSuite {
     fun setUp() {
         server = MockWebServer()
         server.start()
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
         // BaselineSuite tests different install modes; honor the instrumentation runner arg.
         val runnerMode = InstrumentationRegistry.getArguments().getString("mode")
             ?: SampleAppRuntime.MODE_CRONET
@@ -51,7 +51,7 @@ class BaselineSuite {
     fun tearDown() {
         server.close()
         SampleAppRuntime.reset()
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
         installedMode = SampleAppRuntime.MODE_STOCK
     }
 
@@ -74,12 +74,13 @@ class BaselineSuite {
     }
 
     private fun assertFallbackOnly(expectedReason: Metrics.Reason) {
-        assertEquals(0, Metrics.cronet.get())
+        val routes = SampleAppRuntime.routes
+        assertEquals(0, routes.cronetCount())
         assertTrue(
-            "expected at least one fallback, got ${Metrics.okhttpFallback.get()}",
-            Metrics.okhttpFallback.get() >= 1,
+            "expected at least one fallback, got ${routes.fallbackCount()}",
+            routes.fallbackCount() >= 1,
         )
-        assertEquals(expectedReason, Metrics.lastReason)
+        assertEquals(expectedReason, routes.lastReason())
     }
 
     @Test
@@ -210,10 +211,10 @@ class BaselineSuite {
         // cancel() (not close()): the close handshake is async and would leave the server
         // socket open for MockWebServer.close() in tearDown.
         ws.cancel()
-        assertEquals(0, Metrics.cronet.get())
-        assertTrue(Metrics.okhttpFallback.get() >= 1)
+        assertEquals(0, SampleAppRuntime.routes.cronetCount())
+        assertTrue(SampleAppRuntime.routes.fallbackCount() >= 1)
         // The handshake is cleartext, and the cleartext rule precedes the websocket rule.
-        assertEquals(Metrics.Reason.cleartext, Metrics.lastReason)
+        assertEquals(Metrics.Reason.cleartext, SampleAppRuntime.routes.lastReason())
 
         // (b) HTTPS forWebSocket call: policy denies with reason=websocket before any I/O.
         val dead = CountDownLatch(1)
@@ -233,7 +234,7 @@ class BaselineSuite {
         )
         assertTrue("dead-port websocket did not settle", dead.await(15, TimeUnit.SECONDS))
         assertTrue("expected stock-path connection failure", failed.get())
-        assertEquals(0, Metrics.cronet.get())
-        assertEquals(Metrics.Reason.websocket, Metrics.lastReason)
+        assertEquals(0, SampleAppRuntime.routes.cronetCount())
+        assertEquals(Metrics.Reason.websocket, SampleAppRuntime.routes.lastReason())
     }
 }

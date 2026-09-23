@@ -219,6 +219,51 @@ System.setProperty("okhttp.cronet.enabled", "false")
 
 ---
 
+## Metrics
+
+Pass an optional `SarieListener` to `install`. `onRouted` runs on the caller thread before any I/O. The `reason` is null when the call is going to Cronet, and a `Metrics.Reason` when it is going to stock OkHttp. The `Call` is the correlation key: tags stay on `call.request()`.
+
+`onFinished` runs on Sarie's listener thread, once per Cronet `UrlRequest` (a transport retry reports twice). The argument is Cronet's `RequestFinishedInfo`: wire `receivedByteCount` and `sentByteCount`, DNS / connect / SSL / TTFB timestamps, `socketReused`, and the failure. Cronet has already decoded the body, so `receivedByteCount` is smaller than the string you read. A provider that rejects `setRequestFinishedListener` (some HttpEngine builds) skips `onFinished` for that engine.
+
+There are no process-wide counters. Count `onRouted` and `onFinished` in the listener if you need a total.
+
+```kotlin
+SarieBridge.install(context, client, listener = object : SarieListener {
+    override fun onRouted(call: Call, reason: Metrics.Reason?) {
+        val operation = call.request().tag(Operation::class)
+    }
+
+    override fun onFinished(call: Call, info: RequestFinishedInfo) {
+        val wireBytes = info.metrics.receivedByteCount
+    }
+})
+```
+
+---
+
+## Why HTTP/3
+
+Reddit published the result of moving Android feed traffic to HTTP/3: feed failure rate −10.1%, main feed request latency −1.36%, and slow video starts (over 1s) −14.53%. The write-up is [`docs/reddit-journey-to-http3-on-android.md`](docs/reddit-journey-to-http3-on-android.md).
+
+---
+
+## Coming from cronet-okhttp
+
+| Problem on the Cronet path | Sarie |
+| --- | --- |
+| Request tags dropped | The request stays an OkHttp `Call`. Read tags from `call.request()`. |
+| Flipper / network interceptors blind | Network interceptors run before the Cronet hop. |
+| Fork and package relocation to A/B | No fork. `SarieListener.onRouted` says which transport and why. `okhttp.cronet.enabled=false` turns it off. |
+| Upstream OkHttp contract drift | The plugin's recipe registry fails the build on an unexpected OkHttp shape. |
+| Wire bytes, DNS, connect, TTFB | `SarieListener.onFinished` hands over Cronet's `RequestFinishedInfo`. |
+| Cold engine on the first request | Call `install` off the main thread early. Calls made before it returns use stock OkHttp and do not wait. |
+| Preconnect and request priority | One HEAD through the `OkHttpClient` after `install`, plus `addQuicHint`. Priority is the mapper. |
+| Stale DNS | On by default. `configure` can turn it off. |
+
+Sarie does not invent an `InetAddress`, a `Connection`, or a handshake for OkHttp's `EventListener`. It does not show compressed bytes inside a network interceptor, because Cronet decodes the body first. POST 0-RTT is a QUIC limit.
+
+---
+
 ## How this project compares with `google/cronet-transport-for-okhttp`
 
 Google provides an official integration in [`google/cronet-transport-for-okhttp`](https://github.com/google/cronet-transport-for-okhttp). While that library served as inspiration, Sarie was designed to address fundamental architectural and operational shortcomings:
@@ -231,7 +276,7 @@ Google provides an official integration in [`google/cronet-transport-for-okhttp`
 
 2. **Fail-closed pre-send safety vs. Silent configuration bypass**:
    - `google/cronet-transport-for-okhttp` forces requests through Cronet even when the `OkHttpClient` has configurations Cronet does not support (such as custom proxy selectors, custom SSL socket factories, or OkHttp caches). This **silently bypasses your security and proxy configurations**.
-   - **Sarie** evaluates a pre-send policy before starting any request. If an unsupported client configuration is detected, it cleanly falls back to stock OkHttp with an explicit reason recorded in metrics.
+   - **Sarie** evaluates a pre-send policy before starting any request. If an unsupported client configuration is detected, it falls back to stock OkHttp and reports the reason to `SarieListener.onRouted`.
 
 3. **Immediate cancellation vs. Polling lag**:
    - `google/cronet-transport-for-okhttp` checks for call cancellation using a periodic polling loop (~500 ms delay).
@@ -255,7 +300,7 @@ Google provides an official integration in [`google/cronet-transport-for-okhttp`
 | --- | --- | --- |
 | **Integration** | Must add `CronetInterceptor` or use `CronetCallFactory` | Build-time bytecode rewrite; zero client modifications |
 | **Interceptor placement** | Must be last; reordering silently drops downstream interceptors | Sits below all application interceptors; none are skipped |
-| **Unsupported client config** (proxy, unbridged pins, custom trust, …) | Dispatched to Cronet anyway; OkHttp configs silently bypassed | Fail-closed pre-send fallback to stock OkHttp with metrics |
+| **Unsupported client config** (proxy, unbridged pins, custom trust, …) | Dispatched to Cronet anyway; OkHttp configs silently bypassed | Fail-closed pre-send fallback to stock OkHttp; `SarieListener.onRouted` gets the reason |
 | **OkHttp Cache** | Cronet responses never cached | OkHttp's cache stores Cronet responses (no TLS block; a hit has `handshake == null`). Cronet's HTTP cache is off. |
 | **WebSocket** | Fails / Unsupported | Transparently routed to stock OkHttp |
 | **Cancellation** | ~500 ms poll loop | Immediate, via OkHttp `Call.addEventListener` |
