@@ -91,21 +91,61 @@ public class Dump {
         "INVOKEVIRTUAL okhttp3/internal/http/RealInterceptorChain.proceed (Lokhttp3/Request;)",
     };
 
+    static final String[] CALL_SERVER_PREFIX = {
+        "ALOAD 1",
+        "LDC chain",
+        "INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNullParameter (Ljava/lang/Object;Ljava/lang/String;)V",
+        "ALOAD 1",
+        "CHECKCAST okhttp3/internal/http/RealInterceptorChain",
+        "ASTORE 2",
+        "ALOAD 2",
+        "INVOKEVIRTUAL okhttp3/internal/http/RealInterceptorChain.getExchange$okhttp ()Lokhttp3/internal/connection/Exchange;",
+        "DUP",
+        "INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNull (Ljava/lang/Object;)V",
+        "ASTORE 3",
+    };
+
     public static void main(String[] args) throws Exception {
         byte[] in = Files.readAllBytes(Path.of(args[0]));
+        String mode = args.length > 3 ? args[3] : "connect";
         dump(in, Path.of(args[1]));
-        dump(rewrite(in), Path.of(args[2]));
+        dump(mode.equals("callserver") ? rewriteCallServer(in) : rewrite(in), Path.of(args[2]));
         StringBuilder sb = new StringBuilder();
         for (byte b : MessageDigest.getInstance("SHA-256").digest(in)) sb.append(String.format("%02x", b));
         System.out.println(sb);
         List<String> insns = new ArrayList<>();
         record(in, insns);
+        if (mode.equals("callserver")) {
+            List<String> problems = verifyCallServerPrefix(insns);
+            System.out.println("SHAPE callserver-prefix" + (problems.isEmpty() ? " MATCH" : " NOMATCH"));
+            for (String p : problems) System.out.println("PROBLEM " + p);
+            if (!problems.isEmpty()) {
+                for (String i : insns) System.out.println("INSN " + i);
+            }
+            return;
+        }
         List<String> problems = verify(insns);
         System.out.println("SHAPE " + SHAPE_NAME + (problems.isEmpty() ? " MATCH" : " NOMATCH"));
         for (String p : problems) System.out.println("PROBLEM " + p);
         if (!problems.isEmpty()) {
             for (String i : insns) System.out.println("INSN " + i);
         }
+    }
+
+    /** F7 prefix of CallServerInterceptor.intercept. Label ids are not part of the prefix. */
+    static List<String> verifyCallServerPrefix(List<String> insns) {
+        List<String> problems = new ArrayList<>();
+        if (insns.size() < CALL_SERVER_PREFIX.length) {
+            problems.add("expected CallServerInterceptor.intercept to start with the pinned F7 prefix");
+            return problems;
+        }
+        for (int i = 0; i < CALL_SERVER_PREFIX.length; i++) {
+            if (!insns.get(i).equals(CALL_SERVER_PREFIX[i])) {
+                problems.add("expected CallServerInterceptor.intercept to start with the pinned F7 prefix");
+                return problems;
+            }
+        }
+        return problems;
     }
 
     /** Same checks, order and message texts as GuardSpec.verify. */
@@ -162,7 +202,7 @@ public class Dump {
                         insns.add(NAME.getOrDefault(opcode, "?") + " " + owner + "." + name + " " + descriptor);
                     }
                     @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
-                        insns.add(NAME.getOrDefault(opcode, "?") + " L" + System.identityHashCode(label));
+                        insns.add(NAME.getOrDefault(opcode, "?") + " L" + labelId(label));
                     }
                     @Override public void visitLdcInsn(Object value) { insns.add("LDC " + value); }
                     @Override public void visitIincInsn(int value, int increment) {
@@ -192,6 +232,18 @@ public class Dump {
 
     // Readable names for the recorded stream; asm-util's Printer.OPCODES mirrors this but we
     // keep the plugin's hand-rolled map so both sides stay format-identical.
+    static final java.util.IdentityHashMap<org.objectweb.asm.Label, Integer> LABELS =
+        new java.util.IdentityHashMap<>();
+    static int labelSeq = 0;
+    static String labelId(org.objectweb.asm.Label label) {
+        Integer id = LABELS.get(label);
+        if (id == null) {
+            id = labelSeq++;
+            LABELS.put(label, id);
+        }
+        return "L" + id;
+    }
+
     static final Map<Integer, String> NAME = Map.ofEntries(
         Map.entry(Opcodes.NOP, "NOP"),
         Map.entry(Opcodes.ACONST_NULL, "ACONST_NULL"),
@@ -257,6 +309,99 @@ public class Dump {
         }, ClassReader.SKIP_FRAMES);
         return cw.toByteArray();
     }
+
+    /** Prefix injection after the 3-instruction Kotlin preamble. Frames use a lenient hierarchy. */
+    static byte[] rewriteCallServer(byte[] bytes) {
+        ClassReader reader = new ClassReader(bytes);
+        ClassWriter cw = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                try {
+                    return super.getCommonSuperClass(type1, type2);
+                } catch (RuntimeException e) {
+                    return "java/lang/Object";
+                }
+            }
+        };
+        reader.accept(new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                    String signature, String[] exceptions) {
+                MethodVisitor target = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!name.equals(INTERCEPT_NAME) || !descriptor.equals(INTERCEPT_DESC)) return target;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    int instructions = 0;
+                    boolean injected = false;
+                    @Override public void visitCode() { target.visitCode(); }
+                    @Override public void visitInsn(int opcode) {
+                        target.visitInsn(opcode);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitIntInsn(int opcode, int operand) {
+                        target.visitIntInsn(opcode, operand);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitVarInsn(int opcode, int value) {
+                        target.visitVarInsn(opcode, value);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitTypeInsn(int opcode, String type) {
+                        target.visitTypeInsn(opcode, type);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
+                        target.visitFieldInsn(opcode, owner, name, descriptor);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitMethodInsn(int opcode, String owner, String name,
+                            String descriptor, boolean isInterface) {
+                        target.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
+                        target.visitJumpInsn(opcode, label);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitLabel(org.objectweb.asm.Label label) { target.visitLabel(label); }
+                    @Override public void visitLdcInsn(Object value) {
+                        target.visitLdcInsn(value);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitIincInsn(int value, int increment) {
+                        target.visitIincInsn(value, increment);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitTryCatchBlock(org.objectweb.asm.Label start, org.objectweb.asm.Label end,
+                            org.objectweb.asm.Label handler, String type) {
+                        target.visitTryCatchBlock(start, end, handler, type);
+                    }
+                    @Override public void visitLineNumber(int line, org.objectweb.asm.Label start) {
+                        target.visitLineNumber(line, start);
+                    }
+                    @Override public void visitMaxs(int maxStack, int maxLocals) {
+                        target.visitMaxs(maxStack + 2, maxLocals);
+                    }
+                    @Override public void visitEnd() { target.visitEnd(); }
+                    void afterInstruction(MethodVisitor target) {
+                        instructions++;
+                        if (!injected && instructions == 3) {
+                            org.objectweb.asm.Label stock = new org.objectweb.asm.Label();
+                            target.visitVarInsn(Opcodes.ALOAD, 1);
+                            target.visitMethodInsn(Opcodes.INVOKESTATIC, "sarie/bridge/CronetBridge",
+                                    "callServer", INTERCEPT_DESC, false);
+                            target.visitInsn(Opcodes.DUP);
+                            target.visitJumpInsn(Opcodes.IFNULL, stock);
+                            target.visitInsn(Opcodes.ARETURN);
+                            target.visitLabel(stock);
+                            target.visitInsn(Opcodes.POP);
+                            injected = true;
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_FRAMES);
+        return cw.toByteArray();
+    }
 }
 EOF
 
@@ -317,13 +462,62 @@ $(grep -E '^(PROBLEM|INSN) ' <<<"$ANDROID_OUT")
   for P in "${PINNED[@]}"; do
     if [ "$P" = "$V" ]; then PINNED_CELL=yes; fi
   done
-  REPORT_ROWS+="| $V | \`$ANDROID_HASH\` / \`$JVM_HASH\` | $( [ "${VERIFIED_MAP[$V]}" = yes ] && echo "$SHAPE_NAME" || echo '-' ) | $PINNED_CELL | $NOTES |
+
+  VER_ID="$(echo "$V" | tr '.-' '__')"
+  KT_BODY+="    val CONNECT_INTERCEPTOR_ANDROID_${VER_ID} = \"$ANDROID_HASH\"
+    val CONNECT_INTERCEPTOR_JVM_${VER_ID} = \"$JVM_HASH\"
+"
+  CALL_MAP=""
+  CS_CELL="-"
+  # Historical dumps stay ConnectInterceptor-only. Pinned versions also fingerprint
+  # CallServerInterceptor on both artifacts; a prefix miss fails the pin.
+  if [ "$PINNED_CELL" = yes ]; then
+    rm -rf "$CACHE/android-cs-$V" "$CACHE/jvm-cs-$V"
+    unzip -q -o "$CACHE/aar-x-$V/classes.jar" okhttp3/internal/http/CallServerInterceptor.class -d "$CACHE/android-cs-$V"
+    unzip -q -o "$CACHE/okhttp-jvm-$V.jar" okhttp3/internal/http/CallServerInterceptor.class -d "$CACHE/jvm-cs-$V"
+    cp "$CACHE/android-cs-$V/okhttp3/internal/http/CallServerInterceptor.class" "$VRES/android/CallServerInterceptor.class"
+    cp "$CACHE/jvm-cs-$V/okhttp3/internal/http/CallServerInterceptor.class" "$VRES/jvm/CallServerInterceptor.class"
+    CS_ANDROID_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/android/CallServerInterceptor.class" "$VRES/android/CallServerInterceptor.stock.txt" "$VRES/android/CallServerInterceptor.rewritten.txt" callserver)"
+    CS_JVM_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/jvm/CallServerInterceptor.class" "$VRES/jvm/CallServerInterceptor.stock.txt" "$VRES/jvm/CallServerInterceptor.rewritten.txt" callserver)"
+    CS_ANDROID_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CS_ANDROID_OUT")"
+    CS_JVM_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CS_JVM_OUT")"
+    KT_BODY+="    val CALL_SERVER_INTERCEPTOR_ANDROID_${VER_ID} = \"$CS_ANDROID_HASH\"
+    val CALL_SERVER_INTERCEPTOR_JVM_${VER_ID} = \"$CS_JVM_HASH\"
+"
+    CALL_MAP=",
+            InstrumentTarget.CALL_SERVER_INTERCEPTOR to mapOf(
+                Variant.ANDROID to CALL_SERVER_INTERCEPTOR_ANDROID_${VER_ID},
+                Variant.JVM to CALL_SERVER_INTERCEPTOR_JVM_${VER_ID},
+            )"
+    if grep -q "SHAPE callserver-prefix MATCH" <<<"$CS_ANDROID_OUT" && grep -q "SHAPE callserver-prefix MATCH" <<<"$CS_JVM_OUT"; then
+      CS_CELL="callserver-prefix"
+    else
+      VERIFIED_MAP[$V]=no
+      CS_CELL="NOMATCH"
+      REASON="CallServerInterceptor.intercept does not match the pinned F7 prefix"
+      NOTES="EXCLUDED: $REASON"
+      EXCLUDED_SECTIONS+="### $V CallServerInterceptor
+
+$REASON. Problems reported by the shape check (android variant; jvm equivalent omitted):
+
+\`\`\`
+$(grep -E '^(PROBLEM|INSN) ' <<<"$CS_ANDROID_OUT")
+\`\`\`
+
+"
+    fi
+    echo "$V callserver: android=$CS_ANDROID_HASH jvm=$CS_JVM_HASH shape=$CS_CELL"
+  fi
+
+  REPORT_ROWS+="| $V | \`$ANDROID_HASH\` / \`$JVM_HASH\` | $( [ "${VERIFIED_MAP[$V]}" = yes ] && echo "$SHAPE_NAME" || echo '-' ) | $PINNED_CELL | $CS_CELL | $NOTES |
 "
 
-  KT_BODY+="    val OKHTTP_ANDROID_$(echo "$V" | tr '.-' '__') = \"$ANDROID_HASH\"
-    val OKHTTP_JVM_$(echo "$V" | tr '.-' '__') = \"$JVM_HASH\"
-"
-  KT_WHEN+="        \"$V\" -> mapOf(Variant.ANDROID to OKHTTP_ANDROID_$(echo "$V" | tr '.-' '__'), Variant.JVM to OKHTTP_JVM_$(echo "$V" | tr '.-' '__'))
+  KT_WHEN+="        \"$V\" -> mapOf(
+            InstrumentTarget.CONNECT_INTERCEPTOR to mapOf(
+                Variant.ANDROID to CONNECT_INTERCEPTOR_ANDROID_${VER_ID},
+                Variant.JVM to CONNECT_INTERCEPTOR_JVM_${VER_ID},
+            )${CALL_MAP},
+        )
 "
 
   echo "$V: android=$ANDROID_HASH jvm=$JVM_HASH verified=${VERIFIED_MAP[$V]}"
@@ -370,7 +564,7 @@ package sarie.plugin
 // artifacts (see plugin/recipe-verification-report.md). Do not hand-edit.
 object GoldenFingerprints {
 $KT_BODY
-    fun fingerprintsFor(version: String): Map<Variant, String>? = when (version) {
+    fun fingerprintsFor(version: String): Map<InstrumentTarget, Map<Variant, String>>? = when (version) {
 $KT_WHEN        else -> null
     }
 }
@@ -379,14 +573,14 @@ EOF
 REPORT_BODY="# OkHttp recipe verification report
 
 Generated by \`plugin/scripts/generate-fingerprints.sh\` (pinned Maven Central artifacts).
-Structural check = \`RecipeRegistry.CANONICAL_GUARD\` evaluated with ASM 9.7.1, mirroring
-\`GuardSpec.verify\` (single CHECKCAST to okhttp3/internal/http/RealInterceptorChain within the
-first 5 instructions, initExchange\$okhttp x1, copy\$okhttp\$default x1, proceed x1, ends ARETURN).
-A version is pinned in \`RecipeRegistry\` only when BOTH variants match; versions matching no
+ConnectInterceptor structural check = \`RecipeRegistry.CANONICAL_GUARD\` (ASM 9.7.1).
+Pinned versions also require the CallServerInterceptor F7 prefix on both artifacts.
+Historical (unpinned) versions stay ConnectInterceptor-only so an unpinned shape cannot fail the script.
+A version is pinned in \`RecipeRegistry\` only when every checked shape matches; versions matching no
 registered shape are excluded, never force-fit. Do not hand-edit; rerun the script.
 
-| okhttp version | ConnectInterceptor.class sha256 (android / jvm) | guard matched | pinned | notes |
-|---|---|---|---|---|
+| okhttp version | ConnectInterceptor.class sha256 (android / jvm) | connect guard | pinned | callserver guard | notes |
+|---|---|---|---|---|---|
 $REPORT_ROWS
 $EXCLUDED_SECTIONS"
 

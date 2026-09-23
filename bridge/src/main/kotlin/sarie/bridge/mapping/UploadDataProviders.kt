@@ -38,6 +38,26 @@ import org.chromium.net.UploadDataProvider
 import org.chromium.net.UploadDataSink
 
 /**
+ * Header-phase request-body events. Fired from the upload pump (Cronet's upload thread or
+ * the body reader), once each. The callbacks must not block or do I/O.
+ */
+class RequestBodyEvents(
+    private val onStart: () -> Unit,
+    private val onEnd: (Long) -> Unit,
+) {
+    private val started = AtomicBoolean(false)
+    private val ended = AtomicBoolean(false)
+
+    fun start() {
+        if (started.compareAndSet(false, true)) onStart()
+    }
+
+    fun end(byteCount: Long) {
+        if (ended.compareAndSet(false, true)) onEnd(byteCount)
+    }
+}
+
+/**
  * Creates [UploadDataProvider]s bridging OkHttp [RequestBody]s to Cronet.
  *
  * Decision rule: buffered (fully materialized in memory, rewindable) for replayable
@@ -53,10 +73,11 @@ object UploadDataProviders {
         body: RequestBody,
         bodyReaderExecutor: ExecutorService,
         writeTimeoutMillis: Long,
+        requestBodyEvents: RequestBodyEvents? = null,
     ): UploadDataProvider = if (body.isOneShot() || body.contentLength() == -1L) {
-        StreamingUploadDataProvider(body, bodyReaderExecutor, writeTimeoutMillis)
+        StreamingUploadDataProvider(body, bodyReaderExecutor, writeTimeoutMillis, requestBodyEvents)
     } else {
-        BufferedUploadDataProvider(body, bodyReaderExecutor, writeTimeoutMillis)
+        BufferedUploadDataProvider(body, bodyReaderExecutor, writeTimeoutMillis, requestBodyEvents)
     }
 
     /**
@@ -67,6 +88,7 @@ object UploadDataProviders {
         private val body: RequestBody,
         private val bodyReaderExecutor: ExecutorService,
         writeTimeoutMillis: Long,
+        private val requestBodyEvents: RequestBodyEvents?,
     ) : UploadDataProvider() {
 
         private val writeTimeoutMillis: Long =
@@ -79,7 +101,13 @@ object UploadDataProviders {
 
         @Synchronized
         override fun read(sink: UploadDataSink, buffer: ByteBuffer) {
-            val data = materialized ?: materialize().also { materialized = it }
+            val data = materialized ?: run {
+                requestBodyEvents?.start()
+                materialize().also {
+                    materialized = it
+                    requestBodyEvents?.end(it.size.toLong())
+                }
+            }
             if (offset == data.size) {
                 // Known-length bodies shouldn't be over-read by Cronet; this is a safeguard.
                 throw IllegalStateException("The source has been exhausted but we expected more!")
@@ -126,6 +154,7 @@ object UploadDataProviders {
         private val body: RequestBody,
         private val readExecutor: ExecutorService,
         writeTimeoutMillis: Long,
+        private val requestBodyEvents: RequestBodyEvents?,
     ) : UploadDataProvider() {
 
         private val writeTimeoutMillis: Long =
@@ -142,7 +171,11 @@ object UploadDataProviders {
 
             try {
                 if (getLength() == -1L) {
-                    sink.onReadSucceeded(readFromOkHttp(buffer) == ReadResult.END_OF_BODY)
+                    val result = readFromOkHttp(buffer)
+                    if (result == ReadResult.END_OF_BODY) {
+                        requestBodyEvents?.end(totalBytesReadFromOkHttp)
+                    }
+                    sink.onReadSucceeded(result == ReadResult.END_OF_BODY)
                 } else {
                     readKnownBodyLength(sink, buffer)
                 }
@@ -195,6 +228,7 @@ object UploadDataProviders {
             }
 
             buffer.position(bufferPosition)
+            requestBodyEvents?.end(totalBytesReadFromOkHttp)
             sink.onReadSucceeded(false)
         }
 
@@ -209,6 +243,7 @@ object UploadDataProviders {
         private fun ensureReadTaskStarted() {
             // No concurrent calls expected, so a simple flag suffices.
             if (readTask == null) {
+                requestBodyEvents?.start()
                 readTask = readExecutor.submit(
                     Callable {
                         try {

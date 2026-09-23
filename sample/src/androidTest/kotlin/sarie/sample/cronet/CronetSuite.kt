@@ -2,6 +2,7 @@ package sarie.sample.cronet
 
 import sarie.bridge.Metrics
 import sarie.bridge.SarieBridge
+import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -528,6 +529,33 @@ class CronetSuite {
         assertEquals(listOf<Route?>(null), routes)
         // 401 and the Authorization retry both stay on Cronet.
         assertCronetServed(minCount = 2)
+    }
+
+    @Test
+    fun networkInterceptorsSeeRequestResponseAndHttp3() {
+        NetworkParity.loggingAndChuckerSeeHttp3 {
+            installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        }
+    }
+
+    @Test
+    fun networkInterceptorHeaderReachesOrigin() {
+        NetworkParity.addedHeaderReachesOrigin({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorUrlAndProceedGuards() {
+        NetworkParity.urlGuardsThrowStockMessages({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorReadTimeoutAbortsStall() {
+        NetworkParity.readTimeoutFromNetworkInterceptorAborts({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun eventListenerHeaderOrderAroundCronetHandoff() {
+        NetworkParity.eventListenerHeaderOrder({ installCronet(quicHintHost = null) }, ORIGIN)
     }
 
     @Test

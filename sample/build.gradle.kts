@@ -81,6 +81,7 @@ dependencies {
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.okhttp.logging)
     androidTestImplementation("com.squareup.okhttp3:mockwebserver3:$okhttpVersionForTests")
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.core)

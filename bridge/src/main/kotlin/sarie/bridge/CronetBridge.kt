@@ -3,6 +3,7 @@
 package sarie.bridge
 
 import sarie.bridge.mapping.OkHttpBridgeCallback
+import sarie.bridge.mapping.RequestBodyEvents
 import sarie.bridge.mapping.RequestConverter
 import sarie.bridge.mapping.ResponseConverter
 import java.io.IOException
@@ -16,6 +17,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.logging.Level
 import java.util.logging.Logger
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.Interceptor
 import okhttp3.MediaType
 import okhttp3.Request
@@ -41,17 +44,21 @@ import org.chromium.net.UrlRequest
  * itself, which would recurse into this bridge).
  *
  * Bounded differences on the Cronet path (compatibility contract):
- * - No Exchange is ever created, so OkHttp emits no connect/DNS/request-header/response-header
- *   or body events. [okhttp3.EventListener.callEnd] still fires at header return: when the
+ * - No Exchange is ever created. The allow branch proceeds the real chain with no exchange, so
+ *   the app's network interceptors run, then the rewritten CallServerInterceptor calls
+ *   [callServer]. [okhttp3.EventListener.callEnd] still fires at header return: when the
  *   response unwinds, RealCall.getResponseWithInterceptorChain's finally runs
  *   noMoreExchanges -> callDone (bytecode-verified on 5.5.0), and callDone fires callEnd since
  *   no stream flags were ever opened. callFailed fires only if the chain fails before that.
+ * - Header events are emitted from the terminal hop (handoff/delivery by Cronet, not on-wire).
+ *   Connect, DNS, secure-connect and response-body events are not emitted. Response-body events
+ *   would land after callEnd.
  * - callTimeout is evaluated inside callDone, so it bounds the pre-return (header) phase only;
  *   body streaming happens after callDone and is bounded by readTimeout (header wait and every
- *   body read).
- * - Network interceptors never run (policy denies clients that have them).
- * - No fabricated metadata: handshake and networkResponse stay unset; the sent/received
- *   timestamps come from bridge-owned clocks (RequestConverter start / onResponseStarted).
+ *   body read). A network interceptor's withReadTimeout is the chain timeout the hop uses.
+ * - chain.connection() stays null. No fabricated metadata: handshake and networkResponse stay
+ *   unset; the sent/received timestamps come from bridge-owned clocks
+ *   (RequestConverter start / onResponseStarted).
  * - Redirects surface as 3xx with an empty body for OkHttp's follow-up logic to follow.
  * - 401 is returned so RetryAndFollowUp calls authenticator.authenticate(route = null, response).
  * - 407 is rejected with ProtocolException("Received HTTP_PROXY_AUTH (407) code while not using proxy"),
@@ -111,12 +118,68 @@ object CronetBridge {
         }
         return if (decision.allow) {
             Metrics.record(Metrics.Path.CRONET, null)
-            cronetPath(realChain, snapshot!!)
+            val call = realChain.call
+            // No exchange: OkHttp runs network interceptors and lands in callServer.
+            RoutedCycle.open(call, realChain.request.url)
+            try {
+                val response = realChain.proceed(realChain.request)
+                if (!RoutedCycle.reached(call)) {
+                    throw IllegalStateException(exactlyOnceMessage(call))
+                }
+                response
+            } finally {
+                RoutedCycle.close(call)
+            }
         } else {
             Metrics.record(Metrics.Path.FALLBACK, decision.reason)
             stockFallback(realChain)
         }
     }
+
+    /**
+     * Terminal hop for a Sarie-routed call. Descriptor
+     * `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`.
+     *
+     * A non-null exchange means stock OkHttp reached CallServerInterceptor; return null and the
+     * stock body runs. Stock never arrives here with a null exchange (it would NPE), so a null
+     * exchange means this bridge proceeded without one.
+     *
+     * The checks are the ones [okhttp3.internal.http.RealInterceptorChain.proceed] skips when
+     * `exchange == null` (OkHttp 5.5.0, RealInterceptorChain.kt:317-339).
+     */
+    @JvmStatic
+    @Throws(IOException::class)
+    fun callServer(chain: Interceptor.Chain): Response? {
+        val realChain = chain as RealInterceptorChain
+        if (realChain.exchange != null) return null
+        val call = realChain.call
+        val cycle = RoutedCycle.current(call)
+            ?: throw IllegalStateException("Sarie terminal hop without a routed cycle")
+        val url = realChain.request.url
+        if (url.scheme != cycle.scheme || url.host != cycle.host || url.port != cycle.port) {
+            throw IllegalStateException(sameAddressMessage(call))
+        }
+        if (!RoutedCycle.arrive(call)) {
+            throw IllegalStateException(exactlyOnceMessage(call))
+        }
+        val snapshot = SarieBridge.snapshot()
+            ?: throw IOException("Cronet engine is not installed")
+        return cronetPath(realChain, snapshot)
+    }
+
+    /**
+     * RealInterceptorChain.kt:319 — stock's message. Scheme is checked too (the plan requires
+     * it); stock's sameHostAndPort does not mention scheme, and neither does this message.
+     */
+    private fun sameAddressMessage(call: RealCall): String =
+        "network interceptor ${blamedNetworkInterceptor(call)} must retain the same host and port"
+
+    /** RealInterceptorChain.kt:322 and :338. */
+    private fun exactlyOnceMessage(call: RealCall): String =
+        "network interceptor ${blamedNetworkInterceptor(call)} must call proceed() exactly once"
+
+    private fun blamedNetworkInterceptor(call: RealCall): Any =
+        call.client.networkInterceptors.lastOrNull() ?: "unknown"
 
     /**
      * Literal stock ConnectInterceptor body. `index` is private (no getter), so the full-arg
@@ -144,13 +207,34 @@ object CronetBridge {
             responseConverter = ResponseConverter(),
         )
 
+        val events = BridgeEvents(call)
         var retried = false
         while (true) {
-            val converted = converter.convert(request, readTimeoutMillis, writeTimeoutMillis)
+            events.requestHeadersStart()
+            var reportedOutcome = false
+            val converted = try {
+                converter.convert(
+                    request,
+                    readTimeoutMillis,
+                    writeTimeoutMillis,
+                    requestBodyEvents = RequestBodyEvents(
+                        onStart = events::requestBodyStart,
+                        onEnd = events::requestBodyEnd,
+                    ),
+                    onResponseHeadersStart = { events.responseHeadersStart() },
+                )
+            } catch (e: IOException) {
+                events.requestFailed(e)
+                throw e
+            }
             val urlRequest = converted.urlRequest
 
             // 5-step ordered cancellation protocol (Metis B3).
-            if (call.isCanceled()) throw IOException(CANCELED_MESSAGE) // (i)
+            if (call.isCanceled()) {
+                val canceled = IOException(CANCELED_MESSAGE)
+                events.requestFailed(canceled)
+                throw canceled
+            } // (i)
             val handle = CallRegistry.register(call, AtomicReference(urlRequest)) // (ii)
             try {
                 try {
@@ -159,6 +243,7 @@ object CronetBridge {
                         throw IOException(CANCELED_MESSAGE)
                     }
                     urlRequest.start() // (iv)
+                    events.requestHeadersEnd(request)
                     if (call.isCanceled()) { // (v)
                         handle.cancelUrlRequestOnce()
                         throw IOException(CANCELED_MESSAGE)
@@ -167,6 +252,9 @@ object CronetBridge {
                     awaitHeaders(converted.callback, handle, readTimeoutMillis)
                 } catch (e: IOException) {
                     // Pre-headers transport failure: the single idempotent retry (see KDoc).
+                    if (converted.callback.responseHeadersDelivered) events.responseFailed(e)
+                    else events.requestFailed(e)
+                    reportedOutcome = true
                     CallRegistry.unregister(call)
                     if (!retried && isRetryable(e, call, request)) {
                         retried = true
@@ -177,6 +265,8 @@ object CronetBridge {
                 }
 
                 val response = converted.getResponse()
+                events.responseHeadersEnd(response)
+                reportedOutcome = true
                 if (response.code == 407) {
                     response.body.closeQuietly()
                     throw ProtocolException(PROXY_AUTH_MESSAGE)
@@ -184,6 +274,10 @@ object CronetBridge {
                 val body = response.body
                 return response.newBuilder().body(UnregisteringResponseBody(body, call)).build()
             } catch (e: Throwable) {
+                if (e is IOException && !reportedOutcome) {
+                    if (converted.callback.responseHeadersDelivered) events.responseFailed(e)
+                    else events.requestFailed(e)
+                }
                 CallRegistry.unregister(call)
                 throw e
             }
@@ -198,6 +292,20 @@ object CronetBridge {
             return SSLPeerUnverifiedException("Certificate pinning failure!")
         }
         return error
+    }
+
+    /** Header events only. The calls themselves do no I/O; Cronet-thread emits must not block. */
+    private class BridgeEvents(private val call: Call) {
+        private val listener: EventListener get() = (call as RealCall).eventListener
+
+        fun requestHeadersStart() = listener.requestHeadersStart(call)
+        fun requestHeadersEnd(request: Request) = listener.requestHeadersEnd(call, request)
+        fun requestBodyStart() = listener.requestBodyStart(call)
+        fun requestBodyEnd(byteCount: Long) = listener.requestBodyEnd(call, byteCount)
+        fun responseHeadersStart() = listener.responseHeadersStart(call)
+        fun responseHeadersEnd(response: Response) = listener.responseHeadersEnd(call, response)
+        fun requestFailed(ioe: IOException) = listener.requestFailed(call, ioe)
+        fun responseFailed(ioe: IOException) = listener.responseFailed(call, ioe)
     }
 
     /**

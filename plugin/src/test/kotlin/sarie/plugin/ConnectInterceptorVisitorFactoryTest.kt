@@ -15,9 +15,10 @@ import org.junit.Test
 class ConnectInterceptorVisitorFactoryTest {
 
     @Test
-    fun `isInstrumentable is exclusive to the exact ConnectInterceptor class`() {
+    fun `isInstrumentable accepts exactly the registered target classes`() {
         val factory = factory()
         assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.connection.ConnectInterceptor")))
+        assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.http.CallServerInterceptor")))
         for (other in listOf(
             "okhttp3.internal.connection.RetryAndFollowUpInterceptor",
             "okhttp3.internal.connection.RealCall",

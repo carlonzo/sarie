@@ -276,13 +276,13 @@ class PolicyEngineTest {
     }
 
     @Test
-    fun `network interceptor yields network_interceptors`() {
+    fun `network interceptors are not denied`() {
         val withNetInterceptor = OkHttpClient.Builder()
             .addNetworkInterceptor(Interceptor { throw UnsupportedOperationException("never invoked") })
             .build()
         val d = decision(input = inputFor(client = withNetInterceptor))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.network_interceptors, d.reason)
+        assertEquals(Decision(true, null), d)
+        assertEquals("network_interceptors", Metrics.Reason.network_interceptors.name)
     }
 
     @Test

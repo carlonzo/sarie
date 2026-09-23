@@ -17,18 +17,21 @@ class FingerprintTest {
     fun `baked constants equal sha256 of the stock goldens`() {
         for ((version, variant) in allRecipeVariants()) {
             val recipe = RecipeRegistry.forVersion(version)
-            assertEquals(
-                "$version/$variant",
-                recipe.fingerprints.getValue(variant),
-                Fingerprint.sha256Hex(stock(version, variant)),
-            )
+            for (target in InstrumentTarget.entries) {
+                assertEquals(
+                    "$version/$variant/${target.fileName}",
+                    recipe.fingerprints.getValue(target).getValue(variant),
+                    Fingerprint.sha256Hex(stock(version, variant, target.fileName)),
+                )
+            }
         }
     }
 
     @Test
     fun `mutated intercept body is detected with expected and actual hashes in the message`() {
         for ((version, variant) in allRecipeVariants()) {
-            val expected = RecipeRegistry.forVersion(version).fingerprints.getValue(variant)
+            val expected = RecipeRegistry.forVersion(version)
+                .fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR).getValue(variant)
             val mutated = mutateInterceptBody(stock(version, variant))
             val mutatedHash = Fingerprint.sha256Hex(mutated)
             assertNotEquals("$version/$variant", expected, mutatedHash)

@@ -24,23 +24,24 @@ data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
  * 6. non-https scheme -> cleartext
  * 7. forWebSocket -> websocket
  * 8. client cache -> cache
- * 9. network interceptors -> network_interceptors
- * 10. H2_PRIOR_KNOWLEDGE -> h2_prior_knowledge
- * 11. explicit proxy or non-baseline proxySelector -> proxy
- * 12. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
- * 13. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
- * 14. dns !== Dns.SYSTEM -> dns
- * 15. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
- * 16. TLS/trust fingerprint mismatch -> trust (Metis B1)
- * 17. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
+ * 9. H2_PRIOR_KNOWLEDGE -> h2_prior_knowledge
+ * 10. explicit proxy or non-baseline proxySelector -> proxy
+ * 11. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
+ * 12. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
+ * 13. dns !== Dns.SYSTEM -> dns
+ * 14. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
+ * 15. TLS/trust fingerprint mismatch -> trust (Metis B1)
+ * 16. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
  *     -> content_encoding
- * 18. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
+ * 17. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
  *     is a local-test-server concern, not a distinct transport incompatibility)
- * 19. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
- * 20. else allow
+ * 18. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
+ * 19. else allow
  *
  * Authenticators are not a routing rule. [Metrics.Reason.authenticator] is retired and is never
  * produced. A 401 is returned so OkHttp calls authenticator.authenticate(route = null, response).
+ * Network interceptors are not a deny. They run on OkHttp's own chain before the Cronet hop.
+ * [Metrics.Reason.network_interceptors] stays as a retired constant and is never produced.
  */
 object PolicyEngine {
 
@@ -55,9 +56,6 @@ object PolicyEngine {
         if (!input.request.url.isHttps) return Decision(false, Metrics.Reason.cleartext)
         if (input.forWebSocket) return Decision(false, Metrics.Reason.websocket)
         if (input.cache != null) return Decision(false, Metrics.Reason.cache)
-        if (input.networkInterceptors.isNotEmpty()) {
-            return Decision(false, Metrics.Reason.network_interceptors)
-        }
         if (input.protocols.any { it == Protocol.H2_PRIOR_KNOWLEDGE }) {
             return Decision(false, Metrics.Reason.h2_prior_knowledge)
         }

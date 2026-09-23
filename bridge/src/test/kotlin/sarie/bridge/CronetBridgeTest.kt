@@ -17,12 +17,16 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.http.CallServerInterceptor
 import okhttp3.internal.http.RealInterceptorChain
@@ -189,6 +193,7 @@ class CronetBridgeTest {
         System.clearProperty("okhttp.cronet.enabled")
         Metrics.resetForTest()
         CallRegistry.clearForTest()
+        RoutedCycle.clearForTest()
     }
 
     @After
@@ -197,6 +202,7 @@ class CronetBridgeTest {
         SarieBridge.uninstall()
         Metrics.resetForTest()
         CallRegistry.clearForTest()
+        RoutedCycle.clearForTest()
     }
 
     private fun install(engine: CronetEngine, vararg origins: String) {
@@ -209,16 +215,32 @@ class CronetBridgeTest {
         )
     }
 
-    /** Chain shape used by the Cronet path (no proceed happens on that path). */
+    /**
+     * Chain at the ConnectInterceptor position: index points at a stand-in for the rewritten
+     * CallServerInterceptor, which is what [CronetBridge.intercept] proceeds into.
+     */
     private fun cronetChain(
         client: OkHttpClient,
         url: String,
         method: String = "GET",
         body: RequestBody? = null,
+        network: List<Interceptor> = emptyList(),
     ): Pair<RealCall, RealInterceptorChain> {
         val request: Request = Request.Builder().url(url).method(method, body).build()
         val call = client.newCall(request) as RealCall
-        return call to RealInterceptorChain(call, emptyList(), 0, null, request, client)
+        val terminal = Interceptor { inner ->
+            CronetBridge.callServer(inner)
+                ?: throw AssertionError("exchange should be null on the cronet test chain")
+        }
+        val chain = RealInterceptorChain(
+            call,
+            network + terminal,
+            0,
+            null,
+            request,
+            client,
+        )
+        return call to chain
     }
 
     /**
@@ -572,6 +594,110 @@ class CronetBridgeTest {
 
         assertEquals(1, engine.builtRequests.size)
         assertEquals(0, Metrics.retries.get())
+    }
+
+    // --- network-interceptor checks RealInterceptorChain skips when exchange is null ---
+
+    @Test
+    fun `network interceptor host scheme or port change throws stock illegal state`() {
+        val engine = ScriptedCronetEngine()
+        install(engine, "example.com")
+        val host = Interceptor { chain ->
+            val url = chain.request().url.newBuilder().host("evil.example").build()
+            chain.proceed(chain.request().newBuilder().url(url).build())
+        }
+        assertStockAddress(host, "https://example.com/")
+
+        val scheme = Interceptor { chain ->
+            val url = chain.request().url.newBuilder().scheme("http").build()
+            chain.proceed(chain.request().newBuilder().url(url).build())
+        }
+        assertStockAddress(scheme, "https://example.com/")
+
+        val port = Interceptor { chain ->
+            val url = chain.request().url.newBuilder().port(9).build()
+            chain.proceed(chain.request().newBuilder().url(url).build())
+        }
+        assertStockAddress(port, "https://example.com/")
+        assertTrue(engine.builders.isEmpty())
+    }
+
+    @Test
+    fun `network interceptor proceed twice throws stock exactly once`() {
+        val engine = ScriptedCronetEngine()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200)
+        install(engine, "example.com")
+        val interceptor = Interceptor { chain ->
+            chain.proceed(chain.request()).close()
+            chain.proceed(chain.request())
+        }
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            CronetBridge.intercept(networkChain(interceptor))
+        }
+        assertEquals(
+            "network interceptor $interceptor must call proceed() exactly once",
+            thrown.message,
+        )
+    }
+
+    @Test
+    fun `network interceptor short-circuit throws stock exactly once`() {
+        val engine = ScriptedCronetEngine()
+        install(engine, "example.com")
+        val interceptor = Interceptor { chain ->
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("ok")
+                .body("short".toResponseBody(null))
+                .build()
+        }
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            CronetBridge.intercept(networkChain(interceptor))
+        }
+        assertEquals(
+            "network interceptor $interceptor must call proceed() exactly once",
+            thrown.message,
+        )
+        assertTrue(engine.builders.isEmpty())
+    }
+
+    @Test
+    fun `terminal hop emits requestHeadersStart before responseHeadersEnd`() {
+        val engine = ScriptedCronetEngine()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 204)
+        install(engine, "example.com")
+        val seen = mutableListOf<String>()
+        val client = OkHttpClient.Builder()
+            .eventListener(object : EventListener() {
+                override fun callStart(call: Call) { seen += "callStart" }
+                override fun requestHeadersStart(call: Call) { seen += "requestHeadersStart" }
+                override fun responseHeadersEnd(call: Call, response: Response) { seen += "responseHeadersEnd" }
+                override fun callEnd(call: Call) { seen += "callEnd" }
+            })
+            .build()
+        val (_, chain) = cronetChain(client, "https://example.com/")
+        CronetBridge.intercept(chain).close()
+        val headers = seen.indexOf("requestHeadersStart")
+        val response = seen.indexOf("responseHeadersEnd")
+        assertTrue("events=$seen", headers >= 0 && response > headers)
+    }
+
+    private fun assertStockAddress(interceptor: Interceptor, url: String) {
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            CronetBridge.intercept(networkChain(interceptor, url))
+        }
+        assertEquals(
+            "network interceptor $interceptor must retain the same host and port",
+            thrown.message,
+        )
+    }
+
+    private fun networkChain(interceptor: Interceptor, url: String = "https://example.com/"): RealInterceptorChain {
+        val client = OkHttpClient.Builder().addNetworkInterceptor(interceptor).build()
+        val (_, chain) = cronetChain(client, url, network = listOf(interceptor))
+        return chain
     }
 
     // --- shouldHandle never throws ---
