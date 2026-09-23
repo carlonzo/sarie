@@ -4,6 +4,7 @@ import java.net.ProxySelector
 import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.IdentityHashMap
+import javax.net.SocketFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.OkHttpClient
 
@@ -24,6 +25,8 @@ object TrustBaseline {
         val trustFingerprint: String,
         /** The stock client's proxySelector instance; identity baseline for the proxy rule. */
         val proxySelector: ProxySelector,
+        /** [SocketFactory.getDefault] class, captured once so the hot path skips that lock. */
+        val socketFactoryClass: Class<*>,
     )
 
     data class Verdict(val managerClass: Class<*>, val fingerprint: String)
@@ -36,20 +39,37 @@ object TrustBaseline {
             trustManagerClass = stockTm.javaClass,
             trustFingerprint = acceptedIssuersFingerprint(stockTm),
             proxySelector = stock.proxySelector,
+            socketFactoryClass = SocketFactory.getDefault().javaClass,
         )
     }
 
     private val verdicts = IdentityHashMap<X509TrustManager, Verdict>()
     private val verdictsLock = Any()
 
+    private class Seen(val manager: X509TrustManager, val verdict: Verdict)
+
+    @Volatile
+    private var lastSeen: Seen? = null
+
     private const val MEMO_MAX = 1024
 
-    /** Memoized (class, fingerprint) verdict for [trustManager]; recomputed only after overflow. */
-    fun verdictFor(trustManager: X509TrustManager): Verdict = synchronized(verdictsLock) {
-        verdicts[trustManager] ?: run {
-            val verdict = Verdict(trustManager.javaClass, acceptedIssuersFingerprint(trustManager))
-            if (verdicts.size >= MEMO_MAX) verdicts.clear()
-            verdicts[trustManager] = verdict
+    /**
+     * Memoized (class, fingerprint) verdict for [trustManager]. The last manager is served
+     * from [lastSeen] without taking [verdictsLock]. Recomputed only after overflow.
+     */
+    fun verdictFor(trustManager: X509TrustManager): Verdict {
+        val seen = lastSeen
+        if (seen != null && seen.manager === trustManager) return seen.verdict
+        return synchronized(verdictsLock) {
+            val again = lastSeen
+            if (again != null && again.manager === trustManager) return again.verdict
+            val verdict = verdicts[trustManager] ?: run {
+                val computed = Verdict(trustManager.javaClass, acceptedIssuersFingerprint(trustManager))
+                if (verdicts.size >= MEMO_MAX) verdicts.clear()
+                verdicts[trustManager] = computed
+                computed
+            }
+            lastSeen = Seen(trustManager, verdict)
             verdict
         }
     }
@@ -69,7 +89,10 @@ object TrustBaseline {
 
     internal fun memoizedCount(): Int = synchronized(verdictsLock) { verdicts.size }
 
-    internal fun clearMemoForTest() = synchronized(verdictsLock) { verdicts.clear() }
+    internal fun clearMemoForTest() = synchronized(verdictsLock) {
+        verdicts.clear()
+        lastSeen = null
+    }
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 }

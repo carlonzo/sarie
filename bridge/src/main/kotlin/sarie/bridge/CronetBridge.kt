@@ -4,8 +4,7 @@ package sarie.bridge
 
 import sarie.bridge.mapping.OkHttpBridgeCallback
 import sarie.bridge.mapping.RequestBodyEvents
-import sarie.bridge.mapping.RequestConverter
-import sarie.bridge.mapping.ResponseConverter
+
 import java.io.IOException
 import java.net.ProtocolException
 import java.net.SocketTimeoutException
@@ -99,7 +98,7 @@ object CronetBridge {
     /** Never throws: any policy failure fails closed to stock OkHttp. */
     @JvmStatic
     fun shouldHandle(chain: Interceptor.Chain): Boolean = try {
-        PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), SarieBridge.snapshot()).allow
+        PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), SarieBridge.snapshot()) == null
     } catch (t: Throwable) {
         logOnce(t)
         false
@@ -110,29 +109,29 @@ object CronetBridge {
     fun intercept(chain: Interceptor.Chain): Response {
         val realChain = chain as RealInterceptorChain
         val snapshot = SarieBridge.snapshot()
-        val decision = try {
+        val reason = try {
             PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snapshot)
         } catch (t: Throwable) {
             logOnce(t)
-            Decision(false, null) // fail closed to stock
+            Metrics.record(Metrics.Path.FALLBACK, null)
+            return stockFallback(realChain)
         }
-        return if (decision.allow) {
-            Metrics.record(Metrics.Path.CRONET, null)
-            val call = realChain.call
-            // No exchange: OkHttp runs network interceptors and lands in callServer.
-            RoutedCycle.open(call, realChain.request.url)
-            try {
-                val response = realChain.proceed(realChain.request)
-                if (!RoutedCycle.reached(call)) {
-                    throw IllegalStateException(exactlyOnceMessage(call))
-                }
-                response
-            } finally {
-                RoutedCycle.close(call)
+        if (reason != null) {
+            Metrics.record(Metrics.Path.FALLBACK, reason)
+            return stockFallback(realChain)
+        }
+        Metrics.record(Metrics.Path.CRONET, null)
+        val call = realChain.call
+        // No exchange: OkHttp runs network interceptors and lands in callServer.
+        RoutedCycle.open(call, realChain.request.url)
+        return try {
+            val response = realChain.proceed(realChain.request)
+            if (!RoutedCycle.reached(call)) {
+                throw IllegalStateException(exactlyOnceMessage(call))
             }
-        } else {
-            Metrics.record(Metrics.Path.FALLBACK, decision.reason)
-            stockFallback(realChain)
+            response
+        } finally {
+            RoutedCycle.close(call)
         }
     }
 
@@ -197,15 +196,11 @@ object CronetBridge {
         val request = realChain.request
         val readTimeoutMillis = realChain.readTimeoutMillis().toLong()
         val writeTimeoutMillis = realChain.writeTimeoutMillis().toLong()
-        val converter = RequestConverter(
-            cronetEngine = snapshot.engine,
-            // Distinct executors: Cronet posts UploadDataProvider callbacks onto the upload
-            // executor while the provider submits its body work to the reader executor -
-            // one shared single thread would self-deadlock until the write timeout.
-            uploadDataProviderExecutor = CronetUploadExecutor,
-            bodyReaderExecutor = CronetExecutor,
-            responseConverter = ResponseConverter(),
-        )
+        // Distinct executors live inside the snapshot converter: Cronet posts
+        // UploadDataProvider callbacks onto the upload executor while the provider submits
+        // its body work to the reader executor. One shared single thread would self-deadlock
+        // until the write timeout.
+        val converter = snapshot.requestConverter
 
         val events = BridgeEvents(call)
         var retried = false

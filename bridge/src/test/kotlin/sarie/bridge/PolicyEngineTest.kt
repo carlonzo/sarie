@@ -2,7 +2,9 @@
 
 package sarie.bridge
 
+import com.sun.management.ThreadMXBean
 import java.io.File
+import java.lang.management.ManagementFactory
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -34,8 +36,8 @@ import org.chromium.net.CronetEngine
 import org.chromium.net.UrlRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -184,7 +186,7 @@ class PolicyEngineTest {
     private fun decision(
         input: PolicyInput = inputFor(),
         snapshot: RuntimeSnapshot? = snap(),
-    ): Decision = PolicyEngine.shouldHandle(input, snapshot)
+    ): Metrics.Reason? = PolicyEngine.shouldHandle(input, snapshot)
 
     @Before
     fun setUp() {
@@ -208,8 +210,7 @@ class PolicyEngineTest {
     @Test
     fun `null snapshot yields engine_missing`() {
         val d = PolicyEngine.shouldHandle(inputFor(), null)
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.engine_missing, d.reason)
+        assertEquals(Metrics.Reason.engine_missing, d)
     }
 
     @Test
@@ -217,8 +218,7 @@ class PolicyEngineTest {
         try {
             System.setProperty("okhttp.cronet.enabled", "false")
             val d = decision()
-            assertFalse(d.allow)
-            assertEquals(Metrics.Reason.disabled, d.reason)
+            assertEquals(Metrics.Reason.disabled, d)
         } finally {
             System.clearProperty("okhttp.cronet.enabled")
         }
@@ -227,15 +227,13 @@ class PolicyEngineTest {
     @Test
     fun `policy disabled yields disabled`() {
         val d = decision(snapshot = snap(policy("example.com", enabled = false)))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.disabled, d.reason)
+        assertEquals(Metrics.Reason.disabled, d)
     }
 
     @Test
     fun `canceled call yields engine_missing (canceled is not a routing concern)`() {
         val d = decision(input = inputFor(canceled = true))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.engine_missing, d.reason)
+        assertEquals(Metrics.Reason.engine_missing, d)
     }
 
     @Test
@@ -247,22 +245,19 @@ class PolicyEngineTest {
         val call = client.newCall(request) as RealCall
         val chain = RealInterceptorChain(call, emptyList(), 0, null, request, client)
         val d = PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snap())
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.tag_opt_out, d.reason)
+        assertEquals(Metrics.Reason.tag_opt_out, d)
     }
 
     @Test
     fun `cleartext scheme yields cleartext`() {
         val d = decision(input = inputFor(url = "http://example.com/"))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.cleartext, d.reason)
+        assertEquals(Metrics.Reason.cleartext, d)
     }
 
     @Test
     fun `websocket call yields websocket`() {
         val d = decision(input = inputFor(forWebSocket = true))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.websocket, d.reason)
+        assertEquals(Metrics.Reason.websocket, d)
     }
 
     @Test
@@ -271,7 +266,7 @@ class PolicyEngineTest {
             .cache(Cache(Files.createTempDirectory("policy-cache").toFile(), 1024L * 1024))
             .build()
         val d = decision(input = inputFor(client = cached))
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
         assertEquals("cache", Metrics.Reason.cache.name)
     }
 
@@ -281,7 +276,7 @@ class PolicyEngineTest {
             .addNetworkInterceptor(Interceptor { throw UnsupportedOperationException("never invoked") })
             .build()
         val d = decision(input = inputFor(client = withNetInterceptor))
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
         assertEquals("network_interceptors", Metrics.Reason.network_interceptors.name)
     }
 
@@ -291,8 +286,7 @@ class PolicyEngineTest {
             .protocols(listOf(Protocol.H2_PRIOR_KNOWLEDGE))
             .build()
         val d = decision(input = inputFor(client = h2pk))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.h2_prior_knowledge, d.reason)
+        assertEquals(Metrics.Reason.h2_prior_knowledge, d)
     }
 
     @Test
@@ -300,12 +294,12 @@ class PolicyEngineTest {
         val auth = OkHttpClient.Builder()
             .authenticator { _, _ -> null }
             .build()
-        assertEquals(Decision(true, null), decision(input = inputFor(client = auth)))
+        assertNull(decision(input = inputFor(client = auth)))
 
         val proxyAuth = OkHttpClient.Builder()
             .proxyAuthenticator { _, _ -> null }
             .build()
-        assertEquals(Decision(true, null), decision(input = inputFor(client = proxyAuth)))
+        assertNull(decision(input = inputFor(client = proxyAuth)))
 
         // A proxy still denies, and it wins over a custom authenticator.
         val proxied = OkHttpClient.Builder()
@@ -313,8 +307,7 @@ class PolicyEngineTest {
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("192.0.2.1", 8080)))
             .build()
         val d = decision(input = inputFor(client = proxied))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.proxy, d.reason)
+        assertEquals(Metrics.Reason.proxy, d)
     }
 
     @Test
@@ -323,8 +316,7 @@ class PolicyEngineTest {
             .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("192.0.2.1", 8080)))
             .build()
         val d = decision(input = inputFor(client = proxied))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.proxy, d.reason)
+        assertEquals(Metrics.Reason.proxy, d)
     }
 
     @Test
@@ -336,8 +328,7 @@ class PolicyEngineTest {
             })
             .build()
         val d = decision(input = inputFor(client = customSelector))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.proxy, d.reason)
+        assertEquals(Metrics.Reason.proxy, d)
     }
 
     @Test
@@ -346,8 +337,7 @@ class PolicyEngineTest {
             .socketFactory(FakePlainSocketFactory())
             .build()
         val d = decision(input = inputFor(client = customSockets))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.socket_factory, d.reason)
+        assertEquals(Metrics.Reason.socket_factory, d)
     }
 
     @Test
@@ -356,8 +346,7 @@ class PolicyEngineTest {
             .hostnameVerifier { _, _ -> true }
             .build()
         val d = decision(input = inputFor(client = customVerifier))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.hostname_verifier, d.reason)
+        assertEquals(Metrics.Reason.hostname_verifier, d)
     }
 
     @Test
@@ -366,14 +355,13 @@ class PolicyEngineTest {
             .dns { throw UnsupportedOperationException("not called") }
             .build()
         val d = decision(input = inputFor(client = custom))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.dns, d.reason)
+        assertEquals(Metrics.Reason.dns, d)
     }
 
     @Test
     fun `Dns SYSTEM does not deny`() {
         val system = OkHttpClient.Builder().dns(Dns.SYSTEM).build()
-        assertEquals(Decision(true, null), decision(input = inputFor(client = system)))
+        assertNull(decision(input = inputFor(client = system)))
     }
 
     @Test
@@ -386,7 +374,7 @@ class PolicyEngineTest {
                     .build(),
             )
             .build()
-        assertEquals(Metrics.Reason.dns, decision(input = inputFor(client = client)).reason)
+        assertEquals(Metrics.Reason.dns, decision(input = inputFor(client = client)))
     }
 
     @Test
@@ -399,8 +387,7 @@ class PolicyEngineTest {
             )
             .build()
         val d = decision(input = inputFor(client = pinned))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.pins, d.reason)
+        assertEquals(Metrics.Reason.pins, d)
     }
 
     @Test
@@ -417,8 +404,7 @@ class PolicyEngineTest {
             override val sdkPins: Set<String> = setOf("example.com")
         }
         val d = decision(input = inputFor(client = pinned), snapshot = snap(withSdkPins))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.pins, d.reason)
+        assertEquals(Metrics.Reason.pins, d)
     }
 
     @Test
@@ -431,7 +417,7 @@ class PolicyEngineTest {
             )
             .build()
         val d = decision(input = inputFor(client = pinnedElsewhere))
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
     }
 
     @Test
@@ -444,7 +430,7 @@ class PolicyEngineTest {
             input = inputFor(client = client),
             snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
         )
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
     }
 
     @Test
@@ -461,8 +447,7 @@ class PolicyEngineTest {
             input = inputFor(client = derived),
             snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
         )
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.pins, d.reason)
+        assertEquals(Metrics.Reason.pins, d)
     }
 
     @Test
@@ -475,8 +460,7 @@ class PolicyEngineTest {
             input = inputFor(client = OkHttpClient()),
             snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
         )
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.pins, d.reason)
+        assertEquals(Metrics.Reason.pins, d)
     }
 
     @Test
@@ -493,8 +477,7 @@ class PolicyEngineTest {
             snapshot = snap(policy("a.example.com"))
                 .copy(sarieBuilt = true, installedPins = translatePins(pinner.pins).installedPins),
         )
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.pins, d.reason)
+        assertEquals(Metrics.Reason.pins, d)
     }
 
     @Test
@@ -507,8 +490,7 @@ class PolicyEngineTest {
             input = inputFor(client = client, url = "https://a.example.com/"),
             snapshot = snap(policy("a.example.com")).copy(sarieBuilt = true, installedPins = emptySet()),
         )
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.pins, d.reason)
+        assertEquals(Metrics.Reason.pins, d)
     }
 
     @Test
@@ -521,7 +503,7 @@ class PolicyEngineTest {
             input = inputFor(client = client, url = "https://a.example.com/"),
             snapshot = snap(policy("a.example.com")).copy(sarieBuilt = true, installedPins = installed),
         )
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
     }
 
     @Test
@@ -530,8 +512,7 @@ class PolicyEngineTest {
             .sslSocketFactory(FakeSSLSocketFactory(), FakeTrustManager())
             .build()
         val d = decision(input = inputFor(client = customTls))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.trust, d.reason)
+        assertEquals(Metrics.Reason.trust, d)
     }
 
     @Test
@@ -557,8 +538,7 @@ class PolicyEngineTest {
         )
 
         val d = decision(input = inputFor(client = client))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.trust, d.reason)
+        assertEquals(Metrics.Reason.trust, d)
     }
 
     @Test
@@ -569,8 +549,7 @@ class PolicyEngineTest {
             .header("Accept-Encoding", "gzip")
             .build()
         val d = decision(input = chainInput(original = request))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.content_encoding, d.reason)
+        assertEquals(Metrics.Reason.content_encoding, d)
     }
 
     @Test
@@ -578,13 +557,12 @@ class PolicyEngineTest {
         val original = Request.Builder().url("https://example.com/").build()
         val atSwap = original.newBuilder().header("Accept-Encoding", "identity").build()
         val d = decision(input = chainInput(original = original, atSwap = atSwap))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.content_encoding, d.reason)
+        assertEquals(Metrics.Reason.content_encoding, d)
 
         val quality = original.newBuilder().header("Accept-Encoding", "identity;q=1, br").build()
         assertEquals(
             Metrics.Reason.content_encoding,
-            decision(input = chainInput(original = original, atSwap = quality)).reason,
+            decision(input = chainInput(original = original, atSwap = quality)),
         )
     }
 
@@ -594,22 +572,19 @@ class PolicyEngineTest {
             .url("https://example.com/")
             .header("Range", "bytes=0-1")
             .build()
-        assertEquals(Decision(true, null), decision(input = chainInput(original = original)))
+        assertNull(decision(input = chainInput(original = original)))
     }
 
     @Test
     fun `swap Accept-Encoding listing gzip is allowed`() {
         val original = Request.Builder().url("https://example.com/").build()
         val atSwap = original.newBuilder().header("Accept-Encoding", "br, gzip").build()
-        assertEquals(Decision(true, null), decision(input = chainInput(original = original, atSwap = atSwap)))
+        assertNull(decision(input = chainInput(original = original, atSwap = atSwap)))
 
         val quality = original.newBuilder()
             .header("Accept-Encoding", "br;q=1.0, GZip;q=0.5")
             .build()
-        assertEquals(
-            Decision(true, null),
-            decision(input = chainInput(original = original, atSwap = quality)),
-        )
+        assertNull(decision(input = chainInput(original = original, atSwap = quality)))
     }
 
     @Test
@@ -623,7 +598,7 @@ class PolicyEngineTest {
             .build()
         assertEquals(
             Metrics.Reason.trust,
-            decision(input = chainInput(client = customTls, original = owned)).reason,
+            decision(input = chainInput(client = customTls, original = owned)),
         )
 
         val original = Request.Builder().url("https://localhost/").build()
@@ -633,26 +608,24 @@ class PolicyEngineTest {
             decision(
                 input = chainInput(original = original, atSwap = atSwap),
                 snapshot = snap(policy("localhost")),
-            ).reason,
+            ),
         )
     }
 
     @Test
     fun `loopback https denied yields cleartext (cleartext reason reused for loopback)`() {
         val d = decision(input = inputFor(url = "https://localhost/"), snapshot = snap(policy("localhost")))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.cleartext, d.reason)
+        assertEquals(Metrics.Reason.cleartext, d)
 
         val d2 = decision(input = inputFor(url = "https://10.0.2.2/"), snapshot = snap(policy("10.0.2.2")))
-        assertFalse(d2.allow)
-        assertEquals(Metrics.Reason.cleartext, d2.reason)
+        assertEquals(Metrics.Reason.cleartext, d2)
     }
 
     @Test
     fun `loopback https with allowLoopbackHttps yields allow`() {
         val p = policy("localhost", allowLoopback = true)
         val d = decision(input = inputFor(url = "https://localhost/"), snapshot = snap(p))
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
     }
 
     @Test
@@ -661,7 +634,7 @@ class PolicyEngineTest {
             input = inputFor(url = "https://other.com/"),
             snapshot = snap(policy()),
         )
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
     }
 
     @Test
@@ -670,19 +643,18 @@ class PolicyEngineTest {
             input = inputFor(url = "https://other.com/"),
             snapshot = snap(policy("*")),
         )
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
     }
 
     @Test
     fun `origin not allowlisted yields allowlist`() {
         val d = decision(input = inputFor(url = "https://other.com/"))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.allowlist, d.reason)
+        assertEquals(Metrics.Reason.allowlist, d)
     }
 
     @Test
     fun `allowlisted https origin on default client yields allow`() {
-        assertEquals(Decision(true, null), decision())
+        assertNull(decision())
     }
 
     // --- rule ordering: first hit wins ---
@@ -693,13 +665,13 @@ class PolicyEngineTest {
         val tagged = request.newBuilder().tag(CronetOptOut::class.java, CronetOptOut).build()
         val call = client.newCall(tagged) as RealCall
         val chain = RealInterceptorChain(call, emptyList(), 0, null, tagged, client)
-        assertEquals(Metrics.Reason.tag_opt_out, PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snap()).reason)
+        assertEquals(Metrics.Reason.tag_opt_out, PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), snap()))
 
         val cached = OkHttpClient.Builder()
             .cache(Cache(Files.createTempDirectory("policy-cache").toFile(), 1024L * 1024))
             .build()
         val d = decision(input = inputFor(client = cached, forWebSocket = true))
-        assertEquals(Metrics.Reason.websocket, d.reason)
+        assertEquals(Metrics.Reason.websocket, d)
     }
 
     // --- allowlist port semantics ---
@@ -709,19 +681,13 @@ class PolicyEngineTest {
         val p = policy("10.0.2.2", "10.0.2.2:8443", allowLoopback = true)
 
         // Bare "10.0.2.2" matches https://10.0.2.2:443/...
-        assertEquals(
-            Decision(true, null),
-            decision(input = inputFor(url = "https://10.0.2.2/"), snapshot = snap(p)),
-        )
+        assertNull(decision(input = inputFor(url = "https://10.0.2.2/"), snapshot = snap(p)))
         // Explicit "10.0.2.2:8443" matches only port 8443.
-        assertEquals(
-            Decision(true, null),
-            decision(input = inputFor(url = "https://10.0.2.2:8443/"), snapshot = snap(p)),
-        )
+        assertNull(decision(input = inputFor(url = "https://10.0.2.2:8443/"), snapshot = snap(p)))
         // No entry covers 9443 -> default-deny.
         assertEquals(
             Metrics.Reason.allowlist,
-            decision(input = inputFor(url = "https://10.0.2.2:9443/"), snapshot = snap(p)).reason,
+            decision(input = inputFor(url = "https://10.0.2.2:9443/"), snapshot = snap(p)),
         )
         // Bare "example.com" (443 only) does not cover 8443.
         assertEquals(
@@ -729,7 +695,7 @@ class PolicyEngineTest {
             decision(
                 input = inputFor(url = "https://example.com:8443/"),
                 snapshot = snap(policy("example.com")),
-            ).reason,
+            ),
         )
     }
 
@@ -762,7 +728,7 @@ class PolicyEngineTest {
     @Test
     fun `protocols and engine_cold are never routing reasons`() {
         val d = decision(input = inputFor(client = OkHttpClient.Builder().build()))
-        assertEquals(Decision(true, null), d)
+        assertNull(d)
         assertEquals("protocols", Metrics.Reason.protocols.name)
         assertEquals("engine_cold", Metrics.Reason.engine_cold.name)
         assertEquals("dns", Metrics.Reason.dns.name)
@@ -772,7 +738,45 @@ class PolicyEngineTest {
         val auth = OkHttpClient.Builder().authenticator { _, _ -> null }.build()
         assertNotEquals(
             Metrics.Reason.authenticator,
-            decision(input = inputFor(client = auth)).reason,
+            decision(input = inputFor(client = auth)),
         )
+    }
+
+    @Test
+    fun `allow path allocates nothing after warmup`() {
+        val threadMx = ManagementFactory.getThreadMXBean() as ThreadMXBean
+        assertTrue(threadMx.isThreadAllocatedMemorySupported)
+        if (!threadMx.isThreadAllocatedMemoryEnabled) {
+            threadMx.setThreadAllocatedMemoryEnabled(true)
+        }
+        val client = OkHttpClient()
+        val original = Request.Builder().url("https://example.com/").build()
+        val atSwap = original.newBuilder().header("Accept-Encoding", "gzip").build()
+        val input = chainInput(client = client, original = original, atSwap = atSwap)
+        val snapshot = snap(policy())
+        TrustBaseline.baseline
+        var warm = 0
+        while (warm < 50) {
+            assertNull(PolicyEngine.shouldHandle(input, snapshot))
+            warm++
+        }
+        @Suppress("DEPRECATION")
+        val threadId = Thread.currentThread().id
+        val beforeOne = threadMx.getThreadAllocatedBytes(threadId)
+        assertNull(PolicyEngine.shouldHandle(input, snapshot))
+        assertEquals(0L, threadMx.getThreadAllocatedBytes(threadId) - beforeOne)
+
+        val before = threadMx.getThreadAllocatedBytes(threadId)
+        var n = 0
+        while (n < 10_000) {
+            if (PolicyEngine.shouldHandle(input, snapshot) != null) {
+                throw AssertionError("expected allow")
+            }
+            n++
+        }
+        val allocated = threadMx.getThreadAllocatedBytes(threadId) - before
+        // A per-call object is at least 16 bytes. The counter also reports a few KB of
+        // allocator noise across a long loop, so the bound is one byte per call.
+        assertTrue("allocated $allocated bytes across 10000 calls", allocated < 10_000)
     }
 }

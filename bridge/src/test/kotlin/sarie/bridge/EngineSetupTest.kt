@@ -5,6 +5,7 @@ import okhttp3.CertificatePinner
 import okio.ByteString.Companion.toByteString
 import org.chromium.net.ConnectionMigrationOptions
 import org.chromium.net.CronetEngine
+import org.chromium.net.DnsOptions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -22,6 +23,7 @@ class EngineSetupTest {
 
     private class RecordingBuilder(
         private val rejectMigration: Boolean = false,
+        private val rejectDns: Boolean = false,
     ) : SarieEngineBuilder {
         val events = mutableListOf<String>()
         var quic: Boolean? = null
@@ -32,6 +34,7 @@ class EngineSetupTest {
         var cacheMaxSize: Long? = null
         var pinBypass: Boolean? = null
         var migration: ConnectionMigrationOptions? = null
+        var dns: DnsOptions? = null
         val pins = mutableListOf<PinCall>()
 
         override fun enableQuic(enable: Boolean) {
@@ -80,6 +83,12 @@ class EngineSetupTest {
             events += "migration"
             migration = options
         }
+
+        override fun setDnsOptions(options: DnsOptions) {
+            if (rejectDns) throw UnsupportedOperationException("provider rejected dns")
+            events += "dns"
+            dns = options
+        }
     }
 
     private val sha = "sha256/" + ByteArray(32) { 7 }.toByteString().base64()
@@ -103,7 +112,10 @@ class EngineSetupTest {
 
         val configureBrotli = recording.events.indexOf("brotli=true")
         val ownedBrotli = recording.events.lastIndexOf("brotli=false")
-        assertTrue(recording.events.indexOf("migration") < configureBrotli)
+        val migration = recording.events.indexOf("migration")
+        val dns = recording.events.indexOf("dns")
+        assertTrue(migration < dns)
+        assertTrue(dns < configureBrotli)
         assertTrue(configureBrotli < ownedBrotli)
         val evilPinEvent = recording.events.indexOf("pins=evil.example:true")
         val ownedPinEvent = recording.events.indexOf("pins=example.com:false")
@@ -119,6 +131,8 @@ class EngineSetupTest {
         assertEquals(false, recording.pinBypass)
         assertEquals(true, recording.migration?.enableDefaultNetworkMigration)
         assertEquals(true, recording.migration?.enablePathDegradationMigration)
+        assertEquals(true, recording.dns?.enableStaleDns)
+        assertEquals(true, recording.dns?.preestablishConnectionsToStaleDnsResults)
 
         // addPublicKeyPins appends. Configure's pin stays; Sarie's pin is applied after it.
         assertEquals(listOf("evil.example", "example.com"), recording.pins.map { it.host })
@@ -141,6 +155,31 @@ class EngineSetupTest {
             recording.enableBrotli(true)
         }
         assertNull(recording.migration)
+        assertEquals(true, recording.dns?.enableStaleDns)
+        assertEquals(false, recording.brotli)
+        assertEquals("/storage", recording.recordedStorage)
+        assertEquals(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, recording.cacheMode)
+    }
+
+    @Test
+    fun `configure can turn stale dns off`() {
+        val recording = RecordingBuilder()
+        applyEngineConfiguration(recording, "/storage", emptyList()) {
+            recording.setDnsOptions(DnsOptions.builder().enableStaleDns(false).build())
+        }
+        val defaults = recording.events.indexOf("dns")
+        val override = recording.events.lastIndexOf("dns")
+        assertTrue(defaults < override)
+        assertEquals(false, recording.dns?.enableStaleDns)
+        assertEquals(false, recording.brotli)
+    }
+
+    @Test
+    fun `rejected dns options do not fail setup`() {
+        val recording = RecordingBuilder(rejectDns = true)
+        applyEngineConfiguration(recording, "/storage", emptyList())
+        assertNull(recording.dns)
+        assertEquals(true, recording.migration?.enableDefaultNetworkMigration)
         assertEquals(false, recording.brotli)
         assertEquals("/storage", recording.recordedStorage)
         assertEquals(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, recording.cacheMode)

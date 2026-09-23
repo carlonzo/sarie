@@ -2,6 +2,8 @@ package sarie.bridge
 
 import okhttp3.CertificatePinner
 import org.chromium.net.CronetEngine
+import sarie.bridge.mapping.RequestConverter
+import sarie.bridge.mapping.ResponseConverter
 
 /**
  * Immutable install-time state. The engine is borrowed: never closed, shut down, or wrapped,
@@ -20,4 +22,16 @@ data class RuntimeSnapshot(
     val installedPins: Set<CertificatePinner.Pin> = emptySet(),
     val providerName: String? = null,
     val providerVersion: String? = null,
+    /**
+     * Null admits every origin (empty allowlist or `"*"`). Parsed once from
+     * [CronetPolicy.allowedOrigins].
+     */
+    val originRules: List<ParsedOrigin>? = parseAllowedOrigins(policy.allowedOrigins),
+    val responseConverter: ResponseConverter = ResponseConverter(),
+    val requestConverter: RequestConverter = RequestConverter(
+        engine,
+        CronetUploadExecutor,
+        CronetExecutor,
+        responseConverter,
+    ),
 )

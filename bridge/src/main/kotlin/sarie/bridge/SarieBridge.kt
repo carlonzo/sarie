@@ -38,8 +38,9 @@ object SarieBridge {
 
     /**
      * Builds a Cronet engine and publishes it. [configure] runs after the overridable defaults
-     * (connection migration) and before bridge-owned settings, which overwrite brotli, the HTTP
-     * cache, the storage path, pins, and local-trust pin bypass.
+     * (connection migration and stale DNS) and before bridge-owned settings, which overwrite
+     * brotli, the HTTP cache, the storage path, pins, and local-trust pin bypass. Stale DNS
+     * stays at the default unless [configure] replaces it.
      *
      * When no enabled app-packaged, HttpEngine, or Play Services provider exists, this does not
      * publish a snapshot (logged once). Requests keep falling back with `reason=engine_missing`.
@@ -62,6 +63,7 @@ object SarieBridge {
         mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
         configure: (CronetEngine.Builder) -> Unit = {},
     ) {
+        TrustBaseline.baseline
         warnIfUnverified(OkHttp.VERSION)
         val chosen = selectCronetProvider(
             CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) },
@@ -107,6 +109,7 @@ object SarieBridge {
                 policy = policy,
                 mapper = mapper,
                 installedAtMillis = System.currentTimeMillis(),
+                originRules = parseAllowedOrigins(policy.allowedOrigins),
             )
             return
         }
@@ -143,6 +146,7 @@ object SarieBridge {
         policy: CronetPolicy = DefaultPolicy(),
         mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
     ) {
+        TrustBaseline.baseline
         warnIfUnverified(OkHttp.VERSION)
         current = RuntimeSnapshot(engine, policy, mapper, System.currentTimeMillis())
     }

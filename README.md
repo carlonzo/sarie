@@ -91,13 +91,13 @@ Call `CronetProviderInstaller.installProvider(context)` and wait for success bef
 
 ### 3. Setting up the library
 
-At startup:
+At startup, call `install` off the main thread as early as you can:
 
 ```kotlin
 SarieBridge.install(context, client)
 ```
 
-`client` is the `OkHttpClient` whose certificate pins Sarie installs (pass `null` for none). Sarie builds the engine — HTTP/3 and HTTP/2 on, brotli off, Cronet's HTTP cache off — and never shuts it down. You do **not** need to build a `CronetEngine` yourself.
+A call that arrives before `install` returns goes to stock OkHttp (`engine_missing`) and does not wait for the engine. `client` is the `OkHttpClient` whose certificate pins Sarie installs (pass `null` for none). Sarie builds the engine — HTTP/3 and HTTP/2 on, brotli off, Cronet's HTTP cache off, stale DNS on — and never shuts it down. You do **not** need to build a `CronetEngine` yourself.
 
 Once that returns, **you are done!**
 
@@ -152,6 +152,30 @@ Cronet normally discovers HTTP/3 after the first connection receives an `Alt-Svc
 SarieBridge.install(context, client) { builder ->
     builder.addQuicHint("api.example.com", 443, 443)
 }
+```
+
+Stale DNS is on unless `configure` replaces it (`DnsOptions.builder().enableStaleDns(false).build()` passed to `setDnsOptions`). A provider that rejects stale DNS does not fail `install`.
+
+After `install` returns, one cheap HEAD through the same `OkHttpClient` opens a QUIC connection Cronet can reuse:
+
+```kotlin
+client.newCall(
+    Request.Builder().url("https://api.example.com/").head().build(),
+).execute().close()
+```
+
+Pair that HEAD with `addQuicHint` so the first connection tries HTTP/3.
+
+Priority is the existing mapper. One function sees every OkHttp caller:
+
+```kotlin
+SarieBridge.install(
+    context,
+    client,
+    mapper = { request, builder ->
+        builder.setPriority(priorityFor(request))
+    },
+)
 ```
 
 `configure` must not call `addPublicKeyPins`. Cronet only appends pins, and Sarie cannot remove pins `configure` already added. Sarie still appends the OkHttp client's pins after `configure`.

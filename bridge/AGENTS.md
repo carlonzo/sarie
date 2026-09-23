@@ -13,7 +13,7 @@ Behavior that this flow produces is `../COMPATIBILITY.md`. Do not duplicate that
 ConnectInterceptor.intercept (full replace)
   -> CronetBridge.intercept(chain)
   -> PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), SarieBridge.snapshot())
-allow:
+null (allow):
   RoutedCycle.open; proceed with no exchange (network interceptors run)
   -> CallServerInterceptor prefix -> CronetBridge.callServer
        exchange != null -> null, and the stock body runs
@@ -40,16 +40,20 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   protocol converters, ported from Google's cronet-transport-for-okhttp (Apache-2.0 headers
   must stay). The callback translates Cronet's async callbacks into a synchronous header
   future plus a streaming body source.
-- `PolicyEngine.kt`, `PolicyInput.kt`, `TrustBaseline.kt`: pre-send routing. Rule order is
-  the `PolicyEngine` doc comment (authenticators, OkHttp's cache, and network interceptors
-  are not denies). Includes a TLS check on the trust manager's `acceptedIssuers` fingerprint,
-  not just its class. Which rules exist is `COMPATIBILITY.md`.
+- `PolicyEngine.kt`, `PolicyInput.kt`, `TrustBaseline.kt`: pre-send routing.
+  `shouldHandle` returns `Metrics.Reason?` (null allows). Rule order is the `PolicyEngine`
+  doc comment (authenticators, OkHttp's cache, and network interceptors are not denies).
+  Includes a TLS check on the trust manager's `acceptedIssuers` fingerprint, not just its
+  class. Allowlist entries are parsed once onto `RuntimeSnapshot.originRules`. The platform
+  socket-factory class and the last trust verdict are cached on `TrustBaseline`. Which rules
+  exist is `COMPATIBILITY.md`.
 - `CacheHooks.kt`: the two cache `isHttps` replacements. `SarieBridge.isEnabled()` false
   makes them the stock checks.
 - `SarieBridge.kt`, `SarieEngineBuilder.kt`, `CronetProviders.kt`, `PinTranslation.kt`,
   `RuntimeSnapshot.kt`, `CronetPolicy.kt`, `DefaultPolicy.kt`, `CronetOptOut.kt`: lifecycle.
   The host may call `install(context, client)`, which builds the engine. `install(engine)`
-  remains the borrowed path. The bridge never calls `shutdown()` on either. `DefaultPolicy()`
+  remains the borrowed path. The bridge never calls `shutdown()` on either. `RequestConverter`
+  and `ResponseConverter` are built once onto the snapshot. `DefaultPolicy()`
   admits every origin that passes the other rules; a non-empty `allowedOrigins` is optional.
   Kill switch via system property `okhttp.cronet.enabled=false`.
 - `RoutedCycle.kt`: per-call scheme, host, and port for the allow branch, plus whether the terminal hop was reached.
