@@ -242,8 +242,10 @@ object CronetBridge {
                         handle.cancelUrlRequestOnce()
                         throw IOException(CANCELED_MESSAGE)
                     }
-                    urlRequest.start() // (iv)
+                    // Before start(): Cronet may call the upload provider or onResponseStarted on
+                    // its own threads before start() returns, and those emit later events.
                     events.requestHeadersEnd(request)
+                    urlRequest.start() // (iv)
                     if (call.isCanceled()) { // (v)
                         handle.cancelUrlRequestOnce()
                         throw IOException(CANCELED_MESSAGE)

@@ -684,6 +684,23 @@ class CronetBridgeTest {
         assertTrue("events=$seen", headers >= 0 && response > headers)
     }
 
+    @Test
+    fun `requestHeadersEnd precedes a response delivered during start`() {
+        val engine = ScriptedCronetEngine() // delivers onResponseStarted inside start()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 204)
+        install(engine, "example.com")
+        val seen = mutableListOf<String>()
+        val client = OkHttpClient.Builder()
+            .eventListener(object : EventListener() {
+                override fun requestHeadersEnd(call: Call, request: Request) { seen += "requestHeadersEnd" }
+                override fun responseHeadersStart(call: Call) { seen += "responseHeadersStart" }
+            })
+            .build()
+        val (_, chain) = cronetChain(client, "https://example.com/")
+        CronetBridge.intercept(chain).close()
+        assertEquals(listOf("requestHeadersEnd", "responseHeadersStart"), seen)
+    }
+
     private fun assertStockAddress(interceptor: Interceptor, url: String) {
         val thrown = assertThrows(IllegalStateException::class.java) {
             CronetBridge.intercept(networkChain(interceptor, url))
