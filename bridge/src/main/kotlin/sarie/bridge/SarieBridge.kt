@@ -41,7 +41,11 @@ public object SarieBridge {
     private var lastBuilt: RuntimeSnapshot? = null
 
     /**
-     * Builds a Cronet engine with the default configuration and publishes it.
+     * Builds a Cronet engine with the default configuration ([SarieConfig.DEFAULT]) and publishes it.
+     *
+     * Should be called early during application startup off the main thread.
+     *
+     * @param context Android application or activity context.
      */
     public fun install(context: Context) {
         install(context, SarieConfig.DEFAULT)
@@ -49,6 +53,11 @@ public object SarieBridge {
 
     /**
      * Builds a Cronet engine with the configuration constructed by [block] and publishes it.
+     *
+     * Should be called early during application startup off the main thread.
+     *
+     * @param context Android application or activity context.
+     * @param block Configuration lambda executed on [SarieConfig.Builder].
      */
     public inline fun install(
         context: Context,
@@ -70,6 +79,9 @@ public object SarieBridge {
      * Call it once per process. A later call reuses the engine already built (its storage path
      * stays locked while it runs) and only swaps policy and mapper; its pins and configure
      * are ignored, with a warning.
+     *
+     * @param context Android application or activity context.
+     * @param config Configuration for policy, mapper, listener, logger, pins, and builder hooks.
      */
     public fun install(
         context: Context,
@@ -266,7 +278,9 @@ public object SarieBridge {
     }
 
     /**
-     * Publishes a borrowed [engine] with the default configuration.
+     * Publishes a borrowed [engine] with the default configuration ([SarieConfig.DEFAULT]).
+     *
+     * @param engine Host-built Cronet engine. The host owns its lifecycle.
      */
     public fun install(engine: CronetEngine) {
         install(engine, SarieConfig.DEFAULT)
@@ -274,6 +288,10 @@ public object SarieBridge {
 
     /**
      * Publishes a borrowed [engine] with the configuration constructed by [block].
+     *
+     * @param engine Host-built Cronet engine. The host owns its lifecycle.
+     * @param block Configuration lambda executed on [SarieConfig.Builder].
+     * @throws IllegalArgumentException if `certificatePinner` or `configure` is set in [block].
      */
     public inline fun install(
         engine: CronetEngine,
@@ -288,8 +306,9 @@ public object SarieBridge {
      *
      * @param engine Host-built engine. The host owns its lifecycle. Compression and HTTP cache
      *   are whatever the host set; Sarie still disables the cache on each request.
-     * @param config Configuration for routing policy, mapper, and listener. Setting
-     *   `certificatePinner` or `configure` throws [IllegalArgumentException].
+     * @param config Configuration for routing policy, mapper, listener, logger, and bypassable DNS.
+     *   Setting `certificatePinner` or `configure` throws [IllegalArgumentException].
+     * @throws IllegalArgumentException if `config.certificatePinner` or `config.configure` is set.
      */
     public fun install(
         engine: CronetEngine,
@@ -355,10 +374,20 @@ public object SarieBridge {
 
     internal fun snapshot(): RuntimeSnapshot? = current
 
-    /** The engine requests are routed to, or null when nothing is installed. Never shut it down. */
+    /**
+     * The active [CronetEngine] requests are routed to, or `null` when no engine is installed.
+     *
+     * Never call [CronetEngine.shutdown] on this instance. Sarie manages engine lifecycle and
+     * retains engines across reinstalls.
+     */
     public val engine: CronetEngine? get() = current?.engine
 
-    /** Kill switch via system property (default true) plus snapshot presence. */
+    /**
+     * Returns whether the bridge is actively routing eligible calls to Cronet.
+     *
+     * Evaluates to `true` when an engine snapshot is installed and the system property
+     * `okhttp.cronet.enabled` is not set to `"false"`.
+     */
     public fun isEnabled(): Boolean =
         System.getProperty(KILL_SWITCH_PROPERTY, "true").toBoolean() && current != null
 }

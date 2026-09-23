@@ -94,6 +94,17 @@ public object CronetBridge {
     /** Methods safe to retry once on a pre-headers transport failure (RFC idempotent). */
     private val IDEMPOTENT_METHODS = setOf("GET", "HEAD", "OPTIONS")
 
+    /**
+     * Intercepts OkHttp's connection phase, evaluated by the rewritten `ConnectInterceptor`.
+     *
+     * Evaluates pre-send routing policy via [PolicyEngine]. If allowed, proceeds without an
+     * exchange so network interceptors run before reaching [callServer]. If denied, executes
+     * the stock connection fallback.
+     *
+     * @param chain The active OkHttp interceptor chain.
+     * @return The response returned by either Cronet or stock OkHttp.
+     * @throws IOException on network or protocol errors.
+     */
     @JvmStatic
     @Throws(IOException::class)
     public fun intercept(chain: Interceptor.Chain): Response {
@@ -135,6 +146,10 @@ public object CronetBridge {
      *
      * The checks are the ones [okhttp3.internal.http.RealInterceptorChain.proceed] skips when
      * `exchange == null` (OkHttp 5.5.0, RealInterceptorChain.kt:317-339).
+     *
+     * @param chain The active OkHttp interceptor chain.
+     * @return The Cronet response if routed through Cronet, or null if stock OkHttp should execute.
+     * @throws IOException on network or protocol errors.
      */
     @JvmStatic
     @Throws(IOException::class)
