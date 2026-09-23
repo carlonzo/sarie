@@ -71,12 +71,14 @@ Sarie's bridge has **no runtime dependency on Cronet** (`compileOnly` against `c
 | Preference | Provider | Artifact | Min API | Rationale |
 | --- | --- | --- | --- | --- |
 | 1 | App-packaged (`org.chromium.net:cronet-embedded` / `-bundled`) | `org.chromium.net:cronet-embedded:500.0.2` | 24+ | Explicit host choice: ships Chromium Cronet directly in the APK; available immediately without external downloads or IPC. |
-| 2 | Platform HttpEngine (`HttpEngine-Native-Provider`) | System (`org.chromium.net:cronet`) | 34+ (Android 14) | System-managed: updated with OS Mainline modules and starts faster than Play Services without APK size overhead. |
-| 3 | Play Services (`Google-Play-Services-Cronet-Provider`) | `com.google.android.gms:play-services-cronet:18.1.1` | 24+ (with GMS) | Smallest APK size: downloads Chromium binaries via Google Play Services dynamically. |
+| 2 | Play Services (`Google-Play-Services-Cronet-Provider`) | `com.google.android.gms:play-services-cronet:18.1.1` | 24+ (with GMS) | Smallest APK size and receives more frequent Cronet updates than the system image; downloads Chromium binaries via Google Play Services dynamically. |
+| 3 | Platform HttpEngine (`HttpEngine-Native-Provider`) | System (`org.chromium.net:cronet`) | 34+ (Android 14) | System-managed: updated with OS Mainline modules and used when Play Services is absent or fails to initialize. |
 
 The `HttpEngine` provider class ships in `org.chromium.net:cronet` (which every 500.x Cronet artifact pulls in), so devices running API 34+ get `HttpEngine` automatically with any Cronet dependency.
 
-When using Play Services, Sarie automatically initializes `CronetProviderInstaller` in the background on `install` and builds the engine once available—you do not need to call `installProvider` yourself. Calls made before the engine finishes initializing fall back safely to stock OkHttp (`engine_missing`).
+When using Play Services, Sarie automatically initializes `CronetProviderInstaller` in the background on `install` and builds the engine once available (falling back to HttpEngine if the installer fails)—you do not need to call `installProvider` yourself. While the Play task runs, calls fall back safely to stock OkHttp (`engine_missing`).
+
+A host that wants its own provider order builds its own engine and uses the borrowed install (`SarieBridge.install(engine)`). That path installs no pins, so pinned hosts fall back to stock OkHttp.
 
 Java's fallback provider (`Fallback-Cronet-Provider` / `HttpURLConnection`) is never used.
 

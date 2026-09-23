@@ -77,7 +77,7 @@ public object SarieBridge {
                 buildAndPublishEngine(context, config, providers, generation)
             }
             ProviderDecision.RUN_INSTALLER -> {
-                initPlayServicesAndBuild(context, config, generation)
+                initPlayServicesAndBuild(context, config, providers, generation)
             }
             ProviderDecision.GIVE_UP -> warnNoProvider()
         }
@@ -86,14 +86,15 @@ public object SarieBridge {
     private fun initPlayServicesAndBuild(
         context: Context,
         config: SarieConfig,
+        providers: List<LiveCronetProvider>,
         generation: Int,
     ) {
         try {
             com.google.android.gms.net.CronetProviderInstaller.installProvider(context)
                 .addOnCompleteListener(installerExecutor) { task ->
                     if (!generations.isCurrent(generation)) return@addOnCompleteListener
+                    val fresh = CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) }
                     if (task.isSuccessful) {
-                        val fresh = CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) }
                         // Not the caller's thread: a throw here would crash the process.
                         try {
                             buildAndPublishEngine(context, config, fresh, generation)
@@ -106,28 +107,68 @@ public object SarieBridge {
                             )
                         }
                     } else {
-                        logger?.log(
-                            Log.WARN,
-                            "Play Services CronetProviderInstaller failed; " +
-                                "leaving requests on stock OkHttp (engine_missing).",
-                            task.exception,
-                        )
+                        val fallback = selectCronetProvider(fresh)
+                        if (fallback != null) {
+                            logger?.log(
+                                Log.WARN,
+                                "Play Services CronetProviderInstaller failed; " +
+                                    "falling back to ${fallback.name}.",
+                                task.exception,
+                            )
+                            try {
+                                buildAndPublishEngine(context, config, fresh, generation)
+                            } catch (t: Throwable) {
+                                logger?.log(
+                                    Log.WARN,
+                                    "Building the fallback Cronet engine failed; " +
+                                        "leaving requests on stock OkHttp (engine_missing).",
+                                    t,
+                                )
+                            }
+                        } else {
+                            logger?.log(
+                                Log.WARN,
+                                "Play Services CronetProviderInstaller failed; " +
+                                    "leaving requests on stock OkHttp (engine_missing).",
+                                task.exception,
+                            )
+                        }
                     }
                 }
         } catch (t: Throwable) {
-            logger?.log(
-                Log.WARN,
-                "Play Services CronetProviderInstaller failed to start; " +
-                    "leaving requests on stock OkHttp (engine_missing).",
-                t,
-            )
+            val fallback = selectCronetProvider(providers)
+            if (fallback != null) {
+                logger?.log(
+                    Log.WARN,
+                    "Play Services CronetProviderInstaller failed to start; " +
+                        "falling back to ${fallback.name}.",
+                    t,
+                )
+                try {
+                    buildAndPublishEngine(context, config, providers, generation)
+                } catch (e: Throwable) {
+                    logger?.log(
+                        Log.WARN,
+                        "Building the fallback Cronet engine failed; " +
+                            "leaving requests on stock OkHttp (engine_missing).",
+                        e,
+                    )
+                }
+            } else {
+                logger?.log(
+                    Log.WARN,
+                    "Play Services CronetProviderInstaller failed to start; " +
+                        "leaving requests on stock OkHttp (engine_missing).",
+                    t,
+                )
+            }
         }
     }
 
     private fun warnNoProvider() {
         logger?.log(
             Log.WARN,
-            "No enabled Cronet provider (app-packaged, HttpEngine, or Play Services); " +
+            "No enabled Cronet provider (app-packaged, Play Services, or HttpEngine); " +
                 "leaving requests on stock OkHttp (engine_missing). " +
                 "Fallback-Cronet-Provider is not used.",
             null,

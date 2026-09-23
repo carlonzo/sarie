@@ -21,8 +21,8 @@ internal const val PLAY_SERVICES_CRONET_PROVIDER = "Google-Play-Services-Cronet-
  */
 internal val CRONET_PROVIDER_PREFERENCE: List<String> = listOf(
     CronetProvider.PROVIDER_NAME_APP_PACKAGED,
-    CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE,
     PLAY_SERVICES_CRONET_PROVIDER,
+    CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE,
 )
 
 /**
@@ -52,12 +52,20 @@ internal fun <T : CronetProviderCandidate> decideProviderPlan(
     providers: List<T>,
     installerAvailable: Boolean = isPlayServicesInstallerAvailable(),
 ): ProviderDecision {
-    val chosen = selectCronetProvider(providers)
-    return when {
-        chosen != null -> ProviderDecision.BUILD_NOW
-        installerAvailable -> ProviderDecision.RUN_INSTALLER
-        else -> ProviderDecision.GIVE_UP
+    val enabled = providers.filter { it.isEnabled() }
+    if (enabled.any { it.name == CronetProvider.PROVIDER_NAME_APP_PACKAGED }) {
+        return ProviderDecision.BUILD_NOW
     }
+    if (enabled.any { it.name == PLAY_SERVICES_CRONET_PROVIDER }) {
+        return ProviderDecision.BUILD_NOW
+    }
+    if (installerAvailable) {
+        return ProviderDecision.RUN_INSTALLER
+    }
+    if (enabled.any { it.name == CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE }) {
+        return ProviderDecision.BUILD_NOW
+    }
+    return ProviderDecision.GIVE_UP
 }
 
 internal fun isPlayServicesInstallerAvailable(): Boolean =

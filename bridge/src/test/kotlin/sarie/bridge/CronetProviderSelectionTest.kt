@@ -21,28 +21,29 @@ class CronetProviderSelectionTest {
     @Test
     fun `app packaged wins over later providers including fallback`() {
         val app = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_APP_PACKAGED, "app-9")
-        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, "http-1")
         val play = provider(PLAY_SERVICES_CRONET_PROVIDER, "play-2")
+        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, "http-1")
         val fallback = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_FALLBACK, "fb")
-        val chosen = selectCronetProvider(listOf(fallback, play, http, app))
+        val chosen = selectCronetProvider(listOf(fallback, http, play, app))
         assertSame(app, chosen)
         assertEquals("app-9", chosen!!.version)
     }
 
     @Test
-    fun `disabled app packaged is skipped for HttpEngine`() {
+    fun `disabled app packaged is skipped for Play Services`() {
         val app = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_APP_PACKAGED, enabled = false)
-        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, "http-4")
-        val play = provider(PLAY_SERVICES_CRONET_PROVIDER, "play")
-        assertSame(http, selectCronetProvider(listOf(app, play, http)))
+        val play = provider(PLAY_SERVICES_CRONET_PROVIDER, "play-4")
+        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, "http")
+        assertSame(play, selectCronetProvider(listOf(app, http, play)))
+        assertEquals("play-4", play.version)
     }
 
     @Test
-    fun `disabled HttpEngine is skipped for Play Services`() {
-        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, enabled = false)
-        val play = provider(PLAY_SERVICES_CRONET_PROVIDER, "play-7")
-        assertSame(play, selectCronetProvider(listOf(http, play)))
-        assertEquals("play-7", play.version)
+    fun `disabled Play Services is skipped for HttpEngine`() {
+        val play = provider(PLAY_SERVICES_CRONET_PROVIDER, enabled = false)
+        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, "http-7")
+        assertSame(http, selectCronetProvider(listOf(play, http)))
+        assertEquals("http-7", http.version)
     }
 
     @Test
@@ -68,14 +69,11 @@ class CronetProviderSelectionTest {
     }
 
     @Test
-    fun `decideProviderPlan returns BUILD_NOW when app packaged or HttpEngine is enabled`() {
+    fun `decideProviderPlan returns BUILD_NOW when app packaged is enabled`() {
         val app = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_APP_PACKAGED)
-        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE)
 
         assertEquals(ProviderDecision.BUILD_NOW, decideProviderPlan(listOf(app), installerAvailable = true))
         assertEquals(ProviderDecision.BUILD_NOW, decideProviderPlan(listOf(app), installerAvailable = false))
-        assertEquals(ProviderDecision.BUILD_NOW, decideProviderPlan(listOf(http), installerAvailable = true))
-        assertEquals(ProviderDecision.BUILD_NOW, decideProviderPlan(listOf(http), installerAvailable = false))
     }
 
     @Test
@@ -86,13 +84,21 @@ class CronetProviderSelectionTest {
     }
 
     @Test
-    fun `decideProviderPlan returns RUN_INSTALLER when no provider enabled and installer available`() {
+    fun `decideProviderPlan returns RUN_INSTALLER when installer is available and app packaged or play not enabled`() {
         val disabledPlay = provider(PLAY_SERVICES_CRONET_PROVIDER, enabled = false)
         val fallback = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_FALLBACK, enabled = true)
+        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, enabled = true)
 
+        assertEquals(ProviderDecision.RUN_INSTALLER, decideProviderPlan(listOf(http), installerAvailable = true))
         assertEquals(ProviderDecision.RUN_INSTALLER, decideProviderPlan(listOf(disabledPlay), installerAvailable = true))
         assertEquals(ProviderDecision.RUN_INSTALLER, decideProviderPlan(listOf(fallback), installerAvailable = true))
         assertEquals(ProviderDecision.RUN_INSTALLER, decideProviderPlan(emptyList<FakeProvider>(), installerAvailable = true))
+    }
+
+    @Test
+    fun `decideProviderPlan returns BUILD_NOW when only HttpEngine is enabled and installer not available`() {
+        val http = provider(org.chromium.net.CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE, enabled = true)
+        assertEquals(ProviderDecision.BUILD_NOW, decideProviderPlan(listOf(http), installerAvailable = false))
     }
 
     @Test
