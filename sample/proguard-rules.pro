@@ -20,7 +20,7 @@
 # (first run: usage.txt removed ConnectInterceptor + CronetBridge, zero inline
 # attribution). Keeping the public API package roots exactly the surface the suites
 # drive: Call/WebSocket dispatch reaches RealCall -> ConnectInterceptor (ASM trampoline)
-# -> CronetBridge -> bridge runtime + Metrics + PolicyEngine. okhttp3.internal.** is NOT
+# -> CronetBridge -> bridge runtime + PolicyEngine. okhttp3.internal.** is NOT
 # kept: internals stay shrinkable/renamable - renaming is what this suite must survive.
 -keep class okhttp3.* { *; }
 
@@ -89,15 +89,19 @@
 # stays shrinkable/renamable.
 #   SampleAppRuntime - every suite's install/lastEngine entry point (also stripped
 #       outright without a keep: nothing in main references it)
-#   SarieBridge - install/uninstall/snapshot
-#   Metrics + Metrics$Reason - resetForTest/getCronet/getOkhttpFallback/getLastReason +
-#       the reason constants every path assertion compares
-#   RuntimeSnapshot.getPolicy() / CronetPolicy.enabled() - BaselineSuite kill-switch probe
+#   SarieBridge - install/uninstall/engine
+#   FallbackReason - the reason constants every path assertion compares
+#   SarieListener + SampleAppRuntime$RouteLog - onRouted / onFinished assertions
+#   CronetPolicy - the policies the suites install
 -keep class sarie.sample.SampleAppRuntime { *; }
 -keep class sarie.bridge.SarieBridge { *; }
--keep class sarie.bridge.Metrics { *; }
--keep class sarie.bridge.Metrics$Reason { *; }
--keep class sarie.bridge.RuntimeSnapshot { *; }
+-keep class sarie.bridge.FallbackReason { *; }
+# RequestFinishedInfo: only the test APK reads it (CronetSuite wire-bytes assertion); with no
+# app-side caller R8 strips getMetrics(). A real host reads it in its own listener.
+-keep class org.chromium.net.RequestFinishedInfo { *; }
+-keep class org.chromium.net.RequestFinishedInfo$Metrics { *; }
+-keep class sarie.bridge.SarieListener { *; }
+-keep class sarie.sample.SampleAppRuntime$RouteLog { *; }
 -keep class sarie.bridge.CronetPolicy { *; }
 -keepclassmembers class org.chromium.net.CronetEngine {
     public void shutdown();

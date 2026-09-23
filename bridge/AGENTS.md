@@ -13,7 +13,7 @@ Behavior that this flow produces is `../COMPATIBILITY.md`. Do not duplicate that
 ConnectInterceptor.intercept (full replace)
   -> CronetBridge.intercept(chain)
   -> PolicyEngine.shouldHandle(PolicyInput.fromChain(chain), SarieBridge.snapshot())
-allow:
+null (allow):
   RoutedCycle.open; proceed with no exchange (network interceptors run)
   -> CallServerInterceptor prefix -> CronetBridge.callServer
        exchange != null -> null, and the stock body runs
@@ -21,7 +21,7 @@ allow:
             -> OkHttpBridgeCallback -> ResponseConverter -> streaming Response
 deny:
   stockFallback: initExchange + copy(exchange=) + proceed
-  + Metrics.record(Path.FALLBACK, reason)
+  SarieListener.onRouted on both branches (null reason on allow)
 ```
 
 Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` and
@@ -40,16 +40,20 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   protocol converters, ported from Google's cronet-transport-for-okhttp (Apache-2.0 headers
   must stay). The callback translates Cronet's async callbacks into a synchronous header
   future plus a streaming body source.
-- `PolicyEngine.kt`, `PolicyInput.kt`, `TrustBaseline.kt`: pre-send routing. Rule order is
-  the `PolicyEngine` doc comment (authenticators, OkHttp's cache, and network interceptors
-  are not denies). Includes a TLS check on the trust manager's `acceptedIssuers` fingerprint,
-  not just its class. Which rules exist is `COMPATIBILITY.md`.
+- `PolicyEngine.kt`, `PolicyInput.kt`, `TrustBaseline.kt`: pre-send routing.
+  `shouldHandle` returns `FallbackReason?` (null allows). Rule order is the `PolicyEngine`
+  doc comment (authenticators, OkHttp's cache, and network interceptors are not denies).
+  Includes a TLS check on the trust manager's `acceptedIssuers` fingerprint, not just its
+  class. Allowlist entries are parsed once onto `RuntimeSnapshot.originRules`. The platform
+  socket-factory class and the last trust verdict are cached on `TrustBaseline`. Which rules
+  exist is `COMPATIBILITY.md`.
 - `CacheHooks.kt`: the two cache `isHttps` replacements. `SarieBridge.isEnabled()` false
   makes them the stock checks.
 - `SarieBridge.kt`, `SarieEngineBuilder.kt`, `CronetProviders.kt`, `PinTranslation.kt`,
   `RuntimeSnapshot.kt`, `CronetPolicy.kt`, `DefaultPolicy.kt`, `CronetOptOut.kt`: lifecycle.
   The host may call `install(context, client)`, which builds the engine. `install(engine)`
-  remains the borrowed path. The bridge never calls `shutdown()` on either. `DefaultPolicy()`
+  remains the borrowed path. The bridge never calls `shutdown()` on either. `RequestConverter`
+  and `ResponseConverter` are built once onto the snapshot. `DefaultPolicy()`
   admits every origin that passes the other rules; a non-empty `allowedOrigins` is optional.
   Kill switch via system property `okhttp.cronet.enabled=false`.
 - `RoutedCycle.kt`: per-call scheme, host, and port for the allow branch, plus whether the terminal hop was reached.
@@ -60,9 +64,10 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   executors on purpose. Cronet posts `UploadDataProvider.read()` onto the upload executor
   while the provider submits body work to the reader executor; one shared thread
   self-deadlocks until write timeout.
-- `Metrics.kt`: `Path` (CRONET/FALLBACK) and `Reason` counters. Tests assert on it; keep
-  reasons stable.
-- `RequestToUrlRequestMapper.kt`, `BridgePlaceholders.kt`, `VerifiedOkHttpVersions.kt`:
+- `FallbackReason.kt`: the pre-send deny enum delivered to `SarieListener.onRouted`.
+- `SarieListener.kt`: optional `onRouted` / `onFinished`. `onFinished` runs on
+  `RequestFinishedExecutor`, not `CronetExecutor`.
+- `RequestToUrlRequestMapper.kt`, `VerifiedOkHttpVersions.kt`:
   optional `UrlRequest.Builder` hook (default no-op) and generated support.
 
 ## Invariants
@@ -74,7 +79,7 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
     (`CallServerInterceptor` prefix).
   - `CacheHooks.expectTlsBlock` `(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`.
   - `CacheHooks.requireHandshake` `(Lokhttp3/Request;)Z`.
-  `CronetBridge.shouldHandle` stays `@JvmStatic` too.
+
 - Callback overrides in `OkHttpBridgeCallback` stay CPU-only (they run under
   `allowDirectExecutor()` on Cronet's threads). `CacheHooks` is not a Cronet callback.
 - Never call `shutdown()` on an engine this bridge built or borrowed.
@@ -88,7 +93,7 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
 
 - `CronetBridgeTest`: trampoline bytecode shape, the 3 cancel interleavings, 407 rejection,
   fallback behavior.
-- `PolicyEngineTest`: every `Metrics.Reason` and the full rule order.
+- `PolicyEngineTest`: every `FallbackReason` and the full rule order.
 - `UploadPumpWedgeTest`, `mapping/UploadDataProvidersTest`: upload pump behavior including
   mid-upload abandonment on a real single-thread executor.
 - `mapping/*ConverterTest`: protocol mapping (including `h3`/`quic` -> `Protocol.HTTP_3`) and

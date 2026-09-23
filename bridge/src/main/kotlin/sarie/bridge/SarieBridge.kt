@@ -38,8 +38,9 @@ object SarieBridge {
 
     /**
      * Builds a Cronet engine and publishes it. [configure] runs after the overridable defaults
-     * (connection migration) and before bridge-owned settings, which overwrite brotli, the HTTP
-     * cache, the storage path, pins, and local-trust pin bypass.
+     * (connection migration and stale DNS) and before bridge-owned settings, which overwrite
+     * brotli, the HTTP cache, the storage path, pins, and local-trust pin bypass. Stale DNS
+     * stays at the default unless [configure] replaces it.
      *
      * When no enabled app-packaged, HttpEngine, or Play Services provider exists, this does not
      * publish a snapshot (logged once). Requests keep falling back with `reason=engine_missing`.
@@ -60,8 +61,12 @@ object SarieBridge {
         client: OkHttpClient? = null,
         policy: CronetPolicy = DefaultPolicy(),
         mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
+        listener: SarieListener? = null,
         configure: (CronetEngine.Builder) -> Unit = {},
     ) {
+        // Before the provider lookup: a failed install still reports engine_missing.
+        this.listener = listener
+        warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
         val chosen = selectCronetProvider(
             CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) },
@@ -103,10 +108,15 @@ object SarieBridge {
                 "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
                     "configure from this install are ignored (${e.message}).",
             )
-            current = previous.copy(
+            current = RuntimeSnapshot(
+                engine = previous.engine,
                 policy = policy,
                 mapper = mapper,
                 installedAtMillis = System.currentTimeMillis(),
+                sarieBuilt = true,
+                installedPins = previous.installedPins,
+                providerName = previous.providerName,
+                providerVersion = previous.providerVersion,
             )
             return
         }
@@ -142,21 +152,51 @@ object SarieBridge {
         engine: CronetEngine,
         policy: CronetPolicy = DefaultPolicy(),
         mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
+        listener: SarieListener? = null,
     ) {
+        this.listener = listener
+        warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
-        current = RuntimeSnapshot(engine, policy, mapper, System.currentTimeMillis())
+        current = RuntimeSnapshot(
+            engine,
+            policy,
+            mapper,
+            System.currentTimeMillis(),
+        )
     }
 
-    /** Drops the snapshot reference. The engine keeps running; this does not call shutdown. */
+    /**
+     * The listener from the last [install], kept apart from the snapshot so it also hears
+     * `engine_missing`: an install that found no provider, and calls after [uninstall].
+     */
+    @Volatile
+    internal var listener: SarieListener? = null
+        private set
+
+    /**
+     * Drops the snapshot reference. The engine keeps running; this does not call shutdown.
+     * The listener stays, so the fallbacks that follow are still reported.
+     */
     fun uninstall() {
         current = null
     }
 
-    fun snapshot(): RuntimeSnapshot? = current
+    internal fun snapshot(): RuntimeSnapshot? = current
+
+    /** The engine requests are routed to, or null when nothing is installed. Never shut it down. */
+    val engine: CronetEngine? get() = current?.engine
 
     /** Kill switch via system property (default true) plus snapshot presence. */
     fun isEnabled(): Boolean =
         System.getProperty(KILL_SWITCH_PROPERTY, "true").toBoolean() && current != null
+}
+
+/**
+ * Pays the platform-CA hash on the install thread instead of the first request. A failure here
+ * is left for the policy, which fails closed to stock OkHttp; install itself never throws for it.
+ */
+private fun warmTrustBaseline() {
+    runCatching { TrustBaseline.baseline }
 }
 
 /**

@@ -2,7 +2,7 @@ package sarie.sample.cronet
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import sarie.bridge.Metrics
+import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
 import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
@@ -42,8 +42,8 @@ import org.junit.Test
 
 /**
  * Real Cronet device suite against the Caddy origin on the host (10.0.2.2:8443, started per
- * scripts/Caddyfile header). Every cronet-path test asserts Metrics.cronet >= 1 AND
- * lastReason == null (nothing fell back); every stock-path test asserts cronet == 0 with the
+ * scripts/Caddyfile header). Every cronet-path test asserts a null onRouted reason and at
+ * least one Cronet route; every stock-path test asserts zero Cronet routes with the
  * exact fallback reason.
  *
  * HTTP/3 evidence structure:
@@ -75,7 +75,7 @@ class CronetSuite {
 
     @Before
     fun setUp() {
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
     }
 
     /** Engine installed by THIS test (tests without an install must not touch any engine). */
@@ -90,7 +90,7 @@ class CronetSuite {
         // Stops the engine and wipes the Sarie storage dir (persisted QUIC state).
         SampleAppRuntime.reset()
         installedEngine = null
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
     }
 
     /** Installs the cronet-mode runtime with an isolated engine (fresh storage dir). */
@@ -121,21 +121,23 @@ class CronetSuite {
         installedEngine = SampleAppRuntime.lastEngine
     }
 
-    private fun assertCronetServed(minCount: Long = 1) {
-        assertTrue("expected the cronet path, cronet=${Metrics.cronet.get()}", Metrics.cronet.get() >= minCount)
+    private fun assertCronetServed(minCount: Int = 1) {
+        val routes = SampleAppRuntime.routes
+        assertTrue("expected the cronet path, cronet=${routes.cronetCount()}", routes.cronetCount() >= minCount)
         assertNull(
-            "cronet-path request recorded a fallback reason: ${Metrics.lastReason}",
-            Metrics.lastReason,
+            "cronet-path request recorded a fallback reason: ${routes.lastReason()}",
+            routes.lastReason(),
         )
     }
 
-    private fun assertStockServed(reason: Metrics.Reason) {
-        assertEquals(0, Metrics.cronet.get())
+    private fun assertStockServed(reason: FallbackReason) {
+        val routes = SampleAppRuntime.routes
+        assertEquals(0, routes.cronetCount())
         assertTrue(
-            "expected at least one fallback, got ${Metrics.okhttpFallback.get()}",
-            Metrics.okhttpFallback.get() >= 1,
+            "expected at least one fallback, got ${routes.fallbackCount()}",
+            routes.fallbackCount() >= 1,
         )
-        assertEquals(reason, Metrics.lastReason)
+        assertEquals(reason, routes.lastReason())
     }
 
     @Test
@@ -329,7 +331,16 @@ class CronetSuite {
                 "Content-Encoding should be gone after decode, headers=${response.headers}",
                 response.header("Content-Encoding"),
             )
-            assertEquals("gzip-payload-ok", response.body.string())
+            val body = response.body.string()
+            assertEquals("gzip-payload-ok\n".repeat(256), body)
+            assertTrue(SampleAppRuntime.routes.awaitFinished(1))
+            val wire = SampleAppRuntime.routes.finishedInfos().first().metrics.receivedByteCount
+            assertNotNull(wire)
+            assertTrue(
+                "wire bytes $wire should be smaller than the decoded body (${body.length})",
+                wire!! < body.length,
+            )
+            assertNull(SampleAppRuntime.routes.lastReason())
         }
 
         // (b) Unencoded response: the bridge keeps Content-Length. An explicit
@@ -383,7 +394,7 @@ class CronetSuite {
         }
         assertCronetServed()
 
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
 
         // Explicit identity: the app owns decoding, so the call falls back to stock.
         client.newCall(
@@ -399,7 +410,7 @@ class CronetSuite {
                 echoed.contains("Accept-Encoding: [identity]"),
             )
         }
-        assertStockServed(Metrics.Reason.content_encoding)
+        assertStockServed(FallbackReason.content_encoding)
     }
 
     @Test
@@ -491,7 +502,7 @@ class CronetSuite {
         }
         // PolicyEngine records the deny as reason=disabled (kill-switch rule precedes
         // cleartext/allowlist in the rule order).
-        assertStockServed(Metrics.Reason.disabled)
+        assertStockServed(FallbackReason.disabled)
     }
 
     @Test
@@ -588,7 +599,7 @@ class CronetSuite {
                 assertNull(response.handshake)
             }
             assertCronetServed()
-            val cronetAfterStore = Metrics.cronet.get()
+            val cronetAfterStore = SampleAppRuntime.routes.cronetCount()
             client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
                 assertEquals(200, response.code)
                 assertEquals("cacheable-ok", response.body.string())
@@ -596,9 +607,9 @@ class CronetSuite {
                 assertNull(response.handshake)
                 assertNull(response.cacheResponse!!.handshake)
             }
-            assertEquals(cronetAfterStore, Metrics.cronet.get())
+            assertEquals(cronetAfterStore, SampleAppRuntime.routes.cronetCount())
             assertEquals(1, cacheHits)
-            assertNull(Metrics.lastReason)
+            assertNull(SampleAppRuntime.routes.lastReason())
         } finally {
             cache.close()
         }
@@ -607,7 +618,7 @@ class CronetSuite {
     @Test
     fun etagRevalidationStaysOnCronet() {
         // This origin negotiates HTTP/2, not HTTP/3 (local QUIC is blocked; see the class KDoc).
-        // The 304 is still the Cronet transport: Metrics.cronet and lastReason == null.
+        // The 304 is still the Cronet transport: onRouted reason stays null.
         // Do not require Protocol.HTTP_3 here.
         installCronet(quicHintHost = null)
         val cache = newCache()
@@ -641,7 +652,7 @@ class CronetSuite {
             client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
                 assertEquals("cacheable-ok", response.body.string())
             }
-            val cronetAfterStore = Metrics.cronet.get()
+            val cronetAfterStore = SampleAppRuntime.routes.cronetCount()
             client.newCall(
                 Request.Builder()
                     .url("$ORIGIN/cacheable")
@@ -653,8 +664,8 @@ class CronetSuite {
                 assertNotNull(response.cacheResponse)
                 assertNull(response.handshake)
             }
-            assertEquals(cronetAfterStore, Metrics.cronet.get())
-            assertNull(Metrics.lastReason)
+            assertEquals(cronetAfterStore, SampleAppRuntime.routes.cronetCount())
+            assertNull(SampleAppRuntime.routes.lastReason())
         } finally {
             cache.close()
         }
@@ -680,8 +691,8 @@ class CronetSuite {
                 assertNotNull(response.networkResponse)
                 assertNotNull(response.handshake)
             }
-            assertTrue(Metrics.okhttpFallback.get() >= 1)
-            assertEquals(Metrics.Reason.disabled, Metrics.lastReason)
+            assertTrue(SampleAppRuntime.routes.fallbackCount() >= 1)
+            assertEquals(FallbackReason.disabled, SampleAppRuntime.routes.lastReason())
             client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
                 assertEquals(200, response.code)
                 assertNotNull(response.cacheResponse)
@@ -705,7 +716,7 @@ class CronetSuite {
             }
             cache.evictAll()
             assertFalse(cache.urls().hasNext())
-            val cronetAfterStore = Metrics.cronet.get()
+            val cronetAfterStore = SampleAppRuntime.routes.cronetCount()
             client.newCall(
                 Request.Builder()
                     .url("$ORIGIN/cacheable")
@@ -714,7 +725,7 @@ class CronetSuite {
             ).execute().use { response ->
                 assertEquals(504, response.code)
             }
-            assertEquals(cronetAfterStore, Metrics.cronet.get())
+            assertEquals(cronetAfterStore, SampleAppRuntime.routes.cronetCount())
         } finally {
             cache.close()
         }
@@ -742,12 +753,15 @@ class CronetSuite {
 
     @Test
     fun engineMissingFallsBackStock() {
-        // No install: the trampoline finds no snapshot -> exact-stock fallback.
+        // Install (which registers the listener), then drop the snapshot: the trampoline finds
+        // no engine -> exact-stock fallback, still reported to the listener.
+        installCronet(quicHintHost = null)
+        SarieBridge.uninstall()
         OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertEquals("ok", response.body.string())
         }
-        assertStockServed(Metrics.Reason.engine_missing)
+        assertStockServed(FallbackReason.engine_missing)
     }
 
     @Test
@@ -759,7 +773,7 @@ class CronetSuite {
             .use { response ->
                 CertificatePinner.pin(checkNotNull(response.handshake).peerCertificates.first())
             }
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
         val client = OkHttpClient.Builder()
             .certificatePinner(CertificatePinner.Builder().add("cloudflare-quic.com", pin).build())
             .build()
@@ -800,10 +814,14 @@ class CronetSuite {
         }
         // Exact message: stock's failure includes the peer chain after this prefix.
         assertEquals("Certificate pinning failure!", thrown.message)
-        assertEquals(0L, Metrics.retries.get())
-        assertTrue("pin failure must stay on Cronet, cronet=${Metrics.cronet.get()}", Metrics.cronet.get() >= 1)
-        assertEquals(0L, Metrics.okhttpFallback.get())
-        assertNull(Metrics.lastReason)
+        assertTrue(SampleAppRuntime.routes.awaitFinished(1))
+        assertEquals(1, SampleAppRuntime.routes.finishedInfos().size)
+        assertTrue(
+            "pin failure must stay on Cronet, cronet=${SampleAppRuntime.routes.cronetCount()}",
+            SampleAppRuntime.routes.cronetCount() >= 1,
+        )
+        assertEquals(0, SampleAppRuntime.routes.fallbackCount())
+        assertNull(SampleAppRuntime.routes.lastReason())
     }
 
     @Test
@@ -829,7 +847,7 @@ class CronetSuite {
         } catch (_: IOException) {
             // Stock pin check or connect failure. The routing reason is what this test locks.
         }
-        assertStockServed(Metrics.Reason.pins)
+        assertStockServed(FallbackReason.pins)
     }
 
     @Test
@@ -849,7 +867,7 @@ class CronetSuite {
         @Suppress("DEPRECATION")
         first?.shutdown()
         installedEngine = null
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
 
         installCronet(quicHintHost = null)
         OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
@@ -901,7 +919,7 @@ class CronetSuite {
             .header("X-Parity", "same")
             .build()
         val stockEcho = OkHttpClient().newCall(request).execute().use { it.body.string() }
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
         installCronet(quicHintHost = null)
         val cronetEcho = OkHttpClient().newCall(request).execute().use { it.body.string() }
         assertCronetServed()

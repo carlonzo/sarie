@@ -2,18 +2,40 @@
 
 package sarie.bridge
 
-import javax.net.SocketFactory
 import okhttp3.Dns
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.internal.tls.OkHostnameVerifier
 
-/** Routing verdict: [allow] with a null [reason] on the Cronet path, else the fallback reason. */
-data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
+/** One allowlist entry, parsed once when the snapshot is built. */
+internal class ParsedOrigin(val host: String, val port: Int)
+
+/**
+ * Empty set or `"*"` admits every origin (`null`). Other entries are `"host"` (port 443)
+ * or `"host:port"` (exact port; an unparseable port is 443).
+ */
+internal fun parseAllowedOrigins(allowed: Set<String>): List<ParsedOrigin>? {
+    if (allowed.isEmpty() || "*" in allowed) return null
+    val rules = ArrayList<ParsedOrigin>(allowed.size)
+    for (entry in allowed) {
+        val colon = entry.lastIndexOf(':')
+        val host: String
+        val port: Int
+        if (colon > 0) {
+            host = entry.substring(0, colon)
+            port = entry.substring(colon + 1).toIntOrNull() ?: 443
+        } else {
+            host = entry
+            port = 443
+        }
+        rules.add(ParsedOrigin(host, port))
+    }
+    return rules
+}
 
 /**
  * Pure pre-send routing decision over [PolicyInput]. Never performs I/O and never records
- * metrics — the bridge glue (todo 6) records the path/reason it acted on.
+ * metrics. Returns null to allow; otherwise the fallback [FallbackReason].
  *
  * Rule order (first hit wins):
  * 1. snapshot missing -> engine_missing
@@ -37,38 +59,45 @@ data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
  * 17. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
  * 18. else allow
  *
- * Authenticators are not a routing rule. [Metrics.Reason.authenticator] is retired and is never
- * produced. A 401 is returned so OkHttp calls authenticator.authenticate(route = null, response).
+ * Authenticators are not a routing rule. A 401 is returned so OkHttp calls
+ * authenticator.authenticate(route = null, response).
  * OkHttp's cache is not a deny. Hits and 304 revalidation stay on OkHttp's chain.
- * [Metrics.Reason.cache] stays as a retired constant and is never produced.
  * Network interceptors are not a deny. They run on OkHttp's own chain before the Cronet hop.
- * [Metrics.Reason.network_interceptors] stays as a retired constant and is never produced.
  */
-object PolicyEngine {
+internal object PolicyEngine {
 
-    fun shouldHandle(input: PolicyInput, snapshot: RuntimeSnapshot?): Decision {
-        if (snapshot == null) return Decision(false, Metrics.Reason.engine_missing)
-        if (!SarieBridge.isEnabled()) return Decision(false, Metrics.Reason.disabled)
-        if (!snapshot.policy.enabled()) return Decision(false, Metrics.Reason.disabled)
-        if (input.isCanceled) return Decision(false, Metrics.Reason.engine_missing)
-        if (input.request.tag(CronetOptOut::class.java) != null) {
-            return Decision(false, Metrics.Reason.tag_opt_out)
+    /** Cached: evaluating `::class` allocates a [kotlin.reflect.KClass] on every use. */
+    private val optOutClass = CronetOptOut::class
+
+    fun shouldHandle(input: PolicyInput, snapshot: RuntimeSnapshot?): FallbackReason? {
+        if (snapshot == null) return FallbackReason.engine_missing
+        if (!SarieBridge.isEnabled()) return FallbackReason.disabled
+        if (!snapshot.policy.enabled()) return FallbackReason.disabled
+        if (input.isCanceled) return FallbackReason.engine_missing
+        if (input.request.tag(optOutClass) != null) {
+            return FallbackReason.tag_opt_out
         }
-        if (!input.request.url.isHttps) return Decision(false, Metrics.Reason.cleartext)
-        if (input.forWebSocket) return Decision(false, Metrics.Reason.websocket)
-        if (input.protocols.any { it == Protocol.H2_PRIOR_KNOWLEDGE }) {
-            return Decision(false, Metrics.Reason.h2_prior_knowledge)
+        if (!input.request.url.isHttps) return FallbackReason.cleartext
+        if (input.forWebSocket) return FallbackReason.websocket
+        val protocols = input.protocols
+        var protocolIndex = 0
+        while (protocolIndex < protocols.size) {
+            if (protocols[protocolIndex] == Protocol.H2_PRIOR_KNOWLEDGE) {
+                return FallbackReason.h2_prior_knowledge
+            }
+            protocolIndex++
         }
-        if (input.proxy != null || input.proxySelector !== TrustBaseline.baseline.proxySelector) {
-            return Decision(false, Metrics.Reason.proxy)
+        val base = TrustBaseline.baseline
+        if (input.proxy != null || input.proxySelector !== base.proxySelector) {
+            return FallbackReason.proxy
         }
-        if (input.socketFactory.javaClass != SocketFactory.getDefault().javaClass) {
-            return Decision(false, Metrics.Reason.socket_factory)
+        if (input.socketFactory.javaClass != base.socketFactoryClass) {
+            return FallbackReason.socket_factory
         }
         if (input.hostnameVerifier !== OkHostnameVerifier) {
-            return Decision(false, Metrics.Reason.hostname_verifier)
+            return FallbackReason.hostname_verifier
         }
-        if (input.dns !== Dns.SYSTEM) return Decision(false, Metrics.Reason.dns)
+        if (input.dns !== Dns.SYSTEM) return FallbackReason.dns
         if (!pinsSatisfied(
                 input.certificatePinner,
                 input.request.url.host,
@@ -76,17 +105,17 @@ object PolicyEngine {
                 snapshot.installedPins,
             )
         ) {
-            return Decision(false, Metrics.Reason.pins)
+            return FallbackReason.pins
         }
-        if (trustMismatched(input)) return Decision(false, Metrics.Reason.trust)
-        if (contentEncodingDenied(input)) return Decision(false, Metrics.Reason.content_encoding)
+        if (trustMismatched(input)) return FallbackReason.trust
+        if (contentEncodingDenied(input)) return FallbackReason.content_encoding
         if (isLoopback(input.request.url.host) && !snapshot.policy.allowLoopbackHttps) {
-            return Decision(false, Metrics.Reason.cleartext)
+            return FallbackReason.cleartext
         }
-        if (!originAllowed(snapshot.policy.allowedOrigins, input.request.url.host, input.request.url.port)) {
-            return Decision(false, Metrics.Reason.allowlist)
+        if (!originAllowed(snapshot.originRules, input.request.url.host, input.request.url.port)) {
+            return FallbackReason.allowlist
         }
-        return Decision(true, null)
+        return null
     }
 
     /**
@@ -101,8 +130,10 @@ object PolicyEngine {
     }
 
     private fun acceptEncodingLacksGzip(request: Request): Boolean {
+        val first = request.header(ACCEPT_ENCODING)
+        // BridgeInterceptor sets this single value. Null means the header is absent.
+        if (first == null || first == "gzip") return false
         val values = request.headers.values(ACCEPT_ENCODING)
-        if (values.isEmpty()) return false
         return values.asSequence()
             .flatMap { it.split(',') }
             .map { it.substringBefore(';').trim() }
@@ -122,25 +153,16 @@ object PolicyEngine {
     private fun isLoopback(host: String): Boolean =
         host == "localhost" || host == "127.0.0.1" || host == "10.0.2.2"
 
-    /**
-     * Empty set or `"*"` admits every origin. Other entries are `"host"` (port 443)
-     * or `"host:port"` (exact port match).
-     */
-    private fun originAllowed(allowed: Set<String>, host: String, port: Int): Boolean {
-        if (allowed.isEmpty() || "*" in allowed) return true
-        return allowed.any { entry ->
-            val colon = entry.lastIndexOf(':')
-            val entryHost: String
-            val entryPort: Int
-            if (colon > 0) {
-                entryHost = entry.substring(0, colon)
-                entryPort = entry.substring(colon + 1).toIntOrNull() ?: 443
-            } else {
-                entryHost = entry
-                entryPort = 443
-            }
-            entryHost == host && entryPort == port
+    /** [rules] null admits every origin. Otherwise host and port must match one entry. */
+    private fun originAllowed(rules: List<ParsedOrigin>?, host: String, port: Int): Boolean {
+        if (rules == null) return true
+        var i = 0
+        while (i < rules.size) {
+            val rule = rules[i]
+            if (rule.host == host && rule.port == port) return true
+            i++
         }
+        return false
     }
 
     private const val ACCEPT_ENCODING = "Accept-Encoding"

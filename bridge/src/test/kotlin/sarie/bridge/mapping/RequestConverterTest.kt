@@ -2,11 +2,17 @@ package sarie.bridge.mapping
 
 import sarie.bridge.RequestToUrlRequestMapper
 import sarie.bridge.SarieBridge
+import sarie.bridge.SarieListener
 import java.util.concurrent.Executor
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okio.BufferedSink
+import org.chromium.net.CronetException
+import org.chromium.net.RequestFinishedInfo
+import org.chromium.net.UrlResponseInfo
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -58,6 +64,65 @@ class RequestConverterTest {
         val builder = Request.Builder().url("https://example.com/a")
         headers.forEach { (name, value) -> builder.addHeader(name, value) }
         return builder.build()
+    }
+
+    @Test
+    fun `finished listener is attached only when a listener is installed`() {
+        val request = get()
+        val call = OkHttpClient().newCall(request)
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertNull(engine.builders.single().finishedListener)
+
+        SarieBridge.install(engine, listener = object : SarieListener {})
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertNotNull(engine.builders.last().finishedListener)
+    }
+
+    @Test
+    fun `throwing onFinished is swallowed and later calls still deliver`() {
+        val request = get()
+        val call = OkHttpClient().newCall(request)
+        var delivered = 0
+        SarieBridge.install(
+            engine,
+            listener = object : SarieListener {
+                override fun onFinished(call: Call, info: RequestFinishedInfo) {
+                    delivered++
+                    throw IllegalStateException("host listener")
+                }
+            },
+        )
+        converter().convert(request, 5_000, 5_000, call = call)
+        val finished = engine.builders.single().finishedListener!!
+
+        // Called directly, as Cronet's posted task would: nothing may escape to the thread.
+        finished.onRequestFinished(FinishedInfo)
+        finished.onRequestFinished(FinishedInfo)
+        assertEquals(2, delivered)
+    }
+
+    private object FinishedInfo : RequestFinishedInfo() {
+        override fun getUrl(): String = "https://example.com/"
+        override fun getAnnotations(): Collection<Any> = emptyList()
+        override fun getMetrics(): Metrics? = null
+        override fun getFinishedReason(): Int = SUCCEEDED
+        override fun getResponseInfo(): UrlResponseInfo? = null
+        override fun getException(): CronetException? = null
+    }
+
+    @Test
+    fun `rejected finished listener does not fail convert`() {
+        val request = get()
+        val call: Call = OkHttpClient().newCall(request)
+        SarieBridge.install(engine, listener = object : SarieListener {})
+        engine.rejectFinishedListener = true
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertTrue(engine.builders.single().cacheDisabled)
+        assertNull(engine.builders.single().finishedListener)
+
+        engine.rejectFinishedListener = false
+        converter().convert(request, 5_000, 5_000, call = call)
+        assertNull(engine.builders.last().finishedListener)
     }
 
     @Test

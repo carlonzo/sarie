@@ -53,14 +53,12 @@ class SarieBridgeTest {
     @Before
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
-        Metrics.resetForTest()
     }
 
     @After
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
         SarieBridge.uninstall()
-        Metrics.resetForTest()
     }
 
     @Test
@@ -171,46 +169,14 @@ class SarieBridgeTest {
     }
 
     @Test
-    fun `record increments path counters and sets lastReason`() {
-        Metrics.record(Metrics.Path.CRONET, null)
-        Metrics.record(Metrics.Path.CRONET, null)
-        Metrics.record(Metrics.Path.FALLBACK, Metrics.Reason.engine_missing)
-
-        assertEquals(2L, Metrics.cronet.get())
-        assertEquals(1L, Metrics.okhttpFallback.get())
-        assertEquals(Metrics.Reason.engine_missing, Metrics.lastReason)
-    }
-
-    @Test
-    fun `record without reason leaves lastReason untouched`() {
-        Metrics.record(Metrics.Path.FALLBACK, Metrics.Reason.allowlist)
-        Metrics.record(Metrics.Path.CRONET, null)
-
-        assertEquals(1L, Metrics.cronet.get())
-        assertEquals(1L, Metrics.okhttpFallback.get())
-        assertEquals(Metrics.Reason.allowlist, Metrics.lastReason)
-    }
-
-    @Test
-    fun `resetForTest clears counters and lastReason`() {
-        Metrics.record(Metrics.Path.CRONET, Metrics.Reason.cleartext)
-        Metrics.resetForTest()
-
-        assertEquals(0L, Metrics.cronet.get())
-        assertEquals(0L, Metrics.okhttpFallback.get())
-        assertNull(Metrics.lastReason)
-    }
-
-    @Test
-    fun `reason enum covers all 19 values`() {
+    fun `reason enum lists the pre-send denies`() {
         assertEquals(
             listOf(
                 "disabled", "engine_missing", "tag_opt_out", "allowlist", "cleartext", "websocket",
-                "cache", "network_interceptors", "h2_prior_knowledge", "authenticator", "proxy",
-                "socket_factory", "hostname_verifier", "pins", "trust", "protocols", "engine_cold",
-                "dns", "content_encoding",
+                "h2_prior_knowledge", "proxy", "socket_factory", "hostname_verifier", "pins",
+                "trust", "dns", "content_encoding", "policy_error",
             ),
-            Metrics.Reason.values().map { it.name },
+            FallbackReason.values().map { it.name },
         )
     }
 }

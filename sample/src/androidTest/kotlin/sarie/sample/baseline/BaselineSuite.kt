@@ -1,7 +1,7 @@
 package sarie.sample.baseline
 
 import androidx.test.platform.app.InstrumentationRegistry
-import sarie.bridge.Metrics
+import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
 import sarie.sample.SampleAppRuntime
 import java.util.concurrent.CountDownLatch
@@ -17,7 +17,6 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -36,7 +35,7 @@ class BaselineSuite {
     fun setUp() {
         server = MockWebServer()
         server.start()
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
         // BaselineSuite tests different install modes; honor the instrumentation runner arg.
         val runnerMode = InstrumentationRegistry.getArguments().getString("mode")
             ?: SampleAppRuntime.MODE_CRONET
@@ -51,7 +50,7 @@ class BaselineSuite {
     fun tearDown() {
         server.close()
         SampleAppRuntime.reset()
-        Metrics.resetForTest()
+        SampleAppRuntime.routes.clear()
         installedMode = SampleAppRuntime.MODE_STOCK
     }
 
@@ -73,13 +72,14 @@ class BaselineSuite {
         server.enqueue(MockResponse.Builder().code(200).body(body).build())
     }
 
-    private fun assertFallbackOnly(expectedReason: Metrics.Reason) {
-        assertEquals(0, Metrics.cronet.get())
+    private fun assertFallbackOnly(expectedReason: FallbackReason) {
+        val routes = SampleAppRuntime.routes
+        assertEquals(0, routes.cronetCount())
         assertTrue(
-            "expected at least one fallback, got ${Metrics.okhttpFallback.get()}",
-            Metrics.okhttpFallback.get() >= 1,
+            "expected at least one fallback, got ${routes.fallbackCount()}",
+            routes.fallbackCount() >= 1,
         )
-        assertEquals(expectedReason, Metrics.lastReason)
+        assertEquals(expectedReason, routes.lastReason())
     }
 
     @Test
@@ -91,7 +91,7 @@ class BaselineSuite {
             assertEquals(200, response.code)
             assertEquals("baseline-ok", response.body.string())
         }
-        assertFallbackOnly(Metrics.Reason.cleartext)
+        assertFallbackOnly(FallbackReason.cleartext)
     }
 
     @Test
@@ -117,7 +117,7 @@ class BaselineSuite {
             "ran",
             server.takeRequest().headers["X-App-Interceptor"],
         )
-        assertFallbackOnly(Metrics.Reason.cleartext)
+        assertFallbackOnly(FallbackReason.cleartext)
     }
 
     @Test
@@ -139,7 +139,7 @@ class BaselineSuite {
             assertEquals("cloned-ok", response.body.string())
         }
         assertTrue("interceptor added via newBuilder did not run", ran.get())
-        assertFallbackOnly(Metrics.Reason.cleartext)
+        assertFallbackOnly(FallbackReason.cleartext)
     }
 
     @Test
@@ -158,7 +158,7 @@ class BaselineSuite {
         }
         // The fallback metric is recorded by the trampoline, not by any interceptor: clearing
         // them cannot disable the bridge.
-        assertFallbackOnly(Metrics.Reason.cleartext)
+        assertFallbackOnly(FallbackReason.cleartext)
     }
 
     @Test
@@ -166,12 +166,11 @@ class BaselineSuite {
         installDisabled()
         enqueueCleartext200("killswitch-ok")
 
-        assertNull(SarieBridge.snapshot()?.policy?.takeIf { it.enabled() })
         OkHttpClient().newCall(getRequest()).execute().use { response ->
             assertEquals(200, response.code)
             assertEquals("killswitch-ok", response.body.string())
         }
-        assertFallbackOnly(Metrics.Reason.disabled)
+        assertFallbackOnly(FallbackReason.disabled)
     }
 
     @Test
@@ -210,10 +209,10 @@ class BaselineSuite {
         // cancel() (not close()): the close handshake is async and would leave the server
         // socket open for MockWebServer.close() in tearDown.
         ws.cancel()
-        assertEquals(0, Metrics.cronet.get())
-        assertTrue(Metrics.okhttpFallback.get() >= 1)
+        assertEquals(0, SampleAppRuntime.routes.cronetCount())
+        assertTrue(SampleAppRuntime.routes.fallbackCount() >= 1)
         // The handshake is cleartext, and the cleartext rule precedes the websocket rule.
-        assertEquals(Metrics.Reason.cleartext, Metrics.lastReason)
+        assertEquals(FallbackReason.cleartext, SampleAppRuntime.routes.lastReason())
 
         // (b) HTTPS forWebSocket call: policy denies with reason=websocket before any I/O.
         val dead = CountDownLatch(1)
@@ -233,7 +232,7 @@ class BaselineSuite {
         )
         assertTrue("dead-port websocket did not settle", dead.await(15, TimeUnit.SECONDS))
         assertTrue("expected stock-path connection failure", failed.get())
-        assertEquals(0, Metrics.cronet.get())
-        assertEquals(Metrics.Reason.websocket, Metrics.lastReason)
+        assertEquals(0, SampleAppRuntime.routes.cronetCount())
+        assertEquals(FallbackReason.websocket, SampleAppRuntime.routes.lastReason())
     }
 }

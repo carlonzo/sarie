@@ -3,10 +3,14 @@ package sarie.sample
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import org.chromium.net.CronetEngine
+import org.chromium.net.RequestFinishedInfo
 import sarie.bridge.DefaultPolicy
+import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
+import sarie.bridge.SarieListener
 
 /**
  * Test-host installer. Only ever invoked from androidTest code: [ApplicationProvider] lives on
@@ -36,6 +40,8 @@ object SampleAppRuntime {
     var lastEngine: CronetEngine? = null
         private set
 
+    val routes = RouteLog()
+
     fun install(
         mode: String,
         quicHintHost: String? = null,
@@ -53,13 +59,13 @@ object SampleAppRuntime {
             installBorrowed(context, policy, quicHintHost, quicHintPort, freshStorage, brotli, diskCache)
         } else {
             // Sarie-built. Do not call enableBrotli(true) and do not shut the engine down.
-            SarieBridge.install(context, client, policy) { builder ->
+            SarieBridge.install(context, client, policy, listener = routes) { builder ->
                 if (quicHintHost != null) {
                     builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
                 }
             }
         }
-        val engine = SarieBridge.snapshot()?.engine
+        val engine = SarieBridge.engine
             ?: error("SarieBridge.install did not publish an engine")
         if (netLog) {
             // Unique per engine: several suite engines may capture netlogs in one run.
@@ -103,7 +109,7 @@ object SampleAppRuntime {
         if (quicHintHost != null) {
             builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
         }
-        SarieBridge.install(builder.build(), policy)
+        SarieBridge.install(builder.build(), policy, listener = routes)
     }
 
     /**
@@ -112,6 +118,7 @@ object SampleAppRuntime {
      * handshake), which would otherwise leak from one test into the next.
      */
     fun reset() {
+        routes.clear()
         SarieBridge.uninstall()
         @Suppress("DEPRECATION")
         lastEngine?.shutdown()
@@ -137,6 +144,52 @@ object SampleAppRuntime {
             else -> throw IllegalArgumentException("unknown mode: $mode")
         },
     )
+
+    /**
+     * Test-local record of [SarieListener] callbacks. Replaces the old process-wide counters.
+     * [onRouted] runs on the caller thread. [onFinished] runs on Sarie's listener thread.
+     */
+    class RouteLog : SarieListener {
+        private val lock = Any()
+        private val reasons = mutableListOf<FallbackReason?>()
+        private val finished = mutableListOf<RequestFinishedInfo>()
+
+        override fun onRouted(call: Call, reason: FallbackReason?) {
+            synchronized(lock) { reasons += reason }
+        }
+
+        override fun onFinished(call: Call, info: RequestFinishedInfo) {
+            synchronized(lock) {
+                finished += info
+                (lock as Object).notifyAll()
+            }
+        }
+
+        fun clear() = synchronized(lock) {
+            reasons.clear()
+            finished.clear()
+        }
+
+        fun cronetCount(): Int = synchronized(lock) { reasons.count { it == null } }
+
+        fun fallbackCount(): Int = synchronized(lock) { reasons.count { it != null } }
+
+        fun lastReason(): FallbackReason? = synchronized(lock) { reasons.lastOrNull() }
+
+        fun finishedInfos(): List<RequestFinishedInfo> = synchronized(lock) { finished.toList() }
+
+        fun awaitFinished(minCount: Int, timeoutMs: Long = 5_000): Boolean {
+            val deadline = System.nanoTime() + timeoutMs * 1_000_000
+            synchronized(lock) {
+                while (finished.size < minCount) {
+                    val remainingNs = deadline - System.nanoTime()
+                    if (remainingNs <= 0) return false
+                    (lock as Object).wait(remainingNs / 1_000_000, (remainingNs % 1_000_000).toInt())
+                }
+                return true
+            }
+        }
+    }
 
     /** True when instrumentation args request Cronet NetLog capture (h3 diagnostics). */
     val netLogRequested: Boolean =

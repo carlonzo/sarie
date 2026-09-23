@@ -97,6 +97,7 @@ internal fun pinsSatisfied(
     sarieBuilt: Boolean,
     installedPins: Set<CertificatePinner.Pin>,
 ): Boolean {
+    if (pinner.pins.isEmpty() && installedPins.isEmpty()) return true
     val matching = pinner.findMatchingPins(host)
     val installedForHost = installedPins.filter { it.matchesHostname(host) }.toSet()
     if (matching.isEmpty()) return installedForHost.isEmpty()

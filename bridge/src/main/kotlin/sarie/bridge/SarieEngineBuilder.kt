@@ -3,6 +3,7 @@ package sarie.bridge
 import java.util.Date
 import org.chromium.net.ConnectionMigrationOptions
 import org.chromium.net.CronetEngine
+import org.chromium.net.DnsOptions
 
 /**
  * The Cronet builder methods Sarie calls. Production delegates to [CronetEngine.Builder]. Tests
@@ -28,6 +29,7 @@ internal interface SarieEngineBuilder {
         expirationDate: Date,
     )
     fun setConnectionMigrationOptions(options: ConnectionMigrationOptions)
+    fun setDnsOptions(options: DnsOptions)
 }
 
 internal class CronetEngineBuilderAdapter(
@@ -69,12 +71,16 @@ internal class CronetEngineBuilderAdapter(
     override fun setConnectionMigrationOptions(options: ConnectionMigrationOptions) {
         delegate.setConnectionMigrationOptions(options)
     }
+
+    override fun setDnsOptions(options: DnsOptions) {
+        delegate.setDnsOptions(options)
+    }
 }
 
 /**
  * Order: overridable defaults, then [configure], then bridge-owned settings. [configure] cannot
- * leave brotli, cache mode, storage path, or pin bypass at its own values. Migration options are
- * experimental and a provider may reject them; that failure is ignored.
+ * leave brotli, cache mode, storage path, or pin bypass at its own values. Migration options and
+ * stale DNS are overridable; a provider that rejects either does not fail setup.
  */
 internal fun applyEngineConfiguration(
     builder: SarieEngineBuilder,
@@ -93,6 +99,14 @@ private fun applyOverridableDefaults(builder: SarieEngineBuilder) {
             ConnectionMigrationOptions.builder()
                 .enableDefaultNetworkMigration(true)
                 .enablePathDegradationMigration(true)
+                .build(),
+        )
+    }
+    runCatching {
+        builder.setDnsOptions(
+            DnsOptions.builder()
+                .enableStaleDns(true)
+                .preestablishConnectionsToStaleDnsResults(true)
                 .build(),
         )
     }

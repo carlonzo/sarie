@@ -12,6 +12,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.chromium.net.CronetEngine
+import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.CronetException
 import org.chromium.net.UploadDataProvider
 import org.chromium.net.UploadDataSink
@@ -60,6 +61,7 @@ class FakeCronetException(message: String = "fake network error") : CronetExcept
 
 class FakeCronetEngine : CronetEngine() {
     val builders = mutableListOf<FakeUrlRequestBuilder>()
+    var rejectFinishedListener = false
 
     val builtRequests: List<FakeUrlRequest>
         get() = builders.mapNotNull { it.builtRequest }
@@ -68,7 +70,10 @@ class FakeCronetEngine : CronetEngine() {
         url: String,
         callback: UrlRequest.Callback,
         executor: Executor,
-    ): UrlRequest.Builder = FakeUrlRequestBuilder(url, callback, executor).also { builders.add(it) }
+    ): UrlRequest.Builder = FakeUrlRequestBuilder(url, callback, executor).also {
+        it.rejectFinishedListener = rejectFinishedListener
+        builders.add(it)
+    }
 
     override fun getVersionString(): String = "fake"
     @Suppress("OVERRIDE_DEPRECATION")
@@ -151,6 +156,17 @@ class FakeUrlRequestBuilder(
 
     var cacheDisabled = false
         private set
+    var finishedListener: RequestFinishedInfo.Listener? = null
+        private set
+    var rejectFinishedListener = false
+
+    override fun setRequestFinishedListener(
+        listener: RequestFinishedInfo.Listener,
+    ): UrlRequest.Builder {
+        if (rejectFinishedListener) throw UnsupportedOperationException("no finished listener")
+        finishedListener = listener
+        return this
+    }
 
     override fun disableCache(): UrlRequest.Builder {
         cacheDisabled = true
