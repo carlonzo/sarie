@@ -9,12 +9,12 @@ import java.util.Random
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import okhttp3.Authenticator
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.Route
 import okio.BufferedSink
 import org.chromium.net.CronetEngine
 import org.junit.After
@@ -305,11 +305,9 @@ class CronetSuite {
             assertEquals("gzip-payload-ok", response.body.string())
         }
 
-        // (b) Unencoded response: the bridge keeps Content-Length (identity passthrough
-        // clause of keepEncodingAffectedHeaders). Pinned cronet-embedded 143 REPLACES the
-        // caller's Accept-Encoding with its own "gzip, deflate, br" (observed server-side),
-        // so an identity request on /compress/gzip is not expressible on the Cronet path;
-        // an unencoded endpoint pins the same bridge behavior.
+        // (b) Unencoded response: the bridge keeps Content-Length. An explicit
+        // Accept-Encoding: identity is denied (content_encoding) and is not a Cronet
+        // request; /ok pins identity-body Content-Length on the Cronet path.
         client.newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertNull(response.header("Content-Encoding"))
@@ -336,13 +334,22 @@ class CronetSuite {
         installCronet(quicHintHost = null)
         val client = OkHttpClient()
 
-        // (a) An explicit caller Accept-Encoding does NOT reach the wire on the pinned engine
-        // (cronet-embedded 143.7445.0, observed server-side): the engine replaces it with its
-        // own "gzip, deflate, br" and transparently decodes. There is no per-request control
-        // (no API on UrlRequest.Builder; the mapper hook also runs at the builder level, but
-        // the replacement happens natively at request execution) and engine-level
-        // enableBrotli only affects brotli ADVERTISING - so the bridge keeps Cronet's decode
-        // and strips Content-Encoding/Content-Length for all-engine-handled encodings.
+        // Default request: the caller set no Accept-Encoding, so the call stays on Cronet
+        // and the engine advertises its own list. Phase 2 owns the gzip, deflate assertion.
+        client.newCall(Request.Builder().url("$ORIGIN/headers").build()).execute().use { response ->
+            assertEquals(200, response.code)
+            val echoed = response.body.string()
+            println("AE-ECHO-BEGIN\n$echoed\nAE-ECHO-END")
+            assertTrue(
+                "pinned engine must advertise its own Accept-Encoding, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [gzip, deflate, br]"),
+            )
+        }
+        assertCronetServed()
+
+        Metrics.resetForTest()
+
+        // Explicit identity: the app owns decoding, so the call falls back to stock.
         client.newCall(
             Request.Builder().url("$ORIGIN/headers")
                 .header("Accept-Encoding", "identity")
@@ -350,36 +357,42 @@ class CronetSuite {
         ).execute().use { response ->
             assertEquals(200, response.code)
             val echoed = response.body.string()
-            println("AE-ECHO-BEGIN\n$echoed\nAE-ECHO-END")
+            println("AE-IDENTITY-ECHO-BEGIN\n$echoed\nAE-IDENTITY-ECHO-END")
             assertTrue(
-                "pinned engine must replace the caller Accept-Encoding, got:\n$echoed",
-                echoed.contains("Accept-Encoding: [gzip, deflate, br]"),
-            )
-            assertFalse(
-                "the caller's explicit Accept-Encoding must not survive:\n$echoed",
-                echoed.contains("[identity]"),
+                "stock must forward the caller Accept-Encoding, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [identity]"),
             )
         }
+        assertStockServed(Metrics.Reason.content_encoding)
+    }
 
-        // (b) Invariant (never double-decode, never a header/body mismatch): exactly ONE
-        // decode happens - the engine's - even when the caller asked for something else.
-        // If the bridge delivered encoded bytes with the headers stripped, this body would
-        // be raw gzip garbage; if it decoded AND OkHttp's BridgeInterceptor decoded, the
-        // GzipSource would throw on plaintext. Plaintext proves exactly one decode and
-        // consistent headers.
+    @Test
+    fun rangeRequestGoesViaCronetWithIdentityEncoding() {
+        installCronet(quicHintHost = null)
+        val client = OkHttpClient()
+
+        // No Accept-Encoding, but a Range header: BridgeInterceptor does not add gzip, and
+        // Chromium sends identity. The bridge must keep Content-Length.
         client.newCall(
-            Request.Builder().url("$ORIGIN/compress/gzip")
-                .header("Accept-Encoding", "identity")
+            Request.Builder().url("$ORIGIN/headers")
+                .header("Range", "bytes=0-")
                 .build(),
         ).execute().use { response ->
-            assertEquals(200, response.code)
-            assertNull(
-                "decoded body must not keep Content-Encoding, headers=${response.headers}",
-                response.header("Content-Encoding"),
+            assertTrue("unexpected status ${response.code}", response.code in 200..299)
+            val echoed = response.body.string()
+            println("RANGE-ECHO-BEGIN\n$echoed\nRANGE-ECHO-END")
+            assertTrue(
+                "expected Chromium Accept-Encoding identity, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [identity]"),
             )
-            assertEquals("gzip-payload-ok", response.body.string())
+            val length = response.header("Content-Length")
+            assertEquals(
+                "identity body must keep Content-Length, headers=${response.headers}",
+                echoed.toByteArray(Charsets.UTF_8).size.toString(),
+                length,
+            )
         }
-        assertCronetServed(minCount = 2)
+        assertCronetServed()
     }
 
     @Test
@@ -397,17 +410,14 @@ class CronetSuite {
             assertEquals(200, response.code)
             val echoed = response.body.string()
             println("HEADER-ECHO-BEGIN\n$echoed\nHEADER-ECHO-END")
-            // Pinned against cronet-embedded 143.7445.0 (observed, not assumed): the mapper
-            // adds both duplicate values, but the engine collapses them to the LAST value on
-            // the wire. Regression-visible contract for COMPATIBILITY.md: duplicate request
-            // headers do not survive the Cronet path - only the final value is sent.
+            // Repeated names are one field: ", "-joined. The server sees "one, two".
             assertTrue(
-                "expected only the last duplicate value on the wire, got:\n$echoed",
-                echoed.contains("X-Dup: [two]"),
+                "expected joined duplicate values on the wire, got:\n$echoed",
+                echoed.contains("X-Dup: [one, two]"),
             )
             assertFalse(
-                "earlier duplicate values must not reach the server, got:\n$echoed",
-                echoed.contains("[one]"),
+                "duplicates must not collapse to the last value, got:\n$echoed",
+                echoed.contains("X-Dup: [two]"),
             )
             // Host is derived from the URL by the engine stack.
             assertTrue(
@@ -463,19 +473,33 @@ class CronetSuite {
     }
 
     @Test
-    fun authenticatorRoutesToStockFallback() {
+    fun authenticatorRetries401OverCronet() {
         installCronet(quicHintHost = null)
+        val routes = mutableListOf<Route?>()
         val client = OkHttpClient.Builder()
-            .authenticator { _, _ -> null } // custom (non-NONE) authenticator -> stock contract
+            .authenticator { route, response ->
+                routes += route
+                if (response.request.header("Authorization") != null) {
+                    null
+                } else {
+                    response.request.newBuilder()
+                        .header("Authorization", "Bearer token")
+                        .build()
+                }
+            }
             .build()
 
         client.newCall(Request.Builder().url("$ORIGIN/auth").build()).execute().use { response ->
-            assertEquals(401, response.code)
-            assertEquals("unauthorized", response.body.string())
+            assertEquals(200, response.code)
+            assertEquals("ok", response.body.string())
+            // No quic hint, and local QUIC is blocked (h2LocalOriginWhileQuicBlocked),
+            // so this origin's Cronet response is HTTP_2. The plan's HTTP_3 end state
+            // is not observable here; two Cronet hops and route == null are.
+            assertEquals(Protocol.HTTP_2, response.protocol)
         }
-        // Custom authenticator traffic stays stock by design (Metis B2: 407s crash follow-ups;
-        // policy diverts the whole client pre-send with reason=authenticator).
-        assertStockServed(Metrics.Reason.authenticator)
+        assertEquals(listOf<Route?>(null), routes)
+        // 401 and the Authorization retry both stay on Cronet.
+        assertCronetServed(minCount = 2)
     }
 
     @Test

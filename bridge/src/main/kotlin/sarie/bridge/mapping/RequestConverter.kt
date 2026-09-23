@@ -18,6 +18,7 @@ package sarie.bridge.mapping
 
 import sarie.bridge.SarieBridge
 import java.io.IOException
+import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.logging.Logger
@@ -62,9 +63,32 @@ class RequestConverter(
 
         builder.setHttpMethod(okHttpRequest.method)
 
+        // One addHeader per name. Repeated request values join with ", " ("; " for Cookie).
+        // Content-Type and Content-Length the converter adds are folded into that same map.
+        val headerGroups = linkedMapOf<String, JoinedHeader>()
+        fun add(name: String, value: String) {
+            val key = name.lowercase(Locale.US)
+            val group = headerGroups[key]
+            if (group == null) {
+                headerGroups[key] = JoinedHeader(name, mutableListOf(value))
+            } else {
+                group.values.add(value)
+            }
+        }
+        fun addDistinct(name: String, value: String) {
+            val key = name.lowercase(Locale.US)
+            val group = headerGroups[key]
+            if (group == null || group.values.none { it.equals(value, ignoreCase = true) }) {
+                add(name, value)
+            }
+        }
+        fun replace(name: String, value: String) {
+            headerGroups[name.lowercase(Locale.US)] = JoinedHeader(name, mutableListOf(value))
+        }
+
         val headers = okHttpRequest.headers
         for (i in 0 until headers.size) {
-            builder.addHeader(headers.name(i), headers.value(i))
+            add(headers.name(i), headers.value(i))
         }
 
         val body = okHttpRequest.body
@@ -72,13 +96,13 @@ class RequestConverter(
             // If provided by the user, set the RequestBody.contentType(). This matches OkHttp.
             val contentType = body.contentType()
             if (contentType != null) {
-                builder.addHeader(CONTENT_TYPE_HEADER_NAME, contentType.toString())
+                addDistinct(CONTENT_TYPE_HEADER_NAME, contentType.toString())
             }
 
             if (okHttpRequest.header(CONTENT_LENGTH_HEADER_NAME) == null &&
                 body.contentLength() != -1L
             ) {
-                builder.addHeader(CONTENT_LENGTH_HEADER_NAME, body.contentLength().toString())
+                add(CONTENT_LENGTH_HEADER_NAME, body.contentLength().toString())
             }
 
             if (body.contentLength() != 0L) {
@@ -94,7 +118,7 @@ class RequestConverter(
                             "Content-Type has been overridden to " +
                             "\"$CONTENT_TYPE_HEADER_DEFAULT_VALUE\"",
                     )
-                    builder.addHeader(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE)
+                    replace(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE)
                 }
 
                 builder.setUploadDataProvider(
@@ -102,6 +126,11 @@ class RequestConverter(
                     uploadDataProviderExecutor,
                 )
             }
+        }
+
+        for ((key, group) in headerGroups) {
+            val separator = if (key == "cookie") "; " else ", "
+            builder.addHeader(group.name, group.values.joinToString(separator))
         }
 
         SarieBridge.snapshot()?.mapper?.map(okHttpRequest, builder)
@@ -121,6 +150,8 @@ class RequestConverter(
         @Throws(IOException::class)
         fun getResponse(): Response = responseConverter.toResponse(request, callback)
     }
+
+    private class JoinedHeader(val name: String, val values: MutableList<String>)
 
     private companion object {
         private const val CONTENT_LENGTH_HEADER_NAME = "Content-Length"

@@ -91,8 +91,15 @@
 		}
 	}
 
+	# 401 until the caller sends Authorization, then 200. Token-refresh authenticator test.
 	handle /auth {
-		respond "unauthorized" 401
+		@authorized header Authorization
+		handle @authorized {
+			respond "ok" 200
+		}
+		handle {
+			respond "unauthorized" 401
+		}
 	}
 
 	handle /redirect {

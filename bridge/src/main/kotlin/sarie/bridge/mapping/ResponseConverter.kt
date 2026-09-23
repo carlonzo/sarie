@@ -176,6 +176,6 @@ class ResponseConverter {
         private const val CONTENT_ENCODING_HEADER_NAME = "Content-Encoding"
 
         // https://source.chromium.org/search?q=symbol:FilterSourceStream::ParseEncodingType%20f:cc
-        private val ENCODINGS_HANDLED_BY_CRONET = setOf("br", "deflate", "gzip", "x-gzip")
+        private val ENCODINGS_HANDLED_BY_CRONET = setOf("br", "deflate", "gzip", "x-gzip", "zstd")
     }
 }

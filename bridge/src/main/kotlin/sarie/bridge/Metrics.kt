@@ -19,6 +19,8 @@ object Metrics {
         cache,
         network_interceptors,
         h2_prior_knowledge,
+
+        /** Retired: authenticators are allowed on the Cronet path. The name stays stable. */
         authenticator,
         proxy,
         socket_factory,
@@ -27,6 +29,8 @@ object Metrics {
         trust,
         protocols,
         engine_cold,
+        dns,
+        content_encoding,
     }
 
     val cronet = AtomicLong()

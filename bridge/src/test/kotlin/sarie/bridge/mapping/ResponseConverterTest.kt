@@ -87,7 +87,7 @@ class ResponseConverterTest {
 
     @Test
     fun `all-Cronet-handled Content-Encoding strips encoding and length headers`() {
-        val handled = listOf("gzip", "br", "deflate", "x-gzip", "gzip, x-gzip")
+        val handled = listOf("gzip", "br", "deflate", "x-gzip", "zstd", "gzip, x-gzip")
         for (encoding in handled) {
             val response = convert(
                 FakeUrlResponseInfo(

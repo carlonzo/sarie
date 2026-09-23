@@ -189,12 +189,13 @@ class SarieBridgeTest {
     }
 
     @Test
-    fun `reason enum covers all 17 values`() {
+    fun `reason enum covers all 19 values`() {
         assertEquals(
             listOf(
                 "disabled", "engine_missing", "tag_opt_out", "allowlist", "cleartext", "websocket",
                 "cache", "network_interceptors", "h2_prior_knowledge", "authenticator", "proxy",
                 "socket_factory", "hostname_verifier", "pins", "trust", "protocols", "engine_cold",
+                "dns", "content_encoding",
             ),
             Metrics.Reason.values().map { it.name },
         )

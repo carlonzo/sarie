@@ -6,6 +6,7 @@ import sarie.bridge.mapping.OkHttpBridgeCallback
 import sarie.bridge.mapping.RequestConverter
 import sarie.bridge.mapping.ResponseConverter
 import java.io.IOException
+import java.net.ProtocolException
 import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -50,7 +51,9 @@ import org.chromium.net.UrlRequest
  * - No fabricated metadata: handshake and networkResponse stay unset; the sent/received
  *   timestamps come from bridge-owned clocks (RequestConverter start / onResponseStarted).
  * - Redirects surface as 3xx with an empty body for OkHttp's follow-up logic to follow.
- * - 407 is rejected: RetryAndFollowUp would dereference a null Exchange route (Metis B2).
+ * - 401 is returned so RetryAndFollowUp calls authenticator.authenticate(route = null, response).
+ * - 407 is rejected with ProtocolException("Received HTTP_PROXY_AUTH (407) code while not using proxy"),
+ *   never a Response. It is not retryable.
  *
  * Transport-failure retry (compensates for the missing Exchange-based route retry stock runs
  * inside ConnectInterceptor/RetryAndFollowUp): a Cronet request that fails at the transport
@@ -74,7 +77,7 @@ object CronetBridge {
 
     private const val CANCELED_MESSAGE = "Canceled"
     private const val PROXY_AUTH_MESSAGE =
-        "Proxy authentication is not supported over the Cronet path"
+        "Received HTTP_PROXY_AUTH (407) code while not using proxy"
 
     /** Methods safe to retry once on a pre-headers transport failure (RFC idempotent). */
     private val IDEMPOTENT_METHODS = setOf("GET", "HEAD", "OPTIONS")
@@ -169,7 +172,7 @@ object CronetBridge {
                 val response = converted.getResponse()
                 if (response.code == 407) {
                     response.body.closeQuietly()
-                    throw IOException(PROXY_AUTH_MESSAGE)
+                    throw ProtocolException(PROXY_AUTH_MESSAGE)
                 }
                 val body = response.body
                 return response.newBuilder().body(UnregisteringResponseBody(body, call)).build()

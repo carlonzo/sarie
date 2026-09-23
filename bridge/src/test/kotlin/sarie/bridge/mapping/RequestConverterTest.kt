@@ -72,8 +72,7 @@ class RequestConverterTest {
         assertTrue(builder.directExecutorAllowed)
         assertEquals(
             listOf<Pair<String, String>>(
-                "X-Dup" to "one",
-                "X-Dup" to "two",
+                "X-Dup" to "one, two",
                 "X-Single" to "s",
             ),
             builder.headers,
@@ -81,6 +80,51 @@ class RequestConverterTest {
         assertNull(builder.uploadDataProvider)
         // The callback handed to the engine is the same one the response futures live on.
         assertNotNull(builder.callback)
+    }
+
+    @Test
+    fun `repeated headers join with comma except Cookie with semicolon`() {
+        val request = get(
+            "X-Dup" to "one",
+            "X-Dup" to "two",
+            "Cookie" to "a=1",
+            "cookie" to "b=2",
+        )
+
+        converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+        assertEquals(
+            listOf(
+                "X-Dup" to "one, two",
+                "Cookie" to "a=1; b=2",
+            ),
+            engine.builders.single().headers,
+        )
+    }
+
+    @Test
+    fun `converter Content-Type and Content-Length fold into one header each`() {
+        val same = Request.Builder()
+            .url("https://example.com/a")
+            .header("Content-Type", "text/plain")
+            .header("Content-Length", "5")
+            .post(body(contentType = "text/plain", contentLength = 5))
+            .build()
+        converter().convert(same, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+        assertEquals(
+            listOf("Content-Type" to "text/plain", "Content-Length" to "5"),
+            engine.builders.single().headers,
+        )
+
+        val different = Request.Builder()
+            .url("https://example.com/a")
+            .header("Content-Type", "application/json")
+            .post(body(contentType = "text/plain", contentLength = 5))
+            .build()
+        converter().convert(different, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+        val folded = engine.builders.last().headers
+            .filter { it.first.equals("Content-Type", ignoreCase = true) }
+        assertEquals(listOf("Content-Type" to "application/json, text/plain"), folded)
     }
 
     @Test
@@ -128,8 +172,11 @@ class RequestConverterTest {
         for (request in listOf(missingHeader, emptyHeader)) {
             converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
             val builder = engine.builders.last()
-            assertTrue(
-                "Content-Type" to "application/octet-stream" in builder.headers,
+            val contentTypes = builder.headers
+                .filter { it.first.equals("Content-Type", ignoreCase = true) }
+            assertEquals(
+                listOf("Content-Type" to "application/octet-stream"),
+                contentTypes,
             )
             assertNotNull(builder.uploadDataProvider)
         }

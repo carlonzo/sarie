@@ -6,6 +6,7 @@ import sarie.bridge.mapping.FakeCronetException
 import sarie.bridge.mapping.FakeUrlResponseInfo
 import sarie.bridge.mapping.OkHttpBridgeCallback
 import java.io.IOException
+import java.net.ProtocolException
 import java.net.ServerSocket
 import java.net.URL
 import java.net.URLConnection
@@ -426,7 +427,7 @@ class CronetBridgeTest {
     // --- 407 guard ---
 
     @Test
-    fun `407 response is rejected with proxy authentication IOException`() {
+    fun `407 response is rejected with ProtocolException`() {
         val engine = ScriptedCronetEngine()
         engine.responseInfo = FakeUrlResponseInfo(
             statusCode = 407,
@@ -435,12 +436,15 @@ class CronetBridgeTest {
         install(engine, "example.com")
         val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
 
-        val thrown = assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
+        val thrown = assertThrows(ProtocolException::class.java) { CronetBridge.intercept(chain) }
 
         assertEquals(
-            "Proxy authentication is not supported over the Cronet path",
+            "Received HTTP_PROXY_AUTH (407) code while not using proxy",
             thrown.message,
         )
+        // Not retryable: one attempt, no transport-failure retry.
+        assertEquals(1, engine.builtRequests.size)
+        assertEquals(0, Metrics.retries.get())
         // Closing the body quietly cancels the still-unfinished engine request.
         assertEquals(1, engine.builtRequests.single().cancelCalls)
         assertEquals(0, CallRegistry.activeCount())

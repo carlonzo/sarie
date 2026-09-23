@@ -3,8 +3,9 @@
 package sarie.bridge
 
 import javax.net.SocketFactory
-import okhttp3.Authenticator
+import okhttp3.Dns
 import okhttp3.Protocol
+import okhttp3.Request
 import okhttp3.internal.tls.OkHostnameVerifier
 
 /** Routing verdict: [allow] with a null [reason] on the Cronet path, else the fallback reason. */
@@ -25,16 +26,21 @@ data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
  * 8. client cache -> cache
  * 9. network interceptors -> network_interceptors
  * 10. H2_PRIOR_KNOWLEDGE -> h2_prior_knowledge
- * 11. custom authenticator/proxyAuthenticator -> authenticator
- * 12. explicit proxy or non-baseline proxySelector -> proxy
- * 13. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
- * 14. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
- * 15. certificate pins -> pins
+ * 11. explicit proxy or non-baseline proxySelector -> proxy
+ * 12. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
+ * 13. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
+ * 14. dns !== Dns.SYSTEM -> dns
+ * 15. certificate pins -> pins (any non-empty certificatePinner.pins)
  * 16. TLS/trust fingerprint mismatch -> trust (Metis B1)
- * 17. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
+ * 17. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
+ *     -> content_encoding
+ * 18. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
  *     is a local-test-server concern, not a distinct transport incompatibility)
- * 18. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
- * 19. else allow
+ * 19. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
+ * 20. else allow
+ *
+ * Authenticators are not a routing rule. [Metrics.Reason.authenticator] is retired and is never
+ * produced. A 401 is returned so OkHttp calls authenticator.authenticate(route = null, response).
  */
 object PolicyEngine {
 
@@ -55,9 +61,6 @@ object PolicyEngine {
         if (input.protocols.any { it == Protocol.H2_PRIOR_KNOWLEDGE }) {
             return Decision(false, Metrics.Reason.h2_prior_knowledge)
         }
-        if (input.authenticator !== Authenticator.NONE || input.proxyAuthenticator !== Authenticator.NONE) {
-            return Decision(false, Metrics.Reason.authenticator)
-        }
         if (input.proxy != null || input.proxySelector !== TrustBaseline.baseline.proxySelector) {
             return Decision(false, Metrics.Reason.proxy)
         }
@@ -67,8 +70,10 @@ object PolicyEngine {
         if (input.hostnameVerifier !== OkHostnameVerifier) {
             return Decision(false, Metrics.Reason.hostname_verifier)
         }
+        if (input.dns !== Dns.SYSTEM) return Decision(false, Metrics.Reason.dns)
         if (input.certificatePinner.pins.isNotEmpty()) return Decision(false, Metrics.Reason.pins)
         if (trustMismatched(input)) return Decision(false, Metrics.Reason.trust)
+        if (contentEncodingDenied(input)) return Decision(false, Metrics.Reason.content_encoding)
         if (isLoopback(input.request.url.host) && !snapshot.policy.allowLoopbackHttps) {
             return Decision(false, Metrics.Reason.cleartext)
         }
@@ -76,6 +81,27 @@ object PolicyEngine {
             return Decision(false, Metrics.Reason.allowlist)
         }
         return Decision(true, null)
+    }
+
+    /**
+     * The app set Accept-Encoding on the call: stock would hand it the raw bytes.
+     * Or the request at the swap names codings and gzip is not among them
+     * (comma-separated tokens, quality parameters stripped, case-insensitive).
+     * No Accept-Encoding at all is allowed — the Range case, where Chromium sends identity.
+     */
+    private fun contentEncodingDenied(input: PolicyInput): Boolean {
+        if (input.originalRequest.header(ACCEPT_ENCODING) != null) return true
+        return acceptEncodingLacksGzip(input.request)
+    }
+
+    private fun acceptEncodingLacksGzip(request: Request): Boolean {
+        val values = request.headers.values(ACCEPT_ENCODING)
+        if (values.isEmpty()) return false
+        return values.asSequence()
+            .flatMap { it.split(',') }
+            .map { it.substringBefore(';').trim() }
+            .filter { it.isNotEmpty() }
+            .none { it.equals("gzip", ignoreCase = true) }
     }
 
     /** Fail-closed: any null/unknown SSL factory, TM class, or issuer fingerprint mismatch denies. */
@@ -110,4 +136,6 @@ object PolicyEngine {
             entryHost == host && entryPort == port
         }
     }
+
+    private const val ACCEPT_ENCODING = "Accept-Encoding"
 }

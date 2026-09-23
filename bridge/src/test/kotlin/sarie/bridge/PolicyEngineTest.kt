@@ -22,6 +22,7 @@ import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.Cache
 import okhttp3.CertificatePinner
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -165,6 +166,20 @@ class PolicyEngineTest {
         return PolicyInput.fromChain(chain)
     }
 
+    /**
+     * [original] is the call's originalRequest. [atSwap] is the request ConnectInterceptor sees
+     * (after BridgeInterceptor). Defaults to [original].
+     */
+    private fun chainInput(
+        client: OkHttpClient = this.client,
+        original: Request,
+        atSwap: Request = original,
+    ): PolicyInput {
+        val call = client.newCall(original) as RealCall
+        val chain = RealInterceptorChain(call, emptyList(), 0, null, atSwap, client)
+        return PolicyInput.fromChain(chain)
+    }
+
     private fun decision(
         input: PolicyInput = inputFor(),
         snapshot: RuntimeSnapshot? = snap(),
@@ -280,20 +295,25 @@ class PolicyEngineTest {
     }
 
     @Test
-    fun `custom authenticator or proxyAuthenticator yields authenticator`() {
+    fun `custom authenticator or proxyAuthenticator no longer denies`() {
         val auth = OkHttpClient.Builder()
             .authenticator { _, _ -> null }
             .build()
-        val d = decision(input = inputFor(client = auth))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.authenticator, d.reason)
+        assertEquals(Decision(true, null), decision(input = inputFor(client = auth)))
 
         val proxyAuth = OkHttpClient.Builder()
             .proxyAuthenticator { _, _ -> null }
             .build()
-        val d2 = decision(input = inputFor(client = proxyAuth))
-        assertFalse(d2.allow)
-        assertEquals(Metrics.Reason.authenticator, d2.reason)
+        assertEquals(Decision(true, null), decision(input = inputFor(client = proxyAuth)))
+
+        // A proxy still denies, and it wins over a custom authenticator.
+        val proxied = OkHttpClient.Builder()
+            .authenticator { _, _ -> null }
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("192.0.2.1", 8080)))
+            .build()
+        val d = decision(input = inputFor(client = proxied))
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.proxy, d.reason)
     }
 
     @Test
@@ -337,6 +357,35 @@ class PolicyEngineTest {
         val d = decision(input = inputFor(client = customVerifier))
         assertFalse(d.allow)
         assertEquals(Metrics.Reason.hostname_verifier, d.reason)
+    }
+
+    @Test
+    fun `custom dns yields dns`() {
+        val custom = OkHttpClient.Builder()
+            .dns { throw UnsupportedOperationException("not called") }
+            .build()
+        val d = decision(input = inputFor(client = custom))
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.dns, d.reason)
+    }
+
+    @Test
+    fun `Dns SYSTEM does not deny`() {
+        val system = OkHttpClient.Builder().dns(Dns.SYSTEM).build()
+        assertEquals(Decision(true, null), decision(input = inputFor(client = system)))
+    }
+
+    @Test
+    fun `dns deny precedes pins`() {
+        val client = OkHttpClient.Builder()
+            .dns { throw UnsupportedOperationException("not called") }
+            .certificatePinner(
+                CertificatePinner.Builder()
+                    .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                    .build(),
+            )
+            .build()
+        assertEquals(Metrics.Reason.dns, decision(input = inputFor(client = client)).reason)
     }
 
     @Test
@@ -388,6 +437,82 @@ class PolicyEngineTest {
         val d = decision(input = inputFor(client = client))
         assertFalse(d.allow)
         assertEquals(Metrics.Reason.trust, d.reason)
+    }
+
+    @Test
+    fun `originalRequest Accept-Encoding yields content_encoding`() {
+        // gzip would be allowed on the swap request; the app's own header still denies.
+        val request = Request.Builder()
+            .url("https://example.com/")
+            .header("Accept-Encoding", "gzip")
+            .build()
+        val d = decision(input = chainInput(original = request))
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.content_encoding, d.reason)
+    }
+
+    @Test
+    fun `swap Accept-Encoding without gzip yields content_encoding`() {
+        val original = Request.Builder().url("https://example.com/").build()
+        val atSwap = original.newBuilder().header("Accept-Encoding", "identity").build()
+        val d = decision(input = chainInput(original = original, atSwap = atSwap))
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.content_encoding, d.reason)
+
+        val quality = original.newBuilder().header("Accept-Encoding", "identity;q=1, br").build()
+        assertEquals(
+            Metrics.Reason.content_encoding,
+            decision(input = chainInput(original = original, atSwap = quality)).reason,
+        )
+    }
+
+    @Test
+    fun `absent Accept-Encoding is allowed`() {
+        val original = Request.Builder()
+            .url("https://example.com/")
+            .header("Range", "bytes=0-1")
+            .build()
+        assertEquals(Decision(true, null), decision(input = chainInput(original = original)))
+    }
+
+    @Test
+    fun `swap Accept-Encoding listing gzip is allowed`() {
+        val original = Request.Builder().url("https://example.com/").build()
+        val atSwap = original.newBuilder().header("Accept-Encoding", "br, gzip").build()
+        assertEquals(Decision(true, null), decision(input = chainInput(original = original, atSwap = atSwap)))
+
+        val quality = original.newBuilder()
+            .header("Accept-Encoding", "br;q=1.0, GZip;q=0.5")
+            .build()
+        assertEquals(
+            Decision(true, null),
+            decision(input = chainInput(original = original, atSwap = quality)),
+        )
+    }
+
+    @Test
+    fun `content_encoding is after trust and before loopback`() {
+        val customTls = OkHttpClient.Builder()
+            .sslSocketFactory(FakeSSLSocketFactory(), FakeTrustManager())
+            .build()
+        val owned = Request.Builder()
+            .url("https://example.com/")
+            .header("Accept-Encoding", "identity")
+            .build()
+        assertEquals(
+            Metrics.Reason.trust,
+            decision(input = chainInput(client = customTls, original = owned)).reason,
+        )
+
+        val original = Request.Builder().url("https://localhost/").build()
+        val atSwap = original.newBuilder().header("Accept-Encoding", "identity").build()
+        assertEquals(
+            Metrics.Reason.content_encoding,
+            decision(
+                input = chainInput(original = original, atSwap = atSwap),
+                snapshot = snap(policy("localhost")),
+            ).reason,
+        )
     }
 
     @Test
@@ -518,5 +643,14 @@ class PolicyEngineTest {
         assertEquals(Decision(true, null), d)
         assertEquals("protocols", Metrics.Reason.protocols.name)
         assertEquals("engine_cold", Metrics.Reason.engine_cold.name)
+        assertEquals("dns", Metrics.Reason.dns.name)
+        assertEquals("content_encoding", Metrics.Reason.content_encoding.name)
+        // Retired name stays; a custom authenticator must not produce it.
+        assertEquals("authenticator", Metrics.Reason.authenticator.name)
+        val auth = OkHttpClient.Builder().authenticator { _, _ -> null }.build()
+        assertNotEquals(
+            Metrics.Reason.authenticator,
+            decision(input = inputFor(client = auth)).reason,
+        )
     }
 }
