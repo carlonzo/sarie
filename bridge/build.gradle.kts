@@ -47,6 +47,7 @@ val okhttpVersionForTests: String =
 dependencies {
     compileOnly(libs.okhttp.min)
     compileOnly(libs.cronet.api)
+    compileOnly(libs.play.services.cronet)
     testImplementation(libs.cronet.api)
     testImplementation("com.squareup.okhttp3:okhttp:$okhttpVersionForTests")
     testImplementation(libs.junit)
@@ -82,6 +83,19 @@ tasks.register("checkCronetCompileOnly") {
         }
     }
 }
+tasks.register("checkPlayServicesCompileOnly") {
+    group = "verification"
+    description = "Fails if play-services-cronet is resolved on the bridge runtime classpath."
+    doLast {
+        val found = configurations.getByName("debugRuntimeClasspath")
+            .incoming.resolutionResult.allComponents
+            .mapNotNull { it.moduleVersion }
+            .filter { it.group == "com.google.android.gms" }
+        check(found.isEmpty()) {
+            "bridge must not ship play-services on its runtime classpath; found $found"
+        }
+    }
+}
 tasks.named("check") {
-    dependsOn("checkOkHttpCompileOnly", "checkCronetCompileOnly")
+    dependsOn("checkOkHttpCompileOnly", "checkCronetCompileOnly", "checkPlayServicesCompileOnly")
 }

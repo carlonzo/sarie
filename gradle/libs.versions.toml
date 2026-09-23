@@ -15,6 +15,7 @@ androidxTestRunner = "1.7.0"
 androidxTestCore = "1.7.0"
 compileSdk = "37"
 minSdk = "24"
+playServicesCronet = "18.1.1"
 
 [libraries]
 okhttp-min = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttpMin" }
@@ -23,6 +24,7 @@ okhttp-logging = { module = "com.squareup.okhttp3:logging-interceptor", version.
 mockwebserver3 = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
 cronet-api = { module = "org.chromium.net:cronet-api", version.ref = "cronetApi" }
 cronet-embedded = { module = "org.chromium.net:cronet-embedded", version.ref = "cronetEmbedded" }
+play-services-cronet = { module = "com.google.android.gms:play-services-cronet", version.ref = "playServicesCronet" }
 junit = { module = "junit:junit", version.ref = "junit" }
 asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
 asm-commons = { module = "org.ow2.asm:asm-commons", version.ref = "asm" }

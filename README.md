@@ -66,9 +66,21 @@ dependencies {
 
 ### 2. Add a Cronet provider
 
-Sarie's bridge has **no runtime dependency on Cronet** (`compileOnly` against `cronet-api`). Put one implementation on the app classpath. Sarie picks the first enabled provider in this order: app-packaged, platform HttpEngine (Android 14+), then Play Services. It never uses the Java fallback provider.
+Sarie's bridge has **no runtime dependency on Cronet** (`compileOnly` against `cronet-api`). Put one implementation on the app classpath. Sarie automatically selects and initializes the first available provider according to this preference order:
 
-#### Embedded / bundled
+| Preference | Provider | Artifact | Min API | Rationale |
+| --- | --- | --- | --- | --- |
+| 1 | App-packaged (`org.chromium.net:cronet-embedded` / `-bundled`) | `org.chromium.net:cronet-embedded:500.0.2` | 24+ | Explicit host choice: ships Chromium Cronet directly in the APK; available immediately without external downloads or IPC. |
+| 2 | Platform HttpEngine (`HttpEngine-Native-Provider`) | System (`org.chromium.net:cronet`) | 34+ (Android 14) | System-managed: updated with OS Mainline modules and starts faster than Play Services without APK size overhead. |
+| 3 | Play Services (`Google-Play-Services-Cronet-Provider`) | `com.google.android.gms:play-services-cronet:18.1.1` | 24+ (with GMS) | Smallest APK size: downloads Chromium binaries via Google Play Services dynamically. |
+
+The `HttpEngine` provider class ships in `org.chromium.net:cronet` (which every 500.x Cronet artifact pulls in), so devices running API 34+ get `HttpEngine` automatically with any Cronet dependency.
+
+When using Play Services, Sarie automatically initializes `CronetProviderInstaller` in the background on `install` and builds the engine once available—you do not need to call `installProvider` yourself. Calls made before the engine finishes initializing fall back safely to stock OkHttp (`engine_missing`).
+
+Java's fallback provider (`Fallback-Cronet-Provider` / `HttpURLConnection`) is never used.
+
+#### Option A: Embedded / bundled (zero setup, consistent across devices)
 
 ```kotlin
 dependencies {
@@ -77,15 +89,13 @@ dependencies {
 }
 ```
 
-#### Play Services (smaller APK)
+#### Option B: Play Services (smaller APK, auto-initialized)
 
 ```kotlin
 dependencies {
     implementation("com.google.android.gms:play-services-cronet:18.1.1")
 }
 ```
-
-Call `CronetProviderInstaller.installProvider(context)` and wait for success before `SarieBridge.install`. If Play Services is missing, skip install: requests stay on stock OkHttp.
 
 ---
 

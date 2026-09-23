@@ -224,4 +224,21 @@ class SarieBridgeTest {
         assertEquals(listOf(Log.WARN), priorities)
         assertTrue(messages.single().contains("9.9.9"))
     }
+
+    @Test
+    fun `snapshot is not published if install generation has moved`() {
+        val gen = SarieBridge.nextGeneration()
+        val engine = FakeCronetEngine()
+        val snap = RuntimeSnapshot(engine, policy, mapper, System.currentTimeMillis())
+
+        // Generation moves before publishing (e.g. uninstall or another install)
+        SarieBridge.uninstall()
+        assertFalse(SarieBridge.publishIfCurrentGeneration(gen, snap))
+        assertNull(SarieBridge.snapshot())
+
+        // Matching generation succeeds
+        val currentGen = SarieBridge.nextGeneration()
+        assertTrue(SarieBridge.publishIfCurrentGeneration(currentGen, snap))
+        assertSame(engine, SarieBridge.snapshot()?.engine)
+    }
 }

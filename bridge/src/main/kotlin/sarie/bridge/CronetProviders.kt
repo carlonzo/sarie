@@ -38,6 +38,36 @@ internal fun <T : CronetProviderCandidate> selectCronetProvider(providers: List<
     return null
 }
 
+internal enum class ProviderDecision {
+    BUILD_NOW,
+    RUN_INSTALLER,
+    GIVE_UP,
+}
+
+/**
+ * Decides whether to build the engine immediately, initialize Play Services asynchronously,
+ * or give up (engine_missing).
+ */
+internal fun <T : CronetProviderCandidate> decideProviderPlan(
+    providers: List<T>,
+    installerAvailable: Boolean = isPlayServicesInstallerAvailable(),
+): ProviderDecision {
+    val chosen = selectCronetProvider(providers)
+    return when {
+        chosen != null -> ProviderDecision.BUILD_NOW
+        installerAvailable -> ProviderDecision.RUN_INSTALLER
+        else -> ProviderDecision.GIVE_UP
+    }
+}
+
+internal fun isPlayServicesInstallerAvailable(): Boolean =
+    try {
+        Class.forName("com.google.android.gms.net.CronetProviderInstaller")
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
 internal class LiveCronetProvider(
     val source: CronetProvider,
 ) : CronetProviderCandidate {

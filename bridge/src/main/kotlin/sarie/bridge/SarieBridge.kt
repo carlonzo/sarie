@@ -3,7 +3,10 @@ package sarie.bridge
 import android.content.Context
 import android.util.Log
 import java.io.File
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.OkHttp
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetProvider
@@ -25,6 +28,15 @@ object SarieBridge {
 
     private val missingProviderLogged = AtomicBoolean(false)
     private val storageDirLogged = AtomicBoolean(false)
+    private val installerFailedLogged = AtomicBoolean(false)
+
+    private val installGeneration = AtomicInteger(0)
+
+    private val installerExecutor: Executor by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "sarie-play-services-init").apply { isDaemon = true }
+        }
+    }
 
     @Volatile
     private var current: RuntimeSnapshot? = null
@@ -33,25 +45,6 @@ object SarieBridge {
     @Volatile
     private var lastBuilt: RuntimeSnapshot? = null
 
-    /**
-     * Builds a Cronet engine and publishes it. [configure] runs after the overridable defaults
-     * (connection migration and stale DNS) and before bridge-owned settings, which overwrite
-     * brotli, the HTTP cache, the storage path, pins, and local-trust pin bypass. Stale DNS
-     * stays at the default unless [configure] replaces it.
-     *
-     * When no enabled app-packaged, HttpEngine, or Play Services provider exists, this does not
-     * publish a snapshot (logged once). Requests keep falling back with `reason=engine_missing`.
-     * The Java fallback provider is never selected.
-     *
-     * Call it once per process. A later call reuses the engine already built (its storage path
-     * stays locked while it runs) and only swaps [policy] and [mapper]; its [client] pins and
-     * [configure] are ignored, with a warning.
-     *
-     * @param client Source of certificate pins. Null installs no pins.
-     * @param configure Tuning such as QUIC hints. Do not add pins here: Cronet enforces them but
-     *   the routing policy cannot see them, so OkHttp clients without those pins would still be
-     *   routed to Cronet. Put pins on the [client]'s `CertificatePinner`.
-     */
     /**
      * Builds a Cronet engine with the default configuration and publishes it.
      */
@@ -77,14 +70,82 @@ object SarieBridge {
         context: Context,
         config: SarieConfig,
     ) {
+        val generation = installGeneration.incrementAndGet()
         // Before the provider lookup: a failed install still reports engine_missing.
         this.logger = config.logger
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
-        val chosen = selectCronetProvider(
-            CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) },
-        )
+        val providers = CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) }
+        when (decideProviderPlan(providers, isPlayServicesInstallerAvailable())) {
+            ProviderDecision.BUILD_NOW -> {
+                buildAndPublishEngine(context, config, providers, generation)
+            }
+            ProviderDecision.RUN_INSTALLER -> {
+                initPlayServicesAndBuild(context, config, generation)
+            }
+            ProviderDecision.GIVE_UP -> {
+                if (missingProviderLogged.compareAndSet(false, true)) {
+                    logger?.let {
+                        it.log(
+                            Log.WARN,
+                            "No enabled Cronet provider (app-packaged, HttpEngine, or Play Services); " +
+                                "leaving requests on stock OkHttp (engine_missing). " +
+                                "Fallback-Cronet-Provider is not used.",
+                            null,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun initPlayServicesAndBuild(
+        context: Context,
+        config: SarieConfig,
+        generation: Int,
+    ) {
+        try {
+            com.google.android.gms.net.CronetProviderInstaller.installProvider(context)
+                .addOnCompleteListener(installerExecutor) { task ->
+                    if (installGeneration.get() != generation) return@addOnCompleteListener
+                    if (task.isSuccessful) {
+                        val fresh = CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) }
+                        buildAndPublishEngine(context, config, fresh, generation)
+                    } else {
+                        if (installerFailedLogged.compareAndSet(false, true)) {
+                            logger?.let {
+                                it.log(
+                                    Log.WARN,
+                                    "Play Services CronetProviderInstaller failed; " +
+                                        "leaving requests on stock OkHttp (engine_missing).",
+                                    task.exception,
+                                )
+                            }
+                        }
+                    }
+                }
+        } catch (t: Throwable) {
+            if (installerFailedLogged.compareAndSet(false, true)) {
+                logger?.let {
+                    it.log(
+                        Log.WARN,
+                        "Play Services CronetProviderInstaller failed to start; " +
+                            "leaving requests on stock OkHttp (engine_missing).",
+                        t,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun buildAndPublishEngine(
+        context: Context,
+        config: SarieConfig,
+        providers: List<LiveCronetProvider>,
+        generation: Int,
+    ) {
+        val chosen = selectCronetProvider(providers)
         if (chosen == null) {
             if (missingProviderLogged.compareAndSet(false, true)) {
                 logger?.let {
@@ -134,7 +195,7 @@ object SarieBridge {
                     e,
                 )
             }
-            current = RuntimeSnapshot(
+            val reused = RuntimeSnapshot(
                 engine = previous.engine,
                 policy = config.policy,
                 mapper = config.mapper,
@@ -144,6 +205,7 @@ object SarieBridge {
                 providerName = previous.providerName,
                 providerVersion = previous.providerVersion,
             )
+            publishIfCurrentGeneration(generation, reused)
             return
         }
         val snapshot = RuntimeSnapshot(
@@ -157,7 +219,7 @@ object SarieBridge {
             providerVersion = chosen.version,
         )
         lastBuilt = snapshot
-        current = snapshot
+        publishIfCurrentGeneration(generation, snapshot)
     }
 
     /**
@@ -180,6 +242,7 @@ object SarieBridge {
         engine: CronetEngine,
         config: SarieConfig,
     ) {
+        val generation = installGeneration.incrementAndGet()
         require(config.certificatePinner == null) {
             "certificatePinner cannot be used with a borrowed CronetEngine"
         }
@@ -190,11 +253,14 @@ object SarieBridge {
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
-        current = RuntimeSnapshot(
-            engine,
-            config.policy,
-            config.mapper,
-            System.currentTimeMillis(),
+        publishIfCurrentGeneration(
+            generation,
+            RuntimeSnapshot(
+                engine,
+                config.policy,
+                config.mapper,
+                System.currentTimeMillis(),
+            ),
         )
     }
 
@@ -215,7 +281,16 @@ object SarieBridge {
      * The listener stays, so the fallbacks that follow are still reported.
      */
     fun uninstall() {
+        installGeneration.incrementAndGet()
         current = null
+    }
+
+    internal fun nextGeneration(): Int = installGeneration.incrementAndGet()
+
+    internal fun publishIfCurrentGeneration(generation: Int, snapshot: RuntimeSnapshot): Boolean {
+        if (installGeneration.get() != generation) return false
+        current = snapshot
+        return true
     }
 
     internal fun snapshot(): RuntimeSnapshot? = current
