@@ -223,6 +223,9 @@ Disable Cronet routing immediately across the entire process without rebuilding 
 System.setProperty("okhttp.cronet.enabled", "false")
 ```
 
+#### Storage directory and cache clearing
+The directory `<cacheDir>/cronet-cache` (or `<cacheDir>/cronet-cache-<suffix>` in secondary processes) holds QUIC and `Alt-Svc` server state for a Sarie-built engine. It can be deleted safely at any time: the next `install` recreates it, and deleting it only drops remembered HTTP/3 state. Android's standard "Clear cache" action clears this directory as well.
+
 ---
 
 ## What runs where
