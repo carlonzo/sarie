@@ -266,4 +266,73 @@ class SarieBridgeTest {
         assertNotNull(snap)
         assertTrue(dns in snap!!.bypassableDns)
     }
+
+    @Test
+    fun `install with trailing lambda config builds the same snapshot as explicit config`() {
+        val engine = FakeCronetEngine()
+        val dns = Dns { emptyList() }
+        SarieBridge.install(engine) {
+            policy(this@SarieBridgeTest.policy)
+            mapper(this@SarieBridgeTest.mapper)
+            bypassableDns(dns)
+        }
+        val snap = SarieBridge.snapshot()!!
+        assertSame(engine, snap.engine)
+        assertSame(policy, snap.policy)
+        assertSame(mapper, snap.mapper)
+        assertTrue(dns in snap.bypassableDns)
+    }
+
+    @Test
+    fun `DefaultPolicy DSL builds identical policy to Builder`() {
+        val fromBuilder = DefaultPolicy.Builder()
+            .allowedOrigins(setOf("example.com", "api.example.com"))
+            .allowLoopbackHttps(true)
+            .sdkPins(setOf("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
+            .enabled { true }
+            .build()
+
+        val fromDsl = DefaultPolicy {
+            allowedOrigins(setOf("example.com", "api.example.com"))
+            allowLoopbackHttps(true)
+            sdkPins(setOf("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
+            enabled { true }
+        }
+
+        assertEquals(fromBuilder.allowedOrigins, fromDsl.allowedOrigins)
+        assertEquals(fromBuilder.allowLoopbackHttps, fromDsl.allowLoopbackHttps)
+        assertEquals(fromBuilder.sdkPins, fromDsl.sdkPins)
+        assertEquals(fromBuilder.enabled(), fromDsl.enabled())
+    }
+
+    @Test
+    fun `SarieConfig DSL builds identical config to Builder`() {
+        val dns = Dns { emptyList() }
+        val testLogger = SarieLogger { _, _, _ -> }
+        val pinner = CertificatePinner.Builder().build()
+        val pol = DefaultPolicy()
+
+        val fromBuilder = SarieConfig.Builder()
+            .policy(pol)
+            .mapper(RequestToUrlRequestMapper.NOOP)
+            .certificatePinner(pinner)
+            .debugLogger(testLogger)
+            .bypassableDns(dns)
+            .build()
+
+        val fromDsl = SarieConfig {
+            policy(pol)
+            mapper(RequestToUrlRequestMapper.NOOP)
+            certificatePinner(pinner)
+            debugLogger(testLogger)
+            bypassableDns(dns)
+        }
+
+        assertSame(fromBuilder.policy, fromDsl.policy)
+        assertSame(fromBuilder.mapper, fromDsl.mapper)
+        assertSame(fromBuilder.certificatePinner, fromDsl.certificatePinner)
+        assertSame(fromBuilder.debugLogger, fromDsl.debugLogger)
+        assertEquals(fromBuilder.bypassableDns, fromDsl.bypassableDns)
+    }
 }
+

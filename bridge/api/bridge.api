@@ -34,6 +34,10 @@ public final class sarie/bridge/DefaultPolicy$Builder {
 	public final fun sdkPins (Ljava/util/Set;)Lsarie/bridge/DefaultPolicy$Builder;
 }
 
+public final class sarie/bridge/DefaultPolicyKt {
+	public static final fun DefaultPolicy (Lkotlin/jvm/functions/Function1;)Lsarie/bridge/DefaultPolicy;
+}
+
 public final class sarie/bridge/FallbackReason : java/lang/Enum {
 	public static final field allowlist Lsarie/bridge/FallbackReason;
 	public static final field cleartext Lsarie/bridge/FallbackReason;
@@ -69,8 +73,10 @@ public final class sarie/bridge/SarieBridge {
 	public static final field INSTANCE Lsarie/bridge/SarieBridge;
 	public final fun getEngine ()Lorg/chromium/net/CronetEngine;
 	public final fun install (Landroid/content/Context;)V
+	public final fun install (Landroid/content/Context;Lkotlin/jvm/functions/Function1;)V
 	public final fun install (Landroid/content/Context;Lsarie/bridge/SarieConfig;)V
 	public final fun install (Lorg/chromium/net/CronetEngine;)V
+	public final fun install (Lorg/chromium/net/CronetEngine;Lkotlin/jvm/functions/Function1;)V
 	public final fun install (Lorg/chromium/net/CronetEngine;Lsarie/bridge/SarieConfig;)V
 	public final fun isEnabled ()Z
 	public final fun uninstall ()V

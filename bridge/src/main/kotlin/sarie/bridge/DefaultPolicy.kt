@@ -56,3 +56,7 @@ public class DefaultPolicy private constructor(builder: Builder) : CronetPolicy 
         public fun build(): DefaultPolicy = DefaultPolicy(this)
     }
 }
+
+public inline fun DefaultPolicy(block: DefaultPolicy.Builder.() -> Unit): DefaultPolicy =
+    DefaultPolicy.Builder().apply(block).build()
+

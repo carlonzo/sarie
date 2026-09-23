@@ -48,6 +48,16 @@ public object SarieBridge {
     }
 
     /**
+     * Builds a Cronet engine with the configuration constructed by [block] and publishes it.
+     */
+    public inline fun install(
+        context: Context,
+        block: SarieConfig.Builder.() -> Unit,
+    ): Unit {
+        install(context, SarieConfig(block))
+    }
+
+    /**
      * Builds a Cronet engine and publishes it. [SarieConfig.configure] runs after the overridable
      * defaults (connection migration and stale DNS) and before bridge-owned settings, which overwrite
      * brotli, the HTTP cache, the storage path, pins, and local-trust pin bypass. Stale DNS
@@ -260,6 +270,16 @@ public object SarieBridge {
      */
     public fun install(engine: CronetEngine) {
         install(engine, SarieConfig.DEFAULT)
+    }
+
+    /**
+     * Publishes a borrowed [engine] with the configuration constructed by [block].
+     */
+    public inline fun install(
+        engine: CronetEngine,
+        block: SarieConfig.Builder.() -> Unit,
+    ): Unit {
+        install(engine, SarieConfig(block))
     }
 
     /**
