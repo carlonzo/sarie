@@ -32,6 +32,10 @@ object SarieBridge {
     @Volatile
     private var current: RuntimeSnapshot? = null
 
+    /** The last engine this object built. Survives [uninstall] so a reinstall can reuse it. */
+    @Volatile
+    private var lastBuilt: RuntimeSnapshot? = null
+
     /**
      * Builds a Cronet engine and publishes it. [configure] runs after the overridable defaults
      * (connection migration) and before bridge-owned settings, which overwrite brotli, the HTTP
@@ -41,7 +45,14 @@ object SarieBridge {
      * publish a snapshot (logged once). Requests keep falling back with `reason=engine_missing`.
      * The Java fallback provider is never selected.
      *
+     * Call it once per process. A later call reuses the engine already built (its storage path
+     * stays locked while it runs) and only swaps [policy] and [mapper]; its [client] pins and
+     * [configure] are ignored, with a warning.
+     *
      * @param client Source of certificate pins. Null installs no pins.
+     * @param configure Tuning such as QUIC hints. Do not add pins here: Cronet enforces them but
+     *   the routing policy cannot see them, so OkHttp clients without those pins would still be
+     *   routed to Cronet. Put pins on the [client]'s `CertificatePinner`.
      */
     @JvmOverloads
     fun install(
@@ -81,8 +92,25 @@ object SarieBridge {
         applyEngineConfiguration(seam, storageDir.absolutePath, translation.groups) {
             configure(cronetBuilder)
         }
-        val engine = cronetBuilder.build()
-        current = RuntimeSnapshot(
+        val engine = try {
+            cronetBuilder.build()
+        } catch (e: IllegalStateException) {
+            // Cronet refuses a storage path a live engine holds ("Disk cache storage path already
+            // in use"). Sarie never shuts its engine down, so a second install in this process
+            // lands here: keep the engine that owns the path, with the pins it actually enforces.
+            val previous = lastBuilt ?: throw e
+            runtimeLogger.warning(
+                "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
+                    "configure from this install are ignored (${e.message}).",
+            )
+            current = previous.copy(
+                policy = policy,
+                mapper = mapper,
+                installedAtMillis = System.currentTimeMillis(),
+            )
+            return
+        }
+        val snapshot = RuntimeSnapshot(
             engine = engine,
             policy = policy,
             mapper = mapper,
@@ -92,6 +120,8 @@ object SarieBridge {
             providerName = chosen.name,
             providerVersion = chosen.version,
         )
+        lastBuilt = snapshot
+        current = snapshot
     }
 
     /**
