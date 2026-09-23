@@ -200,7 +200,6 @@ class PolicyEngineTest {
     @Before
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
-        TrustBaseline.clearMemoForTest()
         SarieBridge.install(
             engine,
             SarieConfig {
@@ -214,7 +213,6 @@ class PolicyEngineTest {
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
         SarieBridge.uninstall()
-        TrustBaseline.clearMemoForTest()
     }
 
     // --- every rule, first hit wins ---
@@ -712,24 +710,20 @@ class PolicyEngineTest {
 
     @Test
     fun `trust verdicts memoized per TM instance and bounded at 1024`() {
-        TrustBaseline.clearMemoForTest()
-        try {
-            val tm = OkHttpClient().x509TrustManager!!
-            val before = TrustBaseline.memoizedCount()
-            val first = TrustBaseline.verdictFor(tm)
-            assertEquals(before + 1, TrustBaseline.memoizedCount())
-            val second = TrustBaseline.verdictFor(tm)
-            assertSame(first, second)
-            assertEquals(before + 1, TrustBaseline.memoizedCount())
+        val memo = TrustVerdictMemo(1024)
+        val tm = OkHttpClient().x509TrustManager!!
+        val before = memo.size()
+        val first = memo.verdictFor(tm)
+        assertEquals(before + 1, memo.size())
+        val second = memo.verdictFor(tm)
+        assertSame(first, second)
+        assertEquals(before + 1, memo.size())
 
-            repeat(1100) { TrustBaseline.verdictFor(UniqueTrustManager()) }
-            assertTrue(
-                "memo must stay <= 1024, was ${TrustBaseline.memoizedCount()}",
-                TrustBaseline.memoizedCount() <= 1024,
-            )
-        } finally {
-            TrustBaseline.clearMemoForTest()
-        }
+        repeat(1100) { memo.verdictFor(UniqueTrustManager()) }
+        assertTrue(
+            "memo must stay <= 1024, was ${memo.size()}",
+            memo.size() <= 1024,
+        )
     }
 
     // --- reasons that belong to engine lifecycle, not routing ---

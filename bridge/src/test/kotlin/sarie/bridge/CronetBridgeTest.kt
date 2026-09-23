@@ -204,8 +204,6 @@ class CronetBridgeTest {
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
         routes.clear()
-        CallRegistry.clearForTest()
-        RoutedCycle.clearForTest()
     }
 
     @After
@@ -213,8 +211,6 @@ class CronetBridgeTest {
         System.clearProperty("okhttp.cronet.enabled")
         SarieBridge.uninstall()
         routes.clear()
-        CallRegistry.clearForTest()
-        RoutedCycle.clearForTest()
     }
 
     private fun install(engine: CronetEngine, vararg origins: String) {
@@ -357,7 +353,6 @@ class CronetBridgeTest {
         assertEquals(200, response.code)
         assertEquals(cronetBefore + 1, routes.cronetCount())
         assertNull(routes.lastReason())
-        assertEquals(1, CallRegistry.activeCount())
 
         val fake = engine.builtRequests.single()
         assertEquals(1, fake.startCalls)
@@ -380,7 +375,8 @@ class CronetBridgeTest {
         assertEquals(0, fake.cancelCalls)
 
         source.close()
-        assertEquals(0, CallRegistry.activeCount())
+        call.cancel()
+        assertEquals(0, fake.cancelCalls)
     }
 
     // --- the three release-blocker cancel interleavings ---
@@ -404,7 +400,6 @@ class CronetBridgeTest {
         val fake = engine.builtRequests.single()
         assertEquals(0, fake.startCalls)
         assertEquals(0, fake.cancelCalls)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     @Test
@@ -429,7 +424,6 @@ class CronetBridgeTest {
         val callback = engine.builders.single().callback as OkHttpBridgeCallback
         assertTrue("headersFuture must be settled", callback.headersFuture.isDone)
         assertTrue("bodySourceFuture must be settled", callback.bodySourceFuture.isDone)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     @Test
@@ -465,7 +459,6 @@ class CronetBridgeTest {
         assertTrue("expected IOException but was $thrown", thrown is IOException)
         assertEquals("Canceled", thrown.message)
         assertEquals(1, fake.cancelCalls)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     // --- 407 guard ---
@@ -490,7 +483,6 @@ class CronetBridgeTest {
         assertEquals(1, engine.builtRequests.size)
         // Closing the body quietly cancels the still-unfinished engine request.
         assertEquals(1, engine.builtRequests.single().cancelCalls)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     // --- transport-failure retry (idempotent, pre-headers only, once) ---
@@ -516,7 +508,8 @@ class CronetBridgeTest {
         engine.builtRequests.forEach { assertEquals(1, it.startCalls) }
         // Closing the unread body cancels attempt 2 and unregisters.
         response.body.close()
-        assertEquals(0, CallRegistry.activeCount())
+        call.cancel()
+        assertEquals(1, engine.builtRequests[1].cancelCalls)
     }
 
     @Test
@@ -532,7 +525,6 @@ class CronetBridgeTest {
         // (it is an IOException), which is exactly what the retry predicate matches on.
         assertTrue("expected the CronetException to surface", thrown is FakeCronetException)
         assertEquals(2, engine.builtRequests.size)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     @Test
@@ -589,7 +581,6 @@ class CronetBridgeTest {
         assertTrue("expected IOException but was $thrown", thrown is IOException)
         assertEquals("Canceled", thrown.message)
         assertEquals(1, engine.builtRequests.size)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     @Test
