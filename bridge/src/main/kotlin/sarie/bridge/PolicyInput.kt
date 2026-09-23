@@ -31,6 +31,7 @@ data class PolicyInput(
     val request: Request,
     val isCanceled: Boolean,
     val forWebSocket: Boolean,
+    /** Present on the chain. Not a routing deny: OkHttp's cache runs above the Cronet hop. */
     val cache: Cache?,
     val networkInterceptors: List<Interceptor>,
     val protocols: List<Protocol>,

@@ -16,6 +16,7 @@ object Metrics {
         allowlist,
         cleartext,
         websocket,
+        /** Retired. OkHttp's cache runs on the Cronet path and no longer produces this. */
         cache,
         /** Retired. Network interceptors run before the Cronet hop and no longer produce this. */
         network_interceptors,

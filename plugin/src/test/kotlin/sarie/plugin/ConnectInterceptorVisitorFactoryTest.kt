@@ -19,11 +19,15 @@ class ConnectInterceptorVisitorFactoryTest {
         val factory = factory()
         assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.connection.ConnectInterceptor")))
         assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.http.CallServerInterceptor")))
+        assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.Cache\$Entry")))
+        assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.cache.CacheStrategy\$Factory")))
         for (other in listOf(
             "okhttp3.internal.connection.RetryAndFollowUpInterceptor",
             "okhttp3.internal.connection.RealCall",
             "okhttp3.internal.http.RealInterceptorChain",
             "okhttp3.OkHttpClient",
+            "okhttp3.Cache",
+            "okhttp3.internal.cache.CacheStrategy",
             "okhttp3.internal.connection.ConnectInterceptorKt",
             "com.example.Unrelated",
             "",

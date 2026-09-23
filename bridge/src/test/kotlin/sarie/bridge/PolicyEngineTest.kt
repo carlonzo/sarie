@@ -250,13 +250,13 @@ class PolicyEngineTest {
     }
 
     @Test
-    fun `client cache yields cache`() {
+    fun `client cache is not denied`() {
         val cached = OkHttpClient.Builder()
             .cache(Cache(Files.createTempDirectory("policy-cache").toFile(), 1024L * 1024))
             .build()
         val d = decision(input = inputFor(client = cached))
-        assertFalse(d.allow)
-        assertEquals(Metrics.Reason.cache, d.reason)
+        assertEquals(Decision(true, null), d)
+        assertEquals("cache", Metrics.Reason.cache.name)
     }
 
     @Test

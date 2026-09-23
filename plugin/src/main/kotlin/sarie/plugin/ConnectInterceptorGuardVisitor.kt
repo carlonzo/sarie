@@ -47,7 +47,8 @@ internal fun isTargetClass(className: String): Boolean = InstrumentationTargets.
 /**
  * Verifies the pinned stock shape of each registered target BEFORE rewriting it.
  * ConnectInterceptor becomes a full trampoline. CallServerInterceptor keeps its body behind
- * the callServer prefix. `<clinit>`, constructors and every other method pass through untouched.
+ * the callServer prefix. Each cache target replaces one `isHttps` invoke.
+ * `<clinit>`, constructors that are not a cache site, and every other method pass through.
  * A shape mismatch throws with a javap-style dump (fail closed).
  */
 internal class ConnectInterceptorGuardVisitor(
@@ -56,7 +57,7 @@ internal class ConnectInterceptorGuardVisitor(
 ) : ClassVisitor(Opcodes.ASM9, nextClassVisitor) {
 
     private var internalName: String? = null
-    private var interceptSeen = false
+    private var targetMethodSeen = false
 
     override fun visit(
         version: Int,
@@ -78,15 +79,9 @@ internal class ConnectInterceptorGuardVisitor(
         exceptions: Array<out String>?,
     ): MethodVisitor {
         val target = InstrumentationTargets.byInternalName(internalName ?: "")
-        if (
-            target == null ||
-            name != InstrumentationTargets.INTERCEPT_NAME ||
-            descriptor != InstrumentationTargets.INTERCEPT_DESC
-        ) {
-            return super.visitMethod(access, name, descriptor, signature, exceptions)
-        }
-        interceptSeen = true
         val delegate = super.visitMethod(access, name, descriptor, signature, exceptions)
+        if (target == null || !isRewrittenMethod(target, name, descriptor)) return delegate
+        targetMethodSeen = true
         return when (target) {
             InstrumentTarget.CONNECT_INTERCEPTOR -> RecordingMethodVisitor(delegate) { insns ->
                 val problems = guard.verify(insns)
@@ -100,16 +95,42 @@ internal class ConnectInterceptorGuardVisitor(
                 ConnectInterceptorRewriter.emitTrampoline(delegate)
             }
             InstrumentTarget.CALL_SERVER_INTERCEPTOR -> CallServerPrefixVisitor(delegate)
+            InstrumentTarget.CACHE_ENTRY,
+            InstrumentTarget.CACHE_STRATEGY_FACTORY,
+            -> substituteVisitor(target, delegate)
         }
     }
 
     override fun visitEnd() {
         val name = internalName ?: "(unknown)"
-        check(interceptSeen) {
-            "okhttp-cronet: method intercept${InstrumentationTargets.INTERCEPT_DESC} not found in " +
-                "$name; refusing to rewrite"
+        val target = InstrumentationTargets.byInternalName(name)
+        if (target != null) {
+            check(targetMethodSeen) {
+                "okhttp-cronet: method ${expectedMethod(target)} not found in " +
+                    "$name; refusing to rewrite"
+            }
         }
         super.visitEnd()
+    }
+
+    private fun isRewrittenMethod(target: InstrumentTarget, name: String, descriptor: String): Boolean =
+        when (target) {
+            InstrumentTarget.CONNECT_INTERCEPTOR,
+            InstrumentTarget.CALL_SERVER_INTERCEPTOR,
+            -> name == InstrumentationTargets.INTERCEPT_NAME && descriptor == InstrumentationTargets.INTERCEPT_DESC
+            InstrumentTarget.CACHE_ENTRY,
+            InstrumentTarget.CACHE_STRATEGY_FACTORY,
+            -> isCacheSite(target, name, descriptor)
+        }
+
+    private fun expectedMethod(target: InstrumentTarget): String = when (target) {
+        InstrumentTarget.CONNECT_INTERCEPTOR,
+        InstrumentTarget.CALL_SERVER_INTERCEPTOR,
+        -> "intercept${InstrumentationTargets.INTERCEPT_DESC}"
+        InstrumentTarget.CACHE_ENTRY ->
+            "${InstrumentationTargets.CACHE_ENTRY_INIT}${InstrumentationTargets.CACHE_ENTRY_INIT_DESC}"
+        InstrumentTarget.CACHE_STRATEGY_FACTORY ->
+            "${InstrumentationTargets.COMPUTE_CANDIDATE}${InstrumentationTargets.COMPUTE_CANDIDATE_DESC}"
     }
 }
 

@@ -25,10 +25,18 @@ object GoldenFingerprints {
     val CONNECT_INTERCEPTOR_JVM_5_4_0 = "bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527"
     val CALL_SERVER_INTERCEPTOR_ANDROID_5_4_0 = "5ac4bd374d3cc4149d270c7d908d7af89fe958e653cf21921ac9f8c3504b4026"
     val CALL_SERVER_INTERCEPTOR_JVM_5_4_0 = "5ac4bd374d3cc4149d270c7d908d7af89fe958e653cf21921ac9f8c3504b4026"
+    val CACHE_ENTRY_ANDROID_5_4_0 = "a28627862a08ab079e1307503d1ecbaeed9c0a28561405f68022a11967b28800"
+    val CACHE_ENTRY_JVM_5_4_0 = "a28627862a08ab079e1307503d1ecbaeed9c0a28561405f68022a11967b28800"
+    val CACHE_STRATEGY_FACTORY_ANDROID_5_4_0 = "0b7197f51d2dc4a400121d774097515ef81ab3022add67e4605d7e5e21c9d6bc"
+    val CACHE_STRATEGY_FACTORY_JVM_5_4_0 = "0b7197f51d2dc4a400121d774097515ef81ab3022add67e4605d7e5e21c9d6bc"
     val CONNECT_INTERCEPTOR_ANDROID_5_5_0 = "bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527"
     val CONNECT_INTERCEPTOR_JVM_5_5_0 = "bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527"
     val CALL_SERVER_INTERCEPTOR_ANDROID_5_5_0 = "5ac4bd374d3cc4149d270c7d908d7af89fe958e653cf21921ac9f8c3504b4026"
     val CALL_SERVER_INTERCEPTOR_JVM_5_5_0 = "5ac4bd374d3cc4149d270c7d908d7af89fe958e653cf21921ac9f8c3504b4026"
+    val CACHE_ENTRY_ANDROID_5_5_0 = "2bc8910eee670c348bbe88a03415b26b32fe0c9f41478e9e031b8b5722830355"
+    val CACHE_ENTRY_JVM_5_5_0 = "2bc8910eee670c348bbe88a03415b26b32fe0c9f41478e9e031b8b5722830355"
+    val CACHE_STRATEGY_FACTORY_ANDROID_5_5_0 = "0b7197f51d2dc4a400121d774097515ef81ab3022add67e4605d7e5e21c9d6bc"
+    val CACHE_STRATEGY_FACTORY_JVM_5_5_0 = "0b7197f51d2dc4a400121d774097515ef81ab3022add67e4605d7e5e21c9d6bc"
 
     fun fingerprintsFor(version: String): Map<InstrumentTarget, Map<Variant, String>>? = when (version) {
         "5.0.0" -> mapOf(
@@ -94,6 +102,14 @@ object GoldenFingerprints {
                 Variant.ANDROID to CALL_SERVER_INTERCEPTOR_ANDROID_5_4_0,
                 Variant.JVM to CALL_SERVER_INTERCEPTOR_JVM_5_4_0,
             ),
+            InstrumentTarget.CACHE_ENTRY to mapOf(
+                Variant.ANDROID to CACHE_ENTRY_ANDROID_5_4_0,
+                Variant.JVM to CACHE_ENTRY_JVM_5_4_0,
+            ),
+            InstrumentTarget.CACHE_STRATEGY_FACTORY to mapOf(
+                Variant.ANDROID to CACHE_STRATEGY_FACTORY_ANDROID_5_4_0,
+                Variant.JVM to CACHE_STRATEGY_FACTORY_JVM_5_4_0,
+            ),
         )
         "5.5.0" -> mapOf(
             InstrumentTarget.CONNECT_INTERCEPTOR to mapOf(
@@ -103,6 +119,14 @@ object GoldenFingerprints {
             InstrumentTarget.CALL_SERVER_INTERCEPTOR to mapOf(
                 Variant.ANDROID to CALL_SERVER_INTERCEPTOR_ANDROID_5_5_0,
                 Variant.JVM to CALL_SERVER_INTERCEPTOR_JVM_5_5_0,
+            ),
+            InstrumentTarget.CACHE_ENTRY to mapOf(
+                Variant.ANDROID to CACHE_ENTRY_ANDROID_5_5_0,
+                Variant.JVM to CACHE_ENTRY_JVM_5_5_0,
+            ),
+            InstrumentTarget.CACHE_STRATEGY_FACTORY to mapOf(
+                Variant.ANDROID to CACHE_STRATEGY_FACTORY_ANDROID_5_5_0,
+                Variant.JVM to CACHE_STRATEGY_FACTORY_JVM_5_5_0,
             ),
         )
         else -> null

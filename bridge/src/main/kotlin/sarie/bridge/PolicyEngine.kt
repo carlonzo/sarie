@@ -22,19 +22,20 @@ data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
  * 5. CronetOptOut tag -> tag_opt_out
  * 6. non-https scheme -> cleartext
  * 7. forWebSocket -> websocket
- * 8. client cache -> cache
- * 9. H2_PRIOR_KNOWLEDGE -> h2_prior_knowledge
- * 10. custom authenticator/proxyAuthenticator -> authenticator
- * 11. explicit proxy or non-baseline proxySelector -> proxy
- * 12. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
- * 13. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
- * 14. certificate pins -> pins
- * 15. TLS/trust fingerprint mismatch -> trust (Metis B1)
- * 16. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
+ * 8. H2_PRIOR_KNOWLEDGE -> h2_prior_knowledge
+ * 9. custom authenticator/proxyAuthenticator -> authenticator
+ * 10. explicit proxy or non-baseline proxySelector -> proxy
+ * 11. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
+ * 12. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
+ * 13. certificate pins -> pins
+ * 14. TLS/trust fingerprint mismatch -> trust (Metis B1)
+ * 15. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
  *     is a local-test-server concern, not a distinct transport incompatibility)
- * 17. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
- * 18. else allow
+ * 16. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
+ * 17. else allow
  *
+ * OkHttp's cache is not a deny. Hits and 304 revalidation stay on OkHttp's chain.
+ * [Metrics.Reason.cache] stays as a retired constant and is never produced.
  * Network interceptors are not a deny. They run on OkHttp's own chain before the Cronet hop.
  * [Metrics.Reason.network_interceptors] stays as a retired constant and is never produced.
  */
@@ -50,7 +51,6 @@ object PolicyEngine {
         }
         if (!input.request.url.isHttps) return Decision(false, Metrics.Reason.cleartext)
         if (input.forWebSocket) return Decision(false, Metrics.Reason.websocket)
-        if (input.cache != null) return Decision(false, Metrics.Reason.cache)
         if (input.protocols.any { it == Protocol.H2_PRIOR_KNOWLEDGE }) {
             return Decision(false, Metrics.Reason.h2_prior_knowledge)
         }
