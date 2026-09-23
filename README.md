@@ -54,11 +54,11 @@ Next, add OkHttp and the Sarie bridge to your app's dependencies:
 
 ```kotlin
 dependencies {
-    // OkHttp 5.x (host app owns OkHttp; 5.4.0 or 5.5.0)
-    implementation("com.squareup.okhttp3:okhttp:5.5.0")
+    // OkHttp 5.x
+    implementation("com.squareup.okhttp3:okhttp:<okhttp_version>")
 
     // Sarie bridge runtime
-    implementation("com.carlonzo.sarie:bridge:0.1.0-SNAPSHOT")
+    implementation("com.carlonzo.sarie:bridge:<sarie_version>")
 }
 ```
 
