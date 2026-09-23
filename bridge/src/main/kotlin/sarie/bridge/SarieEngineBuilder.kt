@@ -6,8 +6,8 @@ import org.chromium.net.CronetEngine
 
 /**
  * The Cronet builder methods Sarie calls. Production delegates to [CronetEngine.Builder]. Tests
- * record calls: the built engine does not expose brotli, cache mode, storage path, pin bypass, or
- * pins, so overwrite order is asserted here.
+ * record calls. Brotli, cache mode, storage path, QUIC, HTTP/2, and pin bypass are setters, so
+ * the last call wins. `addPublicKeyPins` appends and is not cleared.
  *
  * [configure] on [SarieBridge.install] still receives the real [CronetEngine.Builder]. It runs
  * after [applyOverridableDefaults] and before [applyBridgeOwned], which delegates immediately, so

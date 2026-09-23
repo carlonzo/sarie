@@ -63,10 +63,6 @@ class EngineSetupTest {
         override fun enablePublicKeyPinningBypassForLocalTrustAnchors(enable: Boolean) {
             events += "bypass=$enable"
             pinBypass = enable
-            // Bridge-owned phase forces bypass off immediately before its pins. The real
-            // builder cannot delete pins configure already added; this seam drops them so the
-            // test locks the contract that configure's pins do not remain.
-            if (!enable) pins.clear()
         }
 
         override fun addPublicKeyPins(
@@ -109,7 +105,10 @@ class EngineSetupTest {
         val ownedBrotli = recording.events.lastIndexOf("brotli=false")
         assertTrue(recording.events.indexOf("migration") < configureBrotli)
         assertTrue(configureBrotli < ownedBrotli)
-        assertTrue(recording.events.indexOf("pins=evil.example:true") < recording.events.indexOf("bypass=false"))
+        val evilPinEvent = recording.events.indexOf("pins=evil.example:true")
+        val ownedPinEvent = recording.events.indexOf("pins=example.com:false")
+        assertTrue(evilPinEvent < recording.events.indexOf("bypass=false"))
+        assertTrue(evilPinEvent < ownedPinEvent)
 
         assertEquals(true, recording.quic)
         assertEquals(true, recording.http2)
@@ -121,7 +120,11 @@ class EngineSetupTest {
         assertEquals(true, recording.migration?.enableDefaultNetworkMigration)
         assertEquals(true, recording.migration?.enablePathDegradationMigration)
 
-        val installed = recording.pins.single()
+        // addPublicKeyPins appends. Configure's pin stays; Sarie's pin is applied after it.
+        assertEquals(listOf("evil.example", "example.com"), recording.pins.map { it.host })
+        val evil = recording.pins.first()
+        assertTrue(evil.includeSubdomains)
+        val installed = recording.pins.last()
         assertEquals("example.com", installed.host)
         assertFalse(installed.includeSubdomains)
         assertEquals(pinExpiryDate(), installed.expirationDate)
@@ -129,7 +132,6 @@ class EngineSetupTest {
         assertTrue(
             translation.groups.single().hashes.single().contentEquals(installed.hashes.single()),
         )
-        assertTrue(recording.pins.none { it.host == "evil.example" })
     }
 
     @Test

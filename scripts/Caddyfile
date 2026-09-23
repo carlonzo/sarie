@@ -99,12 +99,11 @@
 		redir * /ok 302
 	}
 
-	# Cacheable body for CronetSuite.borrowedDiskCacheReachesOriginTwice.
-	# Public freshness so a borrowed HTTP_CACHE_DISK engine would store it
-	# if UrlRequest.Builder.disableCache() were missing.
+	# Cacheable, but a new body every origin hit. A Cronet HTTP-cache hit would
+	# repeat the first uuid (CronetSuite.borrowedDiskCacheReachesOriginTwice).
 	handle /cacheable {
 		header Cache-Control "public, max-age=300"
 		header Content-Type text/plain
-		respond "cacheable-ok" 200
+		respond "{http.request.uuid}" 200
 	}
 }

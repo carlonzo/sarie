@@ -146,13 +146,15 @@ SarieBridge.install(
 ```
 
 #### First-connection HTTP/3 (`addQuicHint`)
-Cronet normally discovers HTTP/3 after the first connection receives an `Alt-Svc` response header over TCP. Pass a QUIC hint in `configure` so the **very first connection** attempts HTTP/3. `configure` runs before Sarie overwrites brotli, the HTTP cache, the storage path, pins, and local-trust pin bypass:
+Cronet normally discovers HTTP/3 after the first connection receives an `Alt-Svc` response header over TCP. Pass a QUIC hint in `configure` so the **very first connection** attempts HTTP/3. `configure` runs before Sarie overwrites brotli, the HTTP cache, the storage path, and local-trust pin bypass:
 
 ```kotlin
 SarieBridge.install(context, client) { builder ->
     builder.addQuicHint("api.example.com", 443, 443)
 }
 ```
+
+`configure` must not call `addPublicKeyPins`. Cronet only appends pins, and Sarie cannot remove pins `configure` already added. Sarie still appends the OkHttp client's pins after `configure`.
 
 #### Opting out individual requests
 If a specific request must run on stock OkHttp, tag it with `CronetOptOut`:

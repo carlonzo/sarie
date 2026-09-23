@@ -630,23 +630,25 @@ class CronetSuite {
     @Test
     fun borrowedDiskCacheReachesOriginTwice() {
         installBorrowed(diskCache = true)
-        val token = System.nanoTime().toString()
-        val url = "$ORIGIN/cacheable?t=$token"
         val client = OkHttpClient()
+        val bodies = mutableListOf<String>()
         repeat(2) {
-            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
                 assertEquals(200, response.code)
-                assertEquals("cacheable-ok", response.body.string())
-                // Cronet path does not fabricate these. An OkHttp cache hit would set cacheResponse.
+                // Cronet path does not fabricate these, including when Cronet itself served a cache hit.
                 assertNull(response.networkResponse)
                 assertNull(response.cacheResponse)
+                bodies += response.body.string()
             }
         }
+        assertEquals(2, bodies.size)
+        assertTrue(bodies.all { it.isNotBlank() })
+        assertTrue(
+            "borrowed HTTP_CACHE_DISK served the second GET (same body); disableCache() did not stick. " +
+                "bodies=$bodies",
+            bodies[0] != bodies[1],
+        )
         assertCronetServed(minCount = 2)
-        // The emulator cannot read the host access log. Both GETs must reach the origin:
-        //   grep "cacheable?t=$token" scripts/bin/caddy-access.log
-        // Expect two JSON lines. One line means the borrowed HTTP_CACHE_DISK engine served
-        // the second GET and disableCache() did not stick.
     }
 
     @Test
