@@ -354,6 +354,16 @@ public object CronetBridge {
     }
 
     private fun notifyRouted(call: Call, reason: FallbackReason?) {
+        val request = call.request()
+        SarieBridge.logger?.log(
+            Log.DEBUG,
+            if (reason == null) {
+                "${request.method} ${request.url} -> cronet"
+            } else {
+                "${request.method} ${request.url} -> okhttp (reason=$reason)"
+            },
+            null,
+        )
         val listener = SarieBridge.listener ?: return
         try {
             listener.onRouted(call, reason)

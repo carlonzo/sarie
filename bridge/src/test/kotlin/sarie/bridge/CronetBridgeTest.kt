@@ -803,4 +803,42 @@ class CronetBridgeTest {
         assertEquals(200, response.code)
         response.close()
     }
+
+    @Test
+    fun `debugLogger receives routing lines and negotiated protocol`() {
+        val messages = mutableListOf<String>()
+        val testLogger = SarieLogger { _, message, _ ->
+            messages += message
+        }
+        val engine = ScriptedCronetEngine()
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                debugLogger(testLogger)
+            },
+        )
+        // 1. Deny route
+        val denied = fallbackChain(OkHttpClient(), "https://other.example/")
+        assertThrows(IOException::class.java) { CronetBridge.intercept(denied) }
+        assertTrue(messages.any { it == "GET https://other.example/ -> okhttp (reason=allowlist)" })
+
+        // 2. Allow route and headers arrived
+        engine.responseInfo = FakeUrlResponseInfo(
+            url = "https://example.com/api",
+            statusCode = 200,
+            negotiatedProtocol = "h3",
+        )
+        val (_, allowed) = cronetChain(OkHttpClient(), "https://example.com/api")
+        CronetBridge.intercept(allowed).close()
+
+        assertTrue(messages.any { it == "GET https://example.com/api -> cronet" })
+        assertTrue(messages.any { it == "https://example.com/api -> h3" })
+    }
 }
+

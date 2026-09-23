@@ -67,7 +67,7 @@ public object SarieBridge {
     ) {
         val generation = generations.next()
         // Before the provider lookup: a failed install still reports engine_missing.
-        this.logger = config.logger
+        this.logger = config.debugLogger
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
@@ -228,6 +228,11 @@ public object SarieBridge {
                 bypassableDns = config.bypassableDns,
             )
             publishIfCurrentGeneration(generation, reused)
+            logger?.log(
+                Log.INFO,
+                "Cronet installed (built, reused): provider=${previous.providerName} ${previous.providerVersion}, pins=${previous.installedPins.size}, storage=${storageDir.absolutePath}",
+                null,
+            )
             return
         }
         val snapshot = RuntimeSnapshot(
@@ -243,6 +248,11 @@ public object SarieBridge {
         )
         lastBuilt = snapshot
         publishIfCurrentGeneration(generation, snapshot)
+        logger?.log(
+            Log.INFO,
+            "Cronet installed (built): provider=${chosen.name} ${chosen.version}, pins=${translation.installedPins.size}, storage=${storageDir.absolutePath}",
+            null,
+        )
     }
 
     /**
@@ -272,7 +282,7 @@ public object SarieBridge {
             "configure cannot be used with a borrowed CronetEngine"
         }
         val generation = generations.next()
-        this.logger = config.logger
+        this.logger = config.debugLogger
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
@@ -285,6 +295,11 @@ public object SarieBridge {
                 installedAtMillis = System.currentTimeMillis(),
                 bypassableDns = config.bypassableDns,
             ),
+        )
+        logger?.log(
+            Log.INFO,
+            "Cronet installed (borrowed): version=${engine.versionString}, pins=0",
+            null,
         )
     }
 

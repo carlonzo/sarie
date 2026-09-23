@@ -16,6 +16,7 @@
 // Ported from google/cronet-transport-for-okhttp@eda650fbc9b5279b6219160c2a0b210b28303fd7
 package sarie.bridge.mapping
 
+import android.util.Log
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
@@ -23,6 +24,7 @@ import java.util.concurrent.BlockingQueue
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import sarie.bridge.SarieBridge
 import okio.Buffer
 import okio.Source
 import okio.Timeout
@@ -82,8 +84,16 @@ internal class OkHttpBridgeCallback(
     var responseHeadersDelivered: Boolean = false
         private set
 
-    private fun deliverResponseHeaders() {
+    private fun deliverResponseHeaders(urlResponseInfo: UrlResponseInfo) {
         responseHeadersDelivered = true
+        try {
+            SarieBridge.logger?.log(
+                Log.DEBUG,
+                "${urlResponseInfo.url} -> ${urlResponseInfo.negotiatedProtocol}",
+                null,
+            )
+        } catch (_: Throwable) {
+        }
         // Direct executor: this runs on a Cronet thread. The listener call itself does no I/O.
         onResponseHeadersStart?.invoke()
     }
@@ -122,7 +132,7 @@ internal class OkHttpBridgeCallback(
         // logic. There is no way to retrieve a redirect response's body with Cronet's APIs, so
         // provide an empty one.
         receivedHeadersAtMillis = System.currentTimeMillis()
-        deliverResponseHeaders()
+        deliverResponseHeaders(urlResponseInfo)
         check(headersFuture.complete(urlResponseInfo))
         check(bodySourceFuture.complete(Buffer()))
         urlRequest.cancel()
@@ -131,7 +141,7 @@ internal class OkHttpBridgeCallback(
     override fun onResponseStarted(urlRequest: UrlRequest, urlResponseInfo: UrlResponseInfo) {
         request = urlRequest
         receivedHeadersAtMillis = System.currentTimeMillis()
-        deliverResponseHeaders()
+        deliverResponseHeaders(urlResponseInfo)
         check(headersFuture.complete(urlResponseInfo))
         check(bodySourceFuture.complete(CronetBodySource()))
     }

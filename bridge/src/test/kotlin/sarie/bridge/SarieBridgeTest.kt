@@ -208,10 +208,33 @@ class SarieBridgeTest {
             messages += message
         }
         val engine = FakeCronetEngine()
-        SarieBridge.install(engine, SarieConfig { logger(testLogger) })
+        SarieBridge.install(engine, SarieConfig { debugLogger(testLogger) })
         warnIfUnverified("9.9.9")
-        assertEquals(listOf(Log.WARN), priorities)
-        assertTrue(messages.single().contains("9.9.9"))
+        assertEquals(listOf(Log.INFO, Log.WARN), priorities)
+        assertTrue(messages.any { it.contains("9.9.9") })
+    }
+
+    @Test
+    fun `borrowed install logs summary line`() {
+        val messages = mutableListOf<String>()
+        val priorities = mutableListOf<Int>()
+        val testLogger = SarieLogger { priority, message, _ ->
+            priorities += priority
+            messages += message
+        }
+        val engine = FakeCronetEngine()
+        SarieBridge.install(engine, SarieConfig { debugLogger(testLogger) })
+        assertEquals(listOf(Log.INFO), priorities)
+        assertEquals(
+            "Cronet installed (borrowed): version=fake, pins=0",
+            messages.single(),
+        )
+    }
+
+    @Test
+    fun `SarieLogger Logcat smoke test`() {
+        SarieLogger.Logcat.log(Log.INFO, "test info", null)
+        SarieLogger.Logcat.log(Log.WARN, "test warn", RuntimeException("boom"))
     }
 
     @Test

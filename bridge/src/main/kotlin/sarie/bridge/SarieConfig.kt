@@ -11,7 +11,7 @@ public class SarieConfig private constructor(builder: Builder) {
     public val policy: CronetPolicy = builder.policy
     public val mapper: RequestToUrlRequestMapper = builder.mapper
     public val listener: SarieListener? = builder.listener
-    public val logger: SarieLogger? = builder.logger
+    public val debugLogger: SarieLogger? = builder.debugLogger
     public val configure: (CronetEngine.Builder) -> Unit = builder.configure
     public val bypassableDns: Set<Dns> = builder.bypassableDns.toIdentitySet()
 
@@ -24,7 +24,7 @@ public class SarieConfig private constructor(builder: Builder) {
         internal var policy: CronetPolicy = DefaultPolicy()
         internal var mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP
         internal var listener: SarieListener? = null
-        internal var logger: SarieLogger? = null
+        internal var debugLogger: SarieLogger? = null
         internal var configure: (CronetEngine.Builder) -> Unit = NOOP_CONFIGURE
         internal val bypassableDns: MutableList<Dns> = ArrayList()
 
@@ -35,7 +35,7 @@ public class SarieConfig private constructor(builder: Builder) {
             this.policy = config.policy
             this.mapper = config.mapper
             this.listener = config.listener
-            this.logger = config.logger
+            this.debugLogger = config.debugLogger
             this.configure = config.configure
             this.bypassableDns.addAll(config.bypassableDns)
         }
@@ -56,8 +56,8 @@ public class SarieConfig private constructor(builder: Builder) {
             this.listener = listener
         }
 
-        public fun logger(logger: SarieLogger?): Builder = apply {
-            this.logger = logger
+        public fun debugLogger(debugLogger: SarieLogger?): Builder = apply {
+            this.debugLogger = debugLogger
         }
 
         public fun configure(configure: (CronetEngine.Builder) -> Unit): Builder = apply {

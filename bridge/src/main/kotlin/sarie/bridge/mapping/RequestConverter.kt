@@ -121,16 +121,14 @@ internal class RequestConverter(
                 if (contentType == null &&
                     (contentTypeHeader == null || contentTypeHeader.trim().isEmpty())
                 ) {
-                    SarieBridge.logger?.let {
-                        it.log(
-                            Log.WARN,
-                            "Cronet OkHttp transport was passed a request body with a missing or " +
-                                "empty Content-Type header. This is not supported by Cronet. " +
-                                "Content-Type has been overridden to " +
-                                "\"$CONTENT_TYPE_HEADER_DEFAULT_VALUE\"",
-                            null,
-                        )
-                    }
+                    SarieBridge.logger?.log(
+                        Log.WARN,
+                        "Cronet OkHttp transport was passed a request body with a missing or " +
+                            "empty Content-Type header. This is not supported by Cronet. " +
+                            "Content-Type has been overridden to " +
+                            "\"$CONTENT_TYPE_HEADER_DEFAULT_VALUE\"",
+                        null,
+                    )
                     replace(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE)
                 }
 
@@ -186,14 +184,12 @@ internal class RequestConverter(
         if (attached.isFailure &&
             snapshot.finishedListenerUnsupported.compareAndSet(false, true)
         ) {
-            SarieBridge.logger?.let {
-                it.log(
-                    Log.WARN,
-                    "Cronet provider rejected setRequestFinishedListener; onFinished will be skipped " +
-                        "for this engine (${attached.exceptionOrNull()?.message})",
-                    attached.exceptionOrNull(),
-                )
-            }
+            SarieBridge.logger?.log(
+                Log.WARN,
+                "Cronet provider rejected setRequestFinishedListener; onFinished will be skipped " +
+                    "for this engine (${attached.exceptionOrNull()?.message})",
+                attached.exceptionOrNull(),
+            )
         }
     }
 
