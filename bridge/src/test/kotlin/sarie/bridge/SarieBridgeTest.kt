@@ -193,7 +193,7 @@ class SarieBridgeTest {
             listOf(
                 "disabled", "engine_missing", "tag_opt_out", "allowlist", "cleartext", "websocket",
                 "h2_prior_knowledge", "proxy", "socket_factory", "hostname_verifier", "pins",
-                "trust", "dns", "content_encoding", "policy_error",
+                "trust", "dns", "content_encoding", "policy_error", "content_type",
             ),
             FallbackReason.values().map { it.name },
         )

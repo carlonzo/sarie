@@ -22,4 +22,6 @@ public enum class FallbackReason {
 
     /** The policy itself threw; the call failed closed to stock OkHttp. */
     policy_error,
+
+    content_type,
 }

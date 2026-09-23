@@ -38,6 +38,7 @@ public final class sarie/bridge/FallbackReason : java/lang/Enum {
 	public static final field allowlist Lsarie/bridge/FallbackReason;
 	public static final field cleartext Lsarie/bridge/FallbackReason;
 	public static final field content_encoding Lsarie/bridge/FallbackReason;
+	public static final field content_type Lsarie/bridge/FallbackReason;
 	public static final field disabled Lsarie/bridge/FallbackReason;
 	public static final field dns Lsarie/bridge/FallbackReason;
 	public static final field engine_missing Lsarie/bridge/FallbackReason;

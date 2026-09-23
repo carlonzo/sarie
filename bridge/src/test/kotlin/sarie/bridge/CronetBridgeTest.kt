@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -562,7 +563,7 @@ class CronetBridgeTest {
             OkHttpClient(),
             "https://example.com/",
             method = "POST",
-            body = "x".toRequestBody(null),
+            body = "x".toRequestBody("text/plain".toMediaType()),
         )
 
         assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }

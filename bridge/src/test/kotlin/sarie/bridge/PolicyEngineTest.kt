@@ -25,6 +25,11 @@ import javax.net.ssl.X509TrustManager
 import okhttp3.Cache
 import okhttp3.CertificatePinner
 import okhttp3.Dns
+import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import okio.ByteString.Companion.toByteString
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -678,6 +683,51 @@ class PolicyEngineTest {
                 snapshot = snap(policy("localhost")),
             ),
         )
+    }
+
+    @Test
+    fun `no type with a body yields content_type`() {
+        val body = "hello".toRequestBody(null)
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertEquals(FallbackReason.content_type, decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `zero-length body without type is allowed`() {
+        val body = "".toRequestBody(null)
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertNull(decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `type from header with body is allowed`() {
+        val body = "hello".toRequestBody(null)
+        val req = Request.Builder()
+            .url("https://example.com/")
+            .header("Content-Type", "text/plain")
+            .post(body)
+            .build()
+        assertNull(decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `type from body is allowed`() {
+        val body = "hello".toRequestBody("text/plain".toMediaType())
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertNull(decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `unknown length body without type yields content_type`() {
+        val body = object : RequestBody() {
+            override fun contentType(): MediaType? = null
+            override fun contentLength(): Long = -1L
+            override fun writeTo(sink: BufferedSink) {
+                sink.writeUtf8("chunked")
+            }
+        }
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertEquals(FallbackReason.content_type, decision(input = chainInput(original = req)))
     }
 
     @Test
