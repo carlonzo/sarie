@@ -1,9 +1,12 @@
 package sarie.sample.cronet
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import sarie.bridge.Metrics
 import sarie.bridge.SarieBridge
 import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
+import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.Random
@@ -11,18 +14,25 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.SSLPeerUnverifiedException
+import okhttp3.Authenticator
+import okhttp3.Cache
+import okhttp3.CacheControl
+import okhttp3.Call
 import okhttp3.CertificatePinner
+import okhttp3.EventListener
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.Response
 import okhttp3.Route
 import okio.BufferedSink
 import org.chromium.net.CronetEngine
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -559,6 +569,167 @@ class CronetSuite {
     }
 
     @Test
+    fun cacheableGetSecondRequestIsHitWithNullHandshake() {
+        // Local origin negotiates HTTP/2 (QUIC to this CA is blocked; see the class KDoc).
+        // A cache hit never re-enters the bridge, so the origin is not contacted again.
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        var cacheHits = 0
+        val client = OkHttpClient.Builder()
+            .cache(cache)
+            .eventListener(object : EventListener() {
+                override fun cacheHit(call: Call, response: Response) {
+                    cacheHits++
+                }
+            })
+            .build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNull(response.cacheResponse)
+                assertNull(response.handshake)
+            }
+            assertCronetServed()
+            val cronetAfterStore = Metrics.cronet.get()
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNotNull(response.cacheResponse)
+                assertNull(response.handshake)
+                assertNull(response.cacheResponse!!.handshake)
+            }
+            assertEquals(cronetAfterStore, Metrics.cronet.get())
+            assertEquals(1, cacheHits)
+            assertNull(Metrics.lastReason)
+        } finally {
+            cache.close()
+        }
+    }
+
+    @Test
+    fun etagRevalidationStaysOnCronet() {
+        // This origin negotiates HTTP/2, not HTTP/3 (local QUIC is blocked; see the class KDoc).
+        // The 304 is still the Cronet transport: Metrics.cronet and lastReason == null.
+        // Do not require Protocol.HTTP_3 here.
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/etag").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("\"sarie-etag\"", response.header("ETag"))
+                assertEquals("etag-body", response.body.string())
+            }
+            assertCronetServed()
+            client.newCall(Request.Builder().url("$ORIGIN/etag").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("etag-body", response.body.string())
+                assertNotNull(response.cacheResponse)
+                assertNotNull(response.networkResponse)
+                assertEquals(304, response.networkResponse!!.code)
+            }
+            assertCronetServed(minCount = 2)
+        } finally {
+            cache.close()
+        }
+    }
+
+    @Test
+    fun onlyIfCachedServesSarieEntry() {
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals("cacheable-ok", response.body.string())
+            }
+            val cronetAfterStore = Metrics.cronet.get()
+            client.newCall(
+                Request.Builder()
+                    .url("$ORIGIN/cacheable")
+                    .cacheControl(CacheControl.FORCE_CACHE)
+                    .build(),
+            ).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNotNull(response.cacheResponse)
+                assertNull(response.handshake)
+            }
+            assertEquals(cronetAfterStore, Metrics.cronet.get())
+            assertNull(Metrics.lastReason)
+        } finally {
+            cache.close()
+        }
+    }
+
+    @Test
+    fun killSwitchMissesSarieEntryAndStockRefetchHasHandshake() {
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertNull(response.handshake)
+                assertEquals("cacheable-ok", response.body.string())
+            }
+            assertCronetServed()
+            System.setProperty("okhttp.cronet.enabled", "false")
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNull(response.cacheResponse)
+                assertNotNull(response.networkResponse)
+                assertNotNull(response.handshake)
+            }
+            assertTrue(Metrics.okhttpFallback.get() >= 1)
+            assertEquals(Metrics.Reason.disabled, Metrics.lastReason)
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertNotNull(response.cacheResponse)
+                assertNotNull(response.handshake)
+                assertEquals("cacheable-ok", response.body.string())
+            }
+        } finally {
+            System.clearProperty("okhttp.cronet.enabled")
+            cache.close()
+        }
+    }
+
+    @Test
+    fun evictAllDropsSarieEntries() {
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals("cacheable-ok", response.body.string())
+            }
+            cache.evictAll()
+            assertFalse(cache.urls().hasNext())
+            val cronetAfterStore = Metrics.cronet.get()
+            client.newCall(
+                Request.Builder()
+                    .url("$ORIGIN/cacheable")
+                    .cacheControl(CacheControl.FORCE_CACHE)
+                    .build(),
+            ).execute().use { response ->
+                assertEquals(504, response.code)
+            }
+            assertEquals(cronetAfterStore, Metrics.cronet.get())
+        } finally {
+            cache.close()
+        }
+    }
+
+    private fun newCache(): Cache {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dir = File(context.cacheDir, "okhttp-cache-" + System.nanoTime())
+        return Cache(dir, 10L * 1024 * 1024)
+    }
+
+    @Test
     fun engineMissingFallsBackStock() {
         // No install: the trampoline finds no snapshot -> exact-stock fallback.
         OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
@@ -689,7 +860,7 @@ class CronetSuite {
         val client = OkHttpClient()
         val bodies = mutableListOf<String>()
         repeat(2) {
-            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable-unique").build()).execute().use { response ->
                 assertEquals(200, response.code)
                 // Cronet path does not fabricate these, including when Cronet itself served a cache hit.
                 assertNull(response.networkResponse)
