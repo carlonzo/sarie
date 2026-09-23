@@ -13,8 +13,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import java.util.logging.Level
-import java.util.logging.Logger
+import android.util.Log
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.Interceptor
@@ -81,7 +80,6 @@ import org.chromium.net.UrlRequest
  */
 object CronetBridge {
 
-    private val logger = Logger.getLogger(CronetBridge::class.java.name)
     private val loggedOnce = AtomicBoolean(false)
     private val listenerLoggedOnce = AtomicBoolean(false)
 
@@ -360,14 +358,14 @@ object CronetBridge {
             listener.onRouted(call, reason)
         } catch (t: Throwable) {
             if (listenerLoggedOnce.compareAndSet(false, true)) {
-                logger.log(Level.WARNING, "SarieListener.onRouted threw; routing continues", t)
+                SarieBridge.logger?.log(Log.WARN, "SarieListener.onRouted threw; routing continues", t)
             }
         }
     }
 
     private fun logOnce(t: Throwable) {
         if (loggedOnce.compareAndSet(false, true)) {
-            logger.log(Level.SEVERE, "policy evaluation failed; failing closed to stock OkHttp", t)
+            SarieBridge.logger?.log(Log.ERROR, "policy evaluation failed; failing closed to stock OkHttp", t)
         }
     }
 }

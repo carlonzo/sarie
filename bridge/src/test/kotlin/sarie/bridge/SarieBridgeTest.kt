@@ -6,6 +6,7 @@ import java.net.URLStreamHandlerFactory
 import java.util.concurrent.Executor
 import org.chromium.net.CronetEngine
 import org.chromium.net.UrlRequest
+import android.util.Log
 import okhttp3.CertificatePinner
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -207,5 +208,20 @@ class SarieBridgeTest {
             ),
             FallbackReason.values().map { it.name },
         )
+    }
+
+    @Test
+    fun `logger receives unverified okhttp warning`() {
+        val messages = mutableListOf<String>()
+        val priorities = mutableListOf<Int>()
+        val testLogger = SarieLogger { priority, message, _ ->
+            priorities += priority
+            messages += message
+        }
+        val engine = FakeCronetEngine()
+        SarieBridge.install(engine, SarieConfig { logger(testLogger) })
+        warnIfUnverified("9.9.9")
+        assertEquals(listOf(Log.WARN), priorities)
+        assertTrue(messages.single().contains("9.9.9"))
     }
 }

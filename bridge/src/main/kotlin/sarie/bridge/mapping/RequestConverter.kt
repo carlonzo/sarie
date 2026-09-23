@@ -24,8 +24,7 @@ import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.logging.Level
-import java.util.logging.Logger
+import android.util.Log
 import okhttp3.Call
 import okhttp3.Request
 import okhttp3.Response
@@ -122,12 +121,16 @@ class RequestConverter(
                 if (contentType == null &&
                     (contentTypeHeader == null || contentTypeHeader.trim().isEmpty())
                 ) {
-                    logger.warning(
-                        "Cronet OkHttp transport was passed a request body with a missing or " +
-                            "empty Content-Type header. This is not supported by Cronet. " +
-                            "Content-Type has been overridden to " +
-                            "\"$CONTENT_TYPE_HEADER_DEFAULT_VALUE\"",
-                    )
+                    SarieBridge.logger?.let {
+                        it.log(
+                            Log.WARN,
+                            "Cronet OkHttp transport was passed a request body with a missing or " +
+                                "empty Content-Type header. This is not supported by Cronet. " +
+                                "Content-Type has been overridden to " +
+                                "\"$CONTENT_TYPE_HEADER_DEFAULT_VALUE\"",
+                            null,
+                        )
+                    }
                     replace(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE)
                 }
 
@@ -173,7 +176,7 @@ class RequestConverter(
                             listener.onFinished(call, info)
                         } catch (t: Throwable) {
                             if (finishedThrewLogged.compareAndSet(false, true)) {
-                                logger.log(Level.WARNING, "SarieListener.onFinished threw", t)
+                                SarieBridge.logger?.log(Log.WARN, "SarieListener.onFinished threw", t)
                             }
                         }
                     }
@@ -183,10 +186,14 @@ class RequestConverter(
         if (attached.isFailure &&
             snapshot.finishedListenerUnsupported.compareAndSet(false, true)
         ) {
-            logger.warning(
-                "Cronet provider rejected setRequestFinishedListener; onFinished will be skipped " +
-                    "for this engine (${attached.exceptionOrNull()?.message})",
-            )
+            SarieBridge.logger?.let {
+                it.log(
+                    Log.WARN,
+                    "Cronet provider rejected setRequestFinishedListener; onFinished will be skipped " +
+                        "for this engine (${attached.exceptionOrNull()?.message})",
+                    attached.exceptionOrNull(),
+                )
+            }
         }
     }
 
@@ -209,7 +216,6 @@ class RequestConverter(
         private const val CONTENT_LENGTH_HEADER_NAME = "Content-Length"
         private const val CONTENT_TYPE_HEADER_NAME = "Content-Type"
         private const val CONTENT_TYPE_HEADER_DEFAULT_VALUE = "application/octet-stream"
-        private val logger = Logger.getLogger("CronetTransportForOkHttp")
         private val finishedThrewLogged = AtomicBoolean(false)
         private val DIRECT_EXECUTOR = Executor { it.run() }
     }

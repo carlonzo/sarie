@@ -1,14 +1,12 @@
 package sarie.bridge
 
 import android.content.Context
+import android.util.Log
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.logging.Logger
 import okhttp3.OkHttp
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetProvider
-
-private val runtimeLogger: Logger = Logger.getLogger("sarie.bridge")
 
 /**
  * Process-wide handle to the Cronet engine.
@@ -80,6 +78,7 @@ object SarieBridge {
         config: SarieConfig,
     ) {
         // Before the provider lookup: a failed install still reports engine_missing.
+        this.logger = config.logger
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
@@ -88,21 +87,29 @@ object SarieBridge {
         )
         if (chosen == null) {
             if (missingProviderLogged.compareAndSet(false, true)) {
-                runtimeLogger.warning(
-                    "No enabled Cronet provider (app-packaged, HttpEngine, or Play Services); " +
-                        "leaving requests on stock OkHttp (engine_missing). " +
-                        "Fallback-Cronet-Provider is not used.",
-                )
+                logger?.let {
+                    it.log(
+                        Log.WARN,
+                        "No enabled Cronet provider (app-packaged, HttpEngine, or Play Services); " +
+                            "leaving requests on stock OkHttp (engine_missing). " +
+                            "Fallback-Cronet-Provider is not used.",
+                        null,
+                    )
+                }
             }
             return
         }
         val storageDir = File(context.cacheDir, STORAGE_DIR_NAME)
         if (!storageDir.isDirectory && !storageDir.mkdirs()) {
             if (storageDirLogged.compareAndSet(false, true)) {
-                runtimeLogger.warning(
-                    "Could not create ${storageDir.absolutePath}; leaving requests on stock OkHttp " +
-                        "(engine_missing).",
-                )
+                logger?.let {
+                    it.log(
+                        Log.WARN,
+                        "Could not create ${storageDir.absolutePath}; leaving requests on stock OkHttp " +
+                            "(engine_missing).",
+                        null,
+                    )
+                }
             }
             return
         }
@@ -119,10 +126,14 @@ object SarieBridge {
             // in use"). Sarie never shuts its engine down, so a second install in this process
             // lands here: keep the engine that owns the path, with the pins it actually enforces.
             val previous = lastBuilt ?: throw e
-            runtimeLogger.warning(
-                "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
-                    "configure from this install are ignored (${e.message}).",
-            )
+            logger?.let {
+                it.log(
+                    Log.WARN,
+                    "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
+                        "configure from this install are ignored (${e.message}).",
+                    e,
+                )
+            }
             current = RuntimeSnapshot(
                 engine = previous.engine,
                 policy = config.policy,
@@ -175,6 +186,7 @@ object SarieBridge {
         require(!config.isConfigureSet) {
             "configure cannot be used with a borrowed CronetEngine"
         }
+        this.logger = config.logger
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
@@ -192,6 +204,10 @@ object SarieBridge {
      */
     @Volatile
     internal var listener: SarieListener? = null
+        private set
+
+    @Volatile
+    internal var logger: SarieLogger? = null
         private set
 
     /**
@@ -237,9 +253,13 @@ typealias CronetRuntime = SarieBridge
  */
 internal fun warnIfUnverified(runtimeVersion: String) {
     if (runtimeVersion in VerifiedOkHttpVersions) return
-    runtimeLogger.warning(
-        "okhttp-cronet is running against okhttp $runtimeVersion, which was not verified with this " +
-            "build (verified: ${VerifiedOkHttpVersions.sorted().joinToString()}). The build-time " +
-            "structural guard covered ConnectInterceptor only; run the verification suites for this version.",
-    )
+    SarieBridge.logger?.let {
+        it.log(
+            Log.WARN,
+            "okhttp-cronet is running against okhttp $runtimeVersion, which was not verified with this " +
+                "build (verified: ${VerifiedOkHttpVersions.sorted().joinToString()}). The build-time " +
+                "structural guard covered ConnectInterceptor only; run the verification suites for this version.",
+            null,
+        )
+    }
 }
