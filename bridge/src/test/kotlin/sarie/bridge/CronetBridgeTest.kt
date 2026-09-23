@@ -471,7 +471,7 @@ class CronetBridgeTest {
             statusText = "Proxy Authentication Required",
         )
         install(engine, "example.com")
-        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
 
         val thrown = assertThrows(ProtocolException::class.java) { CronetBridge.intercept(chain) }
 
@@ -482,6 +482,9 @@ class CronetBridgeTest {
         // Not retryable: one attempt, no transport-failure retry.
         assertEquals(1, engine.builtRequests.size)
         // Closing the body quietly cancels the still-unfinished engine request.
+        assertEquals(1, engine.builtRequests.single().cancelCalls)
+        // Unregistered: a later cancel does not reach the engine again.
+        call.cancel()
         assertEquals(1, engine.builtRequests.single().cancelCalls)
     }
 
@@ -517,7 +520,7 @@ class CronetBridgeTest {
         val engine = ScriptedCronetEngine()
         engine.preHeaderFailures = 2
         install(engine, "example.com")
-        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
 
         val thrown = assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
@@ -525,6 +528,9 @@ class CronetBridgeTest {
         // (it is an IOException), which is exactly what the retry predicate matches on.
         assertTrue("expected the CronetException to surface", thrown is FakeCronetException)
         assertEquals(2, engine.builtRequests.size)
+        // Unregistered: a cancel after the failure does not reach either engine request.
+        call.cancel()
+        engine.builtRequests.forEach { assertEquals(0, it.cancelCalls) }
     }
 
     @Test

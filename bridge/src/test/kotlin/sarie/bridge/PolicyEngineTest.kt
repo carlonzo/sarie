@@ -37,6 +37,7 @@ import org.chromium.net.UrlRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -709,21 +710,19 @@ class PolicyEngineTest {
     // --- trust verdict memoization (Metis B1) ---
 
     @Test
-    fun `trust verdicts memoized per TM instance and bounded at 1024`() {
-        val memo = TrustVerdictMemo(1024)
+    fun `trust verdicts memoized per TM instance and cleared on overflow`() {
+        val memo = TrustVerdictMemo(max = 4)
         val tm = OkHttpClient().x509TrustManager!!
-        val before = memo.size()
         val first = memo.verdictFor(tm)
-        assertEquals(before + 1, memo.size())
-        val second = memo.verdictFor(tm)
-        assertSame(first, second)
-        assertEquals(before + 1, memo.size())
+        assertSame(first, memo.verdictFor(tm))
 
-        repeat(1100) { memo.verdictFor(UniqueTrustManager()) }
-        assertTrue(
-            "memo must stay <= 1024, was ${memo.size()}",
-            memo.size() <= 1024,
-        )
+        // Still memoized below the bound, and not only via the last-seen fast path.
+        repeat(2) { memo.verdictFor(UniqueTrustManager()) }
+        assertSame(first, memo.verdictFor(tm))
+
+        // The insert that hits the bound clears the map, so tm is recomputed.
+        repeat(4) { memo.verdictFor(UniqueTrustManager()) }
+        assertNotSame(first, memo.verdictFor(tm))
     }
 
     // --- reasons that belong to engine lifecycle, not routing ---

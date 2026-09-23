@@ -11,7 +11,7 @@ public class SarieConfig private constructor(builder: Builder) {
     public val logger: SarieLogger? = builder.logger
     public val configure: (CronetEngine.Builder) -> Unit = builder.configure
 
-    internal val isConfigureSet: Boolean = builder.isConfigureSet
+    internal val isConfigureSet: Boolean get() = configure !== NOOP_CONFIGURE
 
     public fun newBuilder(): Builder = Builder(this)
 
@@ -22,7 +22,6 @@ public class SarieConfig private constructor(builder: Builder) {
         internal var listener: SarieListener? = null
         internal var logger: SarieLogger? = null
         internal var configure: (CronetEngine.Builder) -> Unit = NOOP_CONFIGURE
-        internal var isConfigureSet: Boolean = false
 
         public constructor()
 
@@ -33,7 +32,6 @@ public class SarieConfig private constructor(builder: Builder) {
             this.listener = config.listener
             this.logger = config.logger
             this.configure = config.configure
-            this.isConfigureSet = config.isConfigureSet
         }
 
         public fun certificatePinner(certificatePinner: CertificatePinner?): Builder = apply {
@@ -58,7 +56,6 @@ public class SarieConfig private constructor(builder: Builder) {
 
         public fun configure(configure: (CronetEngine.Builder) -> Unit): Builder = apply {
             this.configure = configure
-            this.isConfigureSet = true
         }
 
         public fun build(): SarieConfig = SarieConfig(this)

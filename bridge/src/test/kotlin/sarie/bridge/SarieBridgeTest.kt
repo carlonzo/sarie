@@ -214,19 +214,22 @@ class SarieBridgeTest {
     }
 
     @Test
-    fun `snapshot is not published if install generation has moved`() {
-        val gen = SarieBridge.nextGeneration()
+    fun `a newer install generation makes the older one stale`() {
+        val generations = InstallGeneration()
+        val older = generations.next()
+        assertTrue(generations.isCurrent(older))
+        val newer = generations.next()
+        assertFalse(generations.isCurrent(older))
+        assertTrue(generations.isCurrent(newer))
+    }
+
+    @Test
+    fun `rejected borrowed install keeps the current snapshot`() {
         val engine = FakeCronetEngine()
-        val snap = RuntimeSnapshot(engine, policy, mapper, System.currentTimeMillis())
-
-        // Generation moves before publishing (e.g. uninstall or another install)
-        SarieBridge.uninstall()
-        assertFalse(SarieBridge.publishIfCurrentGeneration(gen, snap))
-        assertNull(SarieBridge.snapshot())
-
-        // Matching generation succeeds
-        val currentGen = SarieBridge.nextGeneration()
-        assertTrue(SarieBridge.publishIfCurrentGeneration(currentGen, snap))
+        SarieBridge.install(engine, config)
+        assertThrows(IllegalArgumentException::class.java) {
+            SarieBridge.install(FakeCronetEngine(), SarieConfig { configure { } })
+        }
         assertSame(engine, SarieBridge.snapshot()?.engine)
     }
 }

@@ -1,5 +1,6 @@
 package sarie.bridge
 
+import androidx.annotation.OptIn
 import java.util.Date
 import org.chromium.net.ConnectionMigrationOptions
 import org.chromium.net.CronetEngine
@@ -32,6 +33,7 @@ internal interface SarieEngineBuilder {
     fun setDnsOptions(options: DnsOptions)
 }
 
+@OptIn(markerClass = [ConnectionMigrationOptions.Experimental::class, DnsOptions.Experimental::class])
 internal class CronetEngineBuilderAdapter(
     private val delegate: CronetEngine.Builder,
 ) : SarieEngineBuilder {
@@ -93,6 +95,7 @@ internal fun applyEngineConfiguration(
     applyBridgeOwned(builder, storagePath, groups)
 }
 
+@OptIn(markerClass = [ConnectionMigrationOptions.Experimental::class, DnsOptions.Experimental::class])
 private fun applyOverridableDefaults(builder: SarieEngineBuilder) {
     runCatching {
         builder.setConnectionMigrationOptions(

@@ -24,11 +24,6 @@ android {
             isReturnDefaultValues = true
         }
     }
-
-    lint {
-        // Experimental Cronet options (ConnectionMigrationOptions, DnsOptions) used internally.
-        disable.add("UnsafeOptInUsageError")
-    }
 }
 
 kotlin {

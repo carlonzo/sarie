@@ -99,6 +99,4 @@ internal class TrustVerdictMemo(private val max: Int = 1024) {
             verdict
         }
     }
-
-    internal fun size(): Int = synchronized(verdictsLock) { verdicts.size }
 }

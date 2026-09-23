@@ -5,7 +5,6 @@ import android.util.Log
 import java.io.File
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.OkHttp
 import org.chromium.net.CronetEngine
@@ -25,11 +24,8 @@ import org.chromium.net.CronetProvider
 public object SarieBridge {
     private const val KILL_SWITCH_PROPERTY = "okhttp.cronet.enabled"
 
-    private val missingProviderLogged = AtomicBoolean(false)
-    private val storageDirLogged = AtomicBoolean(false)
-    private val installerFailedLogged = AtomicBoolean(false)
 
-    private val installGeneration = AtomicInteger(0)
+    private val generations = InstallGeneration()
 
     private val installerExecutor: Executor by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         Executors.newSingleThreadExecutor { runnable ->
@@ -69,7 +65,7 @@ public object SarieBridge {
         context: Context,
         config: SarieConfig,
     ) {
-        val generation = installGeneration.incrementAndGet()
+        val generation = generations.next()
         // Before the provider lookup: a failed install still reports engine_missing.
         this.logger = config.logger
         this.listener = config.listener
@@ -83,19 +79,7 @@ public object SarieBridge {
             ProviderDecision.RUN_INSTALLER -> {
                 initPlayServicesAndBuild(context, config, generation)
             }
-            ProviderDecision.GIVE_UP -> {
-                if (missingProviderLogged.compareAndSet(false, true)) {
-                    logger?.let {
-                        it.log(
-                            Log.WARN,
-                            "No enabled Cronet provider (app-packaged, HttpEngine, or Play Services); " +
-                                "leaving requests on stock OkHttp (engine_missing). " +
-                                "Fallback-Cronet-Provider is not used.",
-                            null,
-                        )
-                    }
-                }
-            }
+            ProviderDecision.GIVE_UP -> warnNoProvider()
         }
     }
 
@@ -107,35 +91,47 @@ public object SarieBridge {
         try {
             com.google.android.gms.net.CronetProviderInstaller.installProvider(context)
                 .addOnCompleteListener(installerExecutor) { task ->
-                    if (installGeneration.get() != generation) return@addOnCompleteListener
+                    if (!generations.isCurrent(generation)) return@addOnCompleteListener
                     if (task.isSuccessful) {
                         val fresh = CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) }
-                        buildAndPublishEngine(context, config, fresh, generation)
-                    } else {
-                        if (installerFailedLogged.compareAndSet(false, true)) {
-                            logger?.let {
-                                it.log(
-                                    Log.WARN,
-                                    "Play Services CronetProviderInstaller failed; " +
-                                        "leaving requests on stock OkHttp (engine_missing).",
-                                    task.exception,
-                                )
-                            }
+                        // Not the caller's thread: a throw here would crash the process.
+                        try {
+                            buildAndPublishEngine(context, config, fresh, generation)
+                        } catch (t: Throwable) {
+                            logger?.log(
+                                Log.WARN,
+                                "Building the Play Services Cronet engine failed; " +
+                                    "leaving requests on stock OkHttp (engine_missing).",
+                                t,
+                            )
                         }
+                    } else {
+                        logger?.log(
+                            Log.WARN,
+                            "Play Services CronetProviderInstaller failed; " +
+                                "leaving requests on stock OkHttp (engine_missing).",
+                            task.exception,
+                        )
                     }
                 }
         } catch (t: Throwable) {
-            if (installerFailedLogged.compareAndSet(false, true)) {
-                logger?.let {
-                    it.log(
-                        Log.WARN,
-                        "Play Services CronetProviderInstaller failed to start; " +
-                            "leaving requests on stock OkHttp (engine_missing).",
-                        t,
-                    )
-                }
-            }
+            logger?.log(
+                Log.WARN,
+                "Play Services CronetProviderInstaller failed to start; " +
+                    "leaving requests on stock OkHttp (engine_missing).",
+                t,
+            )
         }
+    }
+
+    private fun warnNoProvider() {
+        logger?.log(
+            Log.WARN,
+            "No enabled Cronet provider (app-packaged, HttpEngine, or Play Services); " +
+                "leaving requests on stock OkHttp (engine_missing). " +
+                "Fallback-Cronet-Provider is not used.",
+            null,
+        )
     }
 
     private fun buildAndPublishEngine(
@@ -146,32 +142,18 @@ public object SarieBridge {
     ) {
         val chosen = selectCronetProvider(providers)
         if (chosen == null) {
-            if (missingProviderLogged.compareAndSet(false, true)) {
-                logger?.let {
-                    it.log(
-                        Log.WARN,
-                        "No enabled Cronet provider (app-packaged, HttpEngine, or Play Services); " +
-                            "leaving requests on stock OkHttp (engine_missing). " +
-                            "Fallback-Cronet-Provider is not used.",
-                        null,
-                    )
-                }
-            }
+            warnNoProvider()
             return
         }
         val dirName = cronetStorageDirName(currentProcessName(), context.packageName)
         val storageDir = File(context.cacheDir, dirName)
         if (!storageDir.isDirectory && !storageDir.mkdirs()) {
-            if (storageDirLogged.compareAndSet(false, true)) {
-                logger?.let {
-                    it.log(
-                        Log.WARN,
-                        "Could not create ${storageDir.absolutePath}; leaving requests on stock OkHttp " +
-                            "(engine_missing).",
-                        null,
-                    )
-                }
-            }
+            logger?.log(
+                Log.WARN,
+                "Could not create ${storageDir.absolutePath}; leaving requests on stock OkHttp " +
+                    "(engine_missing).",
+                null,
+            )
             return
         }
         val translation = translatePins(config.certificatePinner?.pins ?: emptySet())
@@ -187,14 +169,12 @@ public object SarieBridge {
             // in use"). Sarie never shuts its engine down, so a second install in this process
             // lands here: keep the engine that owns the path, with the pins it actually enforces.
             val previous = lastBuilt ?: throw e
-            logger?.let {
-                it.log(
-                    Log.WARN,
-                    "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
-                        "configure from this install are ignored (${e.message}).",
-                    e,
-                )
-            }
+            logger?.log(
+                Log.WARN,
+                "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
+                    "configure from this install are ignored (${e.message}).",
+                e,
+            )
             val reused = RuntimeSnapshot(
                 engine = previous.engine,
                 policy = config.policy,
@@ -242,13 +222,13 @@ public object SarieBridge {
         engine: CronetEngine,
         config: SarieConfig,
     ) {
-        val generation = installGeneration.incrementAndGet()
         require(config.certificatePinner == null) {
             "certificatePinner cannot be used with a borrowed CronetEngine"
         }
         require(!config.isConfigureSet) {
             "configure cannot be used with a borrowed CronetEngine"
         }
+        val generation = generations.next()
         this.logger = config.logger
         this.listener = config.listener
         warmTrustBaseline()
@@ -281,16 +261,17 @@ public object SarieBridge {
      * The listener stays, so the fallbacks that follow are still reported.
      */
     public fun uninstall() {
-        installGeneration.incrementAndGet()
-        current = null
+        synchronized(generations) {
+            generations.next()
+            current = null
+        }
     }
 
-    internal fun nextGeneration(): Int = installGeneration.incrementAndGet()
-
-    internal fun publishIfCurrentGeneration(generation: Int, snapshot: RuntimeSnapshot): Boolean {
-        if (installGeneration.get() != generation) return false
-        current = snapshot
-        return true
+    /** Locked with [uninstall] so a late Play Services callback cannot publish after it. */
+    private fun publishIfCurrentGeneration(generation: Int, snapshot: RuntimeSnapshot) {
+        synchronized(generations) {
+            if (generations.isCurrent(generation)) current = snapshot
+        }
     }
 
     internal fun snapshot(): RuntimeSnapshot? = current
@@ -319,13 +300,23 @@ private fun warmTrustBaseline() {
  */
 internal fun warnIfUnverified(runtimeVersion: String) {
     if (runtimeVersion in VerifiedOkHttpVersions) return
-    SarieBridge.logger?.let {
-        it.log(
-            Log.WARN,
-            "okhttp-cronet is running against okhttp $runtimeVersion, which was not verified with this " +
-                "build (verified: ${VerifiedOkHttpVersions.sorted().joinToString()}). The build-time " +
-                "structural guard covered ConnectInterceptor only; run the verification suites for this version.",
-            null,
-        )
-    }
+    SarieBridge.logger?.log(
+        Log.WARN,
+        "okhttp-cronet is running against okhttp $runtimeVersion, which was not verified with this " +
+            "build (verified: ${VerifiedOkHttpVersions.sorted().joinToString()}). The build-time " +
+            "structural guard covered ConnectInterceptor only; run the verification suites for this version.",
+        null,
+    )
+}
+
+/**
+ * Install counter. The Play Services path builds the engine later, on another thread; it
+ * publishes only if no newer [SarieBridge.install] or [SarieBridge.uninstall] happened since.
+ */
+internal class InstallGeneration {
+    private val counter = AtomicInteger()
+
+    fun next(): Int = counter.incrementAndGet()
+
+    fun isCurrent(generation: Int): Boolean = counter.get() == generation
 }

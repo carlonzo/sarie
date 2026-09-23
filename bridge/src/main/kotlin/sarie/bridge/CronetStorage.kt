@@ -3,7 +3,6 @@ package sarie.bridge
 import android.app.Application
 import android.os.Build
 import java.io.File
-import java.io.FileInputStream
 
 internal const val STORAGE_DIR_NAME = "cronet-cache"
 
@@ -59,17 +58,8 @@ internal fun currentProcessName(): String? {
 
 internal fun readProcessNameFromCmdline(file: File = File("/proc/self/cmdline")): String? {
     return try {
-        if (!file.canRead()) return null
-        FileInputStream(file).use { input ->
-            val buffer = ByteArray(512)
-            var count = 0
-            while (count < buffer.size) {
-                val b = input.read()
-                if (b <= 0) break // EOF (-1) or NUL (0)
-                buffer[count++] = b.toByte()
-            }
-            if (count == 0) null else String(buffer, 0, count, Charsets.US_ASCII).trim()
-        }
+        val name = String(file.readBytes(), Charsets.US_ASCII).substringBefore('\u0000').trim()
+        name.ifEmpty { null }
     } catch (_: Throwable) {
         null
     }
