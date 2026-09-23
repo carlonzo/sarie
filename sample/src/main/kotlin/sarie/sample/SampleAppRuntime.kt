@@ -10,6 +10,7 @@ import org.chromium.net.RequestFinishedInfo
 import sarie.bridge.DefaultPolicy
 import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
+import sarie.bridge.SarieConfig
 import sarie.bridge.SarieListener
 
 /**
@@ -18,9 +19,9 @@ import sarie.bridge.SarieListener
  * point (main sources compile against the cronet-api stubs only).
  *
  * Modes (instrumentation arg `mode`, default "stock"):
- * - "cronet": Sarie builds the engine (`SarieBridge.install(context, client, configure)`).
+ * - "cronet": Sarie builds the engine (`SarieBridge.install(context, config)`).
  *   QUIC hints go through [configure]. Brotli stays off. The bridge never shuts the engine down.
- * - "borrowed": host-built engine passed to `SarieBridge.install(engine)`. Used by the HTTP
+ * - "borrowed": host-built engine passed to `SarieBridge.install(engine, config)`. Used by the HTTP
  *   cache bypass test and the brotli decode test. No pins.
  * - "fallback": Sarie-built engine, policy permanently disabled -> every request falls back.
  * - "stock": no snapshot; OkHttp runs entirely stock.
@@ -59,11 +60,19 @@ object SampleAppRuntime {
             installBorrowed(context, policy, quicHintHost, quicHintPort, freshStorage, brotli, diskCache)
         } else {
             // Sarie-built. Do not call enableBrotli(true) and do not shut the engine down.
-            SarieBridge.install(context, client, policy, listener = routes) { builder ->
-                if (quicHintHost != null) {
-                    builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
-                }
-            }
+            SarieBridge.install(
+                context,
+                SarieConfig {
+                    certificatePinner(client?.certificatePinner)
+                    policy(policy)
+                    listener(routes)
+                    configure { builder ->
+                        if (quicHintHost != null) {
+                            builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
+                        }
+                    }
+                },
+            )
         }
         val engine = SarieBridge.engine
             ?: error("SarieBridge.install did not publish an engine")
@@ -109,7 +118,13 @@ object SampleAppRuntime {
         if (quicHintHost != null) {
             builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
         }
-        SarieBridge.install(builder.build(), policy, listener = routes)
+        SarieBridge.install(
+            builder.build(),
+            SarieConfig {
+                policy(policy)
+                listener(routes)
+            },
+        )
     }
 
     /**
@@ -127,23 +142,27 @@ object SampleAppRuntime {
         File(context.cacheDir, "cronet-cache").deleteRecursively()
     }
 
-    private fun samplePolicy(mode: String): DefaultPolicy = DefaultPolicy(
-        allowedOrigins = setOf(
-            "10.0.2.2:8443",
-            "localhost",
-            "127.0.0.1",
-            // H3-only public origin (known-public-root cert): the embedded engine's QUIC
-            // proof verifier rejects locally-anchored chains outright, so the on-device
-            // h3 proof needs one allowlisted public host (see CronetSuite KDoc).
-            "cloudflare-quic.com",
-        ),
-        allowLoopbackHttps = true,
-        enabled = when (mode) {
-            MODE_FALLBACK -> ({ false })
-            MODE_CRONET, MODE_BORROWED -> ({ System.getProperty("okhttp.cronet.enabled", "true").toBoolean() })
-            else -> throw IllegalArgumentException("unknown mode: $mode")
-        },
-    )
+    private fun samplePolicy(mode: String): DefaultPolicy = DefaultPolicy.Builder()
+        .allowedOrigins(
+            setOf(
+                "10.0.2.2:8443",
+                "localhost",
+                "127.0.0.1",
+                // H3-only public origin (known-public-root cert): the embedded engine's QUIC
+                // proof verifier rejects locally-anchored chains outright, so the on-device
+                // h3 proof needs one allowlisted public host (see CronetSuite KDoc).
+                "cloudflare-quic.com",
+            ),
+        )
+        .allowLoopbackHttps(true)
+        .enabled(
+            when (mode) {
+                MODE_FALLBACK -> ({ false })
+                MODE_CRONET, MODE_BORROWED -> ({ System.getProperty("okhttp.cronet.enabled", "true").toBoolean() })
+                else -> throw IllegalArgumentException("unknown mode: $mode")
+            },
+        )
+        .build()
 
     /**
      * Test-local record of [SarieListener] callbacks. Replaces the old process-wide counters.

@@ -220,11 +220,15 @@ class CronetBridgeTest {
     private fun install(engine: CronetEngine, vararg origins: String) {
         SarieBridge.install(
             engine,
-            object : CronetPolicy {
-                override val allowedOrigins: Set<String> = origins.toSet()
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = origins.toSet()
+                    },
+                )
+                mapper(mapper)
+                listener(routes)
             },
-            mapper,
-            routes,
         )
     }
 
@@ -754,12 +758,16 @@ class CronetBridgeTest {
         val engine = ScriptedCronetEngine()
         SarieBridge.install(
             engine,
-            object : CronetPolicy {
-                override val allowedOrigins: Set<String> = emptySet()
-                override fun enabled(): Boolean = throw IllegalStateException("host policy")
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = emptySet()
+                        override fun enabled(): Boolean = throw IllegalStateException("host policy")
+                    },
+                )
+                mapper(mapper)
+                listener(routes)
             },
-            mapper,
-            routes,
         )
         val closedPort = ServerSocket(0).use { it.localPort }
         val chain = fallbackChain(OkHttpClient(), "https://127.0.0.2:$closedPort/")
@@ -776,14 +784,20 @@ class CronetBridgeTest {
         engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
         SarieBridge.install(
             engine,
-            object : CronetPolicy {
-                override val allowedOrigins: Set<String> = setOf("example.com")
-            },
-            mapper,
-            object : SarieListener {
-                override fun onRouted(call: Call, reason: FallbackReason?) {
-                    throw IllegalStateException("host listener")
-                }
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                listener(
+                    object : SarieListener {
+                        override fun onRouted(call: Call, reason: FallbackReason?) {
+                            throw IllegalStateException("host listener")
+                        }
+                    },
+                )
             },
         )
         val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")

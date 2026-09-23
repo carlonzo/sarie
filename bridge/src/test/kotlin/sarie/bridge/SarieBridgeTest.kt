@@ -6,12 +6,14 @@ import java.net.URLStreamHandlerFactory
 import java.util.concurrent.Executor
 import org.chromium.net.CronetEngine
 import org.chromium.net.UrlRequest
+import okhttp3.CertificatePinner
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -49,6 +51,10 @@ class SarieBridgeTest {
     }
 
     private val mapper = RequestToUrlRequestMapper { _, _ -> }
+    private val config = SarieConfig {
+        policy(this@SarieBridgeTest.policy)
+        mapper(this@SarieBridgeTest.mapper)
+    }
 
     @Before
     fun setUp() {
@@ -87,7 +93,7 @@ class SarieBridgeTest {
     @Test
     fun `install stores snapshot`() {
         val engine = FakeCronetEngine()
-        SarieBridge.install(engine, policy, mapper)
+        SarieBridge.install(engine, config)
 
         val snap = SarieBridge.snapshot()
         assertNotNull(snap)
@@ -103,9 +109,9 @@ class SarieBridgeTest {
         val engine1 = FakeCronetEngine()
         val engine2 = FakeCronetEngine()
 
-        SarieBridge.install(engine1, policy, mapper)
+        SarieBridge.install(engine1, config)
         val first = SarieBridge.snapshot()!!
-        SarieBridge.install(engine2, policy, mapper)
+        SarieBridge.install(engine2, config)
         val second = SarieBridge.snapshot()!!
 
         assertSame(engine2, second.engine)
@@ -117,7 +123,7 @@ class SarieBridgeTest {
     @Test
     fun `borrowed install is not sarie-built and records no pins or provider`() {
         val engine = FakeCronetEngine()
-        SarieBridge.install(engine, policy, mapper)
+        SarieBridge.install(engine, config)
 
         val snap = SarieBridge.snapshot()!!
         assertFalse(snap.sarieBuilt)
@@ -128,8 +134,31 @@ class SarieBridgeTest {
     }
 
     @Test
+    fun `borrowed install rejects certificatePinner`() {
+        val engine = FakeCronetEngine()
+        val pinner = CertificatePinner.Builder()
+            .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+            .build()
+        val pinnerConfig = SarieConfig { certificatePinner(pinner) }
+        val err = assertThrows(IllegalArgumentException::class.java) {
+            SarieBridge.install(engine, pinnerConfig)
+        }
+        assertTrue(err.message!!.contains("certificatePinner"))
+    }
+
+    @Test
+    fun `borrowed install rejects configure`() {
+        val engine = FakeCronetEngine()
+        val configureConfig = SarieConfig { configure { } }
+        val err = assertThrows(IllegalArgumentException::class.java) {
+            SarieBridge.install(engine, configureConfig)
+        }
+        assertTrue(err.message!!.contains("configure"))
+    }
+
+    @Test
     fun `uninstall drops snapshot and disables`() {
-        SarieBridge.install(FakeCronetEngine(), policy, mapper)
+        SarieBridge.install(FakeCronetEngine(), config)
         SarieBridge.uninstall()
 
         assertNull(SarieBridge.snapshot())
@@ -138,7 +167,7 @@ class SarieBridgeTest {
 
     @Test
     fun `kill switch system property disables and restores`() {
-        SarieBridge.install(FakeCronetEngine(), policy, mapper)
+        SarieBridge.install(FakeCronetEngine(), config)
         assertTrue(SarieBridge.isEnabled())
 
         try {

@@ -201,8 +201,13 @@ class PolicyEngineTest {
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
         TrustBaseline.clearMemoForTest()
-        // isEnabled() requires a snapshot present in SarieBridge itself.
-        SarieBridge.install(engine, policy("example.com"), mapper)
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(policy("example.com"))
+                mapper(mapper)
+            },
+        )
     }
 
     @After

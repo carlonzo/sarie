@@ -5,7 +5,6 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.logging.Logger
 import okhttp3.OkHttp
-import okhttp3.OkHttpClient
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetProvider
 
@@ -55,17 +54,33 @@ object SarieBridge {
      *   the routing policy cannot see them, so OkHttp clients without those pins would still be
      *   routed to Cronet. Put pins on the [client]'s `CertificatePinner`.
      */
-    @JvmOverloads
+    /**
+     * Builds a Cronet engine with the default configuration and publishes it.
+     */
+    fun install(context: Context) {
+        install(context, SarieConfig.DEFAULT)
+    }
+
+    /**
+     * Builds a Cronet engine and publishes it. [SarieConfig.configure] runs after the overridable
+     * defaults (connection migration and stale DNS) and before bridge-owned settings, which overwrite
+     * brotli, the HTTP cache, the storage path, pins, and local-trust pin bypass. Stale DNS
+     * stays at the default unless configure replaces it.
+     *
+     * When no enabled app-packaged, HttpEngine, or Play Services provider exists, this does not
+     * publish a snapshot (logged once). Requests keep falling back with `reason=engine_missing`.
+     * The Java fallback provider is never selected.
+     *
+     * Call it once per process. A later call reuses the engine already built (its storage path
+     * stays locked while it runs) and only swaps policy and mapper; its pins and configure
+     * are ignored, with a warning.
+     */
     fun install(
         context: Context,
-        client: OkHttpClient? = null,
-        policy: CronetPolicy = DefaultPolicy(),
-        mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
-        listener: SarieListener? = null,
-        configure: (CronetEngine.Builder) -> Unit = {},
+        config: SarieConfig,
     ) {
         // Before the provider lookup: a failed install still reports engine_missing.
-        this.listener = listener
+        this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
         val chosen = selectCronetProvider(
@@ -91,11 +106,11 @@ object SarieBridge {
             }
             return
         }
-        val translation = translatePins(client?.certificatePinner?.pins ?: emptySet())
+        val translation = translatePins(config.certificatePinner?.pins ?: emptySet())
         val cronetBuilder = chosen.source.createBuilder()
         val seam = CronetEngineBuilderAdapter(cronetBuilder)
         applyEngineConfiguration(seam, storageDir.absolutePath, translation.groups) {
-            configure(cronetBuilder)
+            config.configure(cronetBuilder)
         }
         val engine = try {
             cronetBuilder.build()
@@ -110,8 +125,8 @@ object SarieBridge {
             )
             current = RuntimeSnapshot(
                 engine = previous.engine,
-                policy = policy,
-                mapper = mapper,
+                policy = config.policy,
+                mapper = config.mapper,
                 installedAtMillis = System.currentTimeMillis(),
                 sarieBuilt = true,
                 installedPins = previous.installedPins,
@@ -122,8 +137,8 @@ object SarieBridge {
         }
         val snapshot = RuntimeSnapshot(
             engine = engine,
-            policy = policy,
-            mapper = mapper,
+            policy = config.policy,
+            mapper = config.mapper,
             installedAtMillis = System.currentTimeMillis(),
             sarieBuilt = true,
             installedPins = translation.installedPins,
@@ -135,32 +150,38 @@ object SarieBridge {
     }
 
     /**
+     * Publishes a borrowed [engine] with the default configuration.
+     */
+    fun install(engine: CronetEngine) {
+        install(engine, SarieConfig.DEFAULT)
+    }
+
+    /**
      * Publishes a borrowed [engine]. Not Sarie-built: no installed pins and no provider record.
      * A second call replaces the snapshot; the previous engine is not shut down.
      *
      * @param engine Host-built engine. The host owns its lifecycle. Compression and HTTP cache
      *   are whatever the host set; Sarie still disables the cache on each request.
-     * @param policy Which requests may use Cronet. [DefaultPolicy] with an empty
-     *   [CronetPolicy.allowedOrigins] (the default) lets every origin that passes the other
-     *   fail-closed checks through; pass a non-empty set to restrict to those hosts.
-     * @param mapper Optional hook applied to each Cronet `UrlRequest.Builder` after the
-     *   OkHttp request is copied. Used for Cronet-only knobs (priority, traffic-stats tag,
-     *   annotations). Most hosts leave the default no-op.
+     * @param config Configuration for routing policy, mapper, and listener. Setting
+     *   `certificatePinner` or `configure` throws [IllegalArgumentException].
      */
-    @JvmOverloads
     fun install(
         engine: CronetEngine,
-        policy: CronetPolicy = DefaultPolicy(),
-        mapper: RequestToUrlRequestMapper = RequestToUrlRequestMapper.NOOP,
-        listener: SarieListener? = null,
+        config: SarieConfig,
     ) {
-        this.listener = listener
+        require(config.certificatePinner == null) {
+            "certificatePinner cannot be used with a borrowed CronetEngine"
+        }
+        require(!config.isConfigureSet) {
+            "configure cannot be used with a borrowed CronetEngine"
+        }
+        this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
         current = RuntimeSnapshot(
             engine,
-            policy,
-            mapper,
+            config.policy,
+            config.mapper,
             System.currentTimeMillis(),
         )
     }

@@ -10,13 +10,49 @@ package sarie.bridge
  * allowlist is how you limit it to hosts you have tested. `"*"` is an explicit
  * allow-all token.
  */
-class DefaultPolicy(
-    override val allowedOrigins: Set<String> = emptySet(),
-    override val allowLoopbackHttps: Boolean = false,
-    override val sdkPins: Set<String> = emptySet(),
-    enabled: () -> Boolean = { true },
-) : CronetPolicy {
-    private val gate = enabled
+class DefaultPolicy private constructor(builder: Builder) : CronetPolicy {
+    constructor() : this(Builder())
+
+    override val allowedOrigins: Set<String> = builder.allowedOrigins
+    override val allowLoopbackHttps: Boolean = builder.allowLoopbackHttps
+    override val sdkPins: Set<String> = builder.sdkPins
+    private val gate: () -> Boolean = builder.enabled
 
     override fun enabled(): Boolean = gate()
+
+    fun newBuilder(): Builder = Builder(this)
+
+    class Builder {
+        internal var allowedOrigins: Set<String> = emptySet()
+        internal var allowLoopbackHttps: Boolean = false
+        internal var sdkPins: Set<String> = emptySet()
+        internal var enabled: () -> Boolean = { true }
+
+        constructor()
+
+        internal constructor(policy: DefaultPolicy) {
+            this.allowedOrigins = policy.allowedOrigins
+            this.allowLoopbackHttps = policy.allowLoopbackHttps
+            this.sdkPins = policy.sdkPins
+            this.enabled = policy.gate
+        }
+
+        fun allowedOrigins(allowedOrigins: Set<String>): Builder = apply {
+            this.allowedOrigins = allowedOrigins.toSet()
+        }
+
+        fun allowLoopbackHttps(allowLoopbackHttps: Boolean): Builder = apply {
+            this.allowLoopbackHttps = allowLoopbackHttps
+        }
+
+        fun sdkPins(sdkPins: Set<String>): Builder = apply {
+            this.sdkPins = sdkPins.toSet()
+        }
+
+        fun enabled(enabled: () -> Boolean): Builder = apply {
+            this.enabled = enabled
+        }
+
+        fun build(): DefaultPolicy = DefaultPolicy(this)
+    }
 }
