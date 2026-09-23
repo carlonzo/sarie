@@ -328,4 +328,3 @@ On the Cronet path:
 ## Documentation & Reference
 
 - [`COMPATIBILITY.md`](COMPATIBILITY.md): Complete behavior contract with test citations for every supported scenario.
-- [`ROLLBACK.md`](ROLLBACK.md): Emergency recovery and build/runtime rollback procedures.

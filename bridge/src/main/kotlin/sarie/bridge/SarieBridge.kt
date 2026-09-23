@@ -24,7 +24,7 @@ private val runtimeLogger: Logger = Logger.getLogger("sarie.bridge")
  */
 object SarieBridge {
     private const val KILL_SWITCH_PROPERTY = "okhttp.cronet.enabled"
-    private const val STORAGE_DIR_NAME = "sarie-cronet"
+    private const val STORAGE_DIR_NAME = "cronet-cache"
 
     private val missingProviderLogged = AtomicBoolean(false)
     private val storageDirLogged = AtomicBoolean(false)
@@ -81,7 +81,7 @@ object SarieBridge {
             }
             return
         }
-        val storageDir = File(context.noBackupFilesDir, STORAGE_DIR_NAME)
+        val storageDir = File(context.cacheDir, STORAGE_DIR_NAME)
         if (!storageDir.isDirectory && !storageDir.mkdirs()) {
             if (storageDirLogged.compareAndSet(false, true)) {
                 runtimeLogger.warning(

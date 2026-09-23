@@ -26,7 +26,7 @@ import sarie.bridge.SarieListener
  * - "stock": no snapshot; OkHttp runs entirely stock.
  *
  * [freshStorage] applies only to the borrowed engine. The Sarie-built engine always uses
- * `<noBackupFilesDir>/sarie-cronet`, which [configure] cannot replace.
+ * `<cacheDir>/cronet-cache`, which [configure] cannot replace.
  * [lastEngine] is the engine from the snapshot so the owning suite can stop it in @After.
  * This object does not call [CronetEngine.shutdown].
  */
@@ -124,7 +124,7 @@ object SampleAppRuntime {
         lastEngine?.shutdown()
         lastEngine = null
         val context: Context = ApplicationProvider.getApplicationContext()
-        File(context.noBackupFilesDir, "sarie-cronet").deleteRecursively()
+        File(context.cacheDir, "cronet-cache").deleteRecursively()
     }
 
     private fun samplePolicy(mode: String): DefaultPolicy = DefaultPolicy(
