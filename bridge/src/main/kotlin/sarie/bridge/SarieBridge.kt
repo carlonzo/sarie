@@ -24,7 +24,6 @@ import org.chromium.net.CronetProvider
  */
 object SarieBridge {
     private const val KILL_SWITCH_PROPERTY = "okhttp.cronet.enabled"
-    private const val STORAGE_DIR_NAME = "cronet-cache"
 
     private val missingProviderLogged = AtomicBoolean(false)
     private val storageDirLogged = AtomicBoolean(false)
@@ -160,7 +159,8 @@ object SarieBridge {
             }
             return
         }
-        val storageDir = File(context.cacheDir, STORAGE_DIR_NAME)
+        val dirName = cronetStorageDirName(currentProcessName(), context.packageName)
+        val storageDir = File(context.cacheDir, dirName)
         if (!storageDir.isDirectory && !storageDir.mkdirs()) {
             if (storageDirLogged.compareAndSet(false, true)) {
                 logger?.let {
