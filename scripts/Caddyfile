@@ -110,7 +110,7 @@
 
 	# 401 until the caller sends Authorization, then 200. Token-refresh authenticator test.
 	handle /auth {
-		@authorized header Authorization
+		@authorized header Authorization *
 		handle @authorized {
 			respond "ok" 200
 		}

@@ -34,6 +34,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -82,15 +83,12 @@ class CronetSuite {
 
     @After
     fun tearDown() {
-        SarieBridge.uninstall()
-        installedEngine?.let { engine ->
-            if (SampleAppRuntime.netLogRequested) {
-                @Suppress("DEPRECATION")
-                engine.stopNetLog()
-            }
-            @Suppress("DEPRECATION") // suite owns these engines; stop them to keep the emulator healthy
-            engine.shutdown()
+        if (SampleAppRuntime.netLogRequested) {
+            @Suppress("DEPRECATION")
+            installedEngine?.stopNetLog()
         }
+        // Stops the engine and wipes the Sarie storage dir (persisted QUIC state).
+        SampleAppRuntime.reset()
         installedEngine = null
         Metrics.resetForTest()
     }
@@ -142,9 +140,8 @@ class CronetSuite {
 
     @Test
     fun h3NegotiatedAgainstPublicOrigin() {
-        // cloudflare-quic.com serves HTTP/3 ONLY (no TCP listener), so the request cannot
-        // downgrade to h2: if this returns, the device negotiated real h3 through the
-        // trampoline. Its cert chains to a known public root, which the embedded engine's
+        // cloudflare-quic.com also serves h2 over TCP now (checked 2026-09-23), so the
+        // assertion below, not the origin, is what proves h3 through the trampoline. Its cert chains to a known public root, which the embedded engine's
         // QUIC proof verifier requires - locally-anchored CAs are rejected (see the class
         // KDoc and h2LocalOriginWhileQuicBlocked).
         installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
@@ -730,6 +727,20 @@ class CronetSuite {
     }
 
     @Test
+    fun secondInstallReusesTheLiveEngine() {
+        // The first engine holds <noBackupFilesDir>/sarie-cronet. A second build on that path
+        // throws in Cronet; install must reuse the live engine instead.
+        installCronet(quicHintHost = null)
+        val first = installedEngine
+        installCronet(quicHintHost = null)
+        assertSame(first, installedEngine)
+        OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
+            assertEquals("ok", response.body.string())
+        }
+        assertCronetServed()
+    }
+
+    @Test
     fun engineMissingFallsBackStock() {
         // No install: the trampoline finds no snapshot -> exact-stock fallback.
         OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
@@ -862,8 +873,9 @@ class CronetSuite {
         repeat(2) {
             client.newCall(Request.Builder().url("$ORIGIN/cacheable-unique").build()).execute().use { response ->
                 assertEquals(200, response.code)
-                // Cronet path does not fabricate these, including when Cronet itself served a cache hit.
-                assertNull(response.networkResponse)
+                // OkHttp's CacheInterceptor sets networkResponse on every network response, as in
+                // stock. No OkHttp cache here, so cacheResponse stays null.
+                assertNotNull(response.networkResponse)
                 assertNull(response.cacheResponse)
                 bodies += response.body.string()
             }
@@ -897,8 +909,14 @@ class CronetSuite {
         val stock = echoedHeaders(stockEcho)
         val cronet = echoedHeaders(cronetEcho)
         assertEquals(listOf("same"), cronet["X-Parity"])
+        // Recorded on cronet 500.0.2 (COMPATIBILITY row 24): Chromium adds an RFC 9218
+        // Priority header and advertises deflate next to gzip. Any other diff fails.
         val diff = headerDiff(stock, cronet)
-        assertTrue("wire header diff (Cronet-added names must be recorded, not stripped):\n$diff", diff.isEmpty())
+        assertEquals(
+            "wire header diff changed; record it in COMPATIBILITY.md",
+            "cronet-added: [Priority]\nAccept-Encoding stock=[gzip] cronet=[gzip, deflate]\n",
+            diff,
+        )
     }
 
     /** Caddy `headers.tmpl`: `Name: [v1] [v2]`, plus a leading `Host: [...]` line. */

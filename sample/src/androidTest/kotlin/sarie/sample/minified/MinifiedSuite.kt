@@ -1,7 +1,6 @@
 package sarie.sample.minified
 
 import sarie.bridge.Metrics
-import sarie.bridge.SarieBridge
 import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
 import java.util.concurrent.CountDownLatch
@@ -52,11 +51,8 @@ class MinifiedSuite {
     @After
     fun tearDown() {
         server.close()
-        SarieBridge.uninstall()
-        installedEngine?.let { engine ->
-            @Suppress("DEPRECATION") // suite owns these engines; stop them to keep the emulator healthy
-            engine.shutdown()
-        }
+        // Stops the engine and wipes the Sarie storage dir (persisted QUIC state).
+        SampleAppRuntime.reset()
         installedEngine = null
         Metrics.resetForTest()
     }
@@ -106,8 +102,8 @@ class MinifiedSuite {
 
     @Test
     fun publicOriginH3ThroughTrampoline() {
-        // cloudflare-quic.com serves HTTP/3 ONLY (no TCP listener), so no h2 downgrade can
-        // fake the result; its cert chains to a known public root, which the embedded
+        // cloudflare-quic.com also serves h2 over TCP now (checked 2026-09-23); the
+        // HTTP_3 assertion is the proof. Its cert chains to a known public root, which the embedded
         // engine's QUIC proof verifier requires. Strongest R8 proof: suppressed-internal
         // calls + trampoline + mapping all survive shrinking on a real h3 response.
         installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)

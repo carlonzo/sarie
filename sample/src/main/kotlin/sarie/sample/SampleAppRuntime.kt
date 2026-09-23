@@ -106,6 +106,20 @@ object SampleAppRuntime {
         SarieBridge.install(builder.build(), policy)
     }
 
+    /**
+     * Test isolation: uninstalls, stops the last engine, and deletes the Sarie storage dir.
+     * Chromium persists per-host state there (alt-svc, QUIC marked broken after a failed
+     * handshake), which would otherwise leak from one test into the next.
+     */
+    fun reset() {
+        SarieBridge.uninstall()
+        @Suppress("DEPRECATION")
+        lastEngine?.shutdown()
+        lastEngine = null
+        val context: Context = ApplicationProvider.getApplicationContext()
+        File(context.noBackupFilesDir, "sarie-cronet").deleteRecursively()
+    }
+
     private fun samplePolicy(mode: String): DefaultPolicy = DefaultPolicy(
         allowedOrigins = setOf(
             "10.0.2.2:8443",
