@@ -22,6 +22,7 @@ import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.Cache
 import okhttp3.CertificatePinner
+import okio.ByteString.Companion.toByteString
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -351,6 +352,95 @@ class PolicyEngineTest {
         val d = decision(input = inputFor(client = pinned))
         assertFalse(d.allow)
         assertEquals(Metrics.Reason.pins, d.reason)
+    }
+
+    @Test
+    fun `sdkPins does not exempt certificate pins`() {
+        val pinned = OkHttpClient.Builder()
+            .certificatePinner(
+                CertificatePinner.Builder()
+                    .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                    .build(),
+            )
+            .build()
+        val withSdkPins = object : CronetPolicy {
+            override val allowedOrigins: Set<String> = setOf("example.com")
+            override val sdkPins: Set<String> = setOf("example.com")
+        }
+        val d = decision(input = inputFor(client = pinned), snapshot = snap(withSdkPins))
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.pins, d.reason)
+    }
+
+    @Test
+    fun `pins for another host do not deny this host`() {
+        val pinnedElsewhere = OkHttpClient.Builder()
+            .certificatePinner(
+                CertificatePinner.Builder()
+                    .add("other.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                    .build(),
+            )
+            .build()
+        val d = decision(input = inputFor(client = pinnedElsewhere))
+        assertEquals(Decision(true, null), d)
+    }
+
+    @Test
+    fun `sarie-built engine allows pins that match the installed set`() {
+        val sha = "sha256/" + ByteArray(32) { 4 }.toByteString().base64()
+        val pinner = CertificatePinner.Builder().add("example.com", sha).build()
+        val client = OkHttpClient.Builder().certificatePinner(pinner).build()
+        val installed = translatePins(pinner.pins).installedPins
+        val d = decision(
+            input = inputFor(client = client),
+            snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
+        )
+        assertEquals(Decision(true, null), d)
+    }
+
+    @Test
+    fun `derived client with different pins falls back`() {
+        val installedSha = "sha256/" + ByteArray(32) { 4 }.toByteString().base64()
+        val otherSha = "sha256/" + ByteArray(32) { 5 }.toByteString().base64()
+        val installed = translatePins(
+            CertificatePinner.Builder().add("example.com", installedSha).build().pins,
+        ).installedPins
+        val derived = OkHttpClient.Builder()
+            .certificatePinner(CertificatePinner.Builder().add("example.com", otherSha).build())
+            .build()
+        val d = decision(
+            input = inputFor(client = derived),
+            snapshot = snap().copy(sarieBuilt = true, installedPins = installed),
+        )
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.pins, d.reason)
+    }
+
+    @Test
+    fun `single label wildcard pin is denied on a sarie-built engine`() {
+        val sha = "sha256/" + ByteArray(32) { 4 }.toByteString().base64()
+        val client = OkHttpClient.Builder()
+            .certificatePinner(CertificatePinner.Builder().add("*.example.com", sha).build())
+            .build()
+        val d = decision(
+            input = inputFor(client = client, url = "https://a.example.com/"),
+            snapshot = snap(policy("a.example.com")).copy(sarieBuilt = true, installedPins = emptySet()),
+        )
+        assertFalse(d.allow)
+        assertEquals(Metrics.Reason.pins, d.reason)
+    }
+
+    @Test
+    fun `double wildcard pin installed for the host is allowed`() {
+        val sha = "sha256/" + ByteArray(32) { 6 }.toByteString().base64()
+        val pinner = CertificatePinner.Builder().add("**.example.com", sha).build()
+        val client = OkHttpClient.Builder().certificatePinner(pinner).build()
+        val installed = translatePins(pinner.pins).installedPins
+        val d = decision(
+            input = inputFor(client = client, url = "https://a.example.com/"),
+            snapshot = snap(policy("a.example.com")).copy(sarieBuilt = true, installedPins = installed),
+        )
+        assertEquals(Decision(true, null), d)
     }
 
     @Test

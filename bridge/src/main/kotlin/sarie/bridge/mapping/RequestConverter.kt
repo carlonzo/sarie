@@ -40,7 +40,8 @@ class RequestConverter(
      * Since Cronet delivers responses through callbacks, the returned holder also exposes
      * [ConvertedRequest.getResponse], which blocks until the status code and headers are
      * available. The host mapper from [SarieBridge] is applied to the builder just before
-     * build() so host tags survive on the Cronet request.
+     * build() so host tags survive on the Cronet request. [UrlRequest.Builder.disableCache] runs
+     * immediately before build(), on both the Sarie-built and borrowed engines.
      */
     @Throws(IOException::class)
     fun convert(
@@ -105,6 +106,7 @@ class RequestConverter(
         }
 
         SarieBridge.snapshot()?.mapper?.map(okHttpRequest, builder)
+        builder.disableCache()
 
         return ConvertedRequest(builder.build(), callback, okHttpRequest, responseConverter)
     }

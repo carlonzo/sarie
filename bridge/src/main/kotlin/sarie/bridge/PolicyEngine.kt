@@ -29,7 +29,7 @@ data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
  * 12. explicit proxy or non-baseline proxySelector -> proxy
  * 13. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
  * 14. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
- * 15. certificate pins -> pins
+ * 15. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
  * 16. TLS/trust fingerprint mismatch -> trust (Metis B1)
  * 17. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
  *     is a local-test-server concern, not a distinct transport incompatibility)
@@ -67,7 +67,15 @@ object PolicyEngine {
         if (input.hostnameVerifier !== OkHostnameVerifier) {
             return Decision(false, Metrics.Reason.hostname_verifier)
         }
-        if (input.certificatePinner.pins.isNotEmpty()) return Decision(false, Metrics.Reason.pins)
+        if (!pinsSatisfied(
+                input.certificatePinner,
+                input.request.url.host,
+                snapshot.sarieBuilt,
+                snapshot.installedPins,
+            )
+        ) {
+            return Decision(false, Metrics.Reason.pins)
+        }
         if (trustMismatched(input)) return Decision(false, Metrics.Reason.trust)
         if (isLoopback(input.request.url.host) && !snapshot.policy.allowLoopbackHttps) {
             return Decision(false, Metrics.Reason.cleartext)

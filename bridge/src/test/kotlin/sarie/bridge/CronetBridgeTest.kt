@@ -7,6 +7,7 @@ import sarie.bridge.mapping.FakeUrlResponseInfo
 import sarie.bridge.mapping.OkHttpBridgeCallback
 import java.io.IOException
 import java.net.ServerSocket
+import javax.net.ssl.SSLPeerUnverifiedException
 import java.net.URL
 import java.net.URLConnection
 import java.net.URLStreamHandlerFactory
@@ -26,6 +27,8 @@ import okhttp3.internal.http.CallServerInterceptor
 import okhttp3.internal.http.RealInterceptorChain
 import okio.Buffer
 import org.chromium.net.CronetEngine
+import org.chromium.net.CronetException
+import org.chromium.net.NetworkException
 import org.chromium.net.UploadDataProvider
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
@@ -77,6 +80,7 @@ class CronetBridgeTest {
          * transport-level CronetException, mirroring onFailed before onResponseStarted.
          */
         var preHeaderFailures = 0
+        var preHeaderFailure: CronetException = FakeCronetException("net err")
 
         override fun newUrlRequestBuilder(
             url: String,
@@ -148,7 +152,7 @@ class CronetBridgeTest {
             // mirroring a real engine (onCanceled is delivered from cancel() below).
             if (cancelCalls == 0) {
                 if (buildIndex < engine.preHeaderFailures) {
-                    callback.onFailed(this, engine.responseInfo, FakeCronetException("net err"))
+                    callback.onFailed(this, engine.responseInfo, engine.preHeaderFailure)
                 } else {
                     callback.onResponseStarted(this, engine.responseInfo)
                 }
@@ -490,6 +494,27 @@ class CronetBridgeTest {
         assertEquals(2, engine.builtRequests.size)
         assertEquals(retriesBefore + 1, Metrics.retries.get())
         assertEquals(0, CallRegistry.activeCount())
+    }
+
+    @Test
+    fun `pin failure -150 becomes SSLPeerUnverifiedException and is not retried`() {
+        val engine = ScriptedCronetEngine()
+        engine.preHeaderFailures = 2
+        engine.preHeaderFailure = object : NetworkException("pin", null) {
+            override fun getCronetInternalErrorCode(): Int = -150
+            override fun getErrorCode(): Int = ERROR_OTHER
+            override fun immediatelyRetryable(): Boolean = true
+        }
+        install(engine, "example.com")
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+
+        val thrown = assertThrows(SSLPeerUnverifiedException::class.java) {
+            CronetBridge.intercept(chain)
+        }
+
+        assertEquals("Certificate pinning failure!", thrown.message)
+        assertEquals(1, engine.builtRequests.size)
+        assertEquals(0, Metrics.retries.get())
     }
 
     @Test

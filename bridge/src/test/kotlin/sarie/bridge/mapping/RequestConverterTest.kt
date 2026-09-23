@@ -61,6 +61,12 @@ class RequestConverterTest {
     }
 
     @Test
+    fun `convert disables the Cronet cache before build`() {
+        converter().convert(get(), readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+        assertTrue(engine.builders.single().cacheDisabled)
+    }
+
+    @Test
     fun `GET maps method, url, headers and multi-values`() {
         val request = get("X-Dup" to "one", "X-Dup" to "two", "X-Single" to "s")
 

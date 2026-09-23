@@ -9,7 +9,8 @@ import java.util.Random
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
-import okhttp3.Authenticator
+import javax.net.ssl.SSLPeerUnverifiedException
+import okhttp3.CertificatePinner
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
@@ -21,6 +22,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -89,6 +91,22 @@ class CronetSuite {
             quicHintPort = quicHintPort,
             freshStorage = true,
             netLog = SampleAppRuntime.netLogRequested,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+    }
+
+    /** Borrowed host-built engine. [brotli] and [diskCache] are the two tests that need one. */
+    private fun installBorrowed(
+        brotli: Boolean = false,
+        diskCache: Boolean = false,
+        quicHintHost: String? = null,
+    ) {
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_BORROWED,
+            quicHintHost = quicHintHost,
+            freshStorage = true,
+            brotli = brotli,
+            diskCache = diskCache,
         )
         installedEngine = SampleAppRuntime.lastEngine
     }
@@ -306,10 +324,9 @@ class CronetSuite {
         }
 
         // (b) Unencoded response: the bridge keeps Content-Length (identity passthrough
-        // clause of keepEncodingAffectedHeaders). Pinned cronet-embedded 143 REPLACES the
-        // caller's Accept-Encoding with its own "gzip, deflate, br" (observed server-side),
-        // so an identity request on /compress/gzip is not expressible on the Cronet path;
-        // an unencoded endpoint pins the same bridge behavior.
+        // clause of keepEncodingAffectedHeaders). The Sarie-built engine advertises
+        // "gzip, deflate" (brotli off), so an identity request on /compress/gzip is not
+        // expressible on the Cronet path; an unencoded endpoint pins the same bridge behavior.
         client.newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertNull(response.header("Content-Encoding"))
@@ -317,10 +334,15 @@ class CronetSuite {
             assertEquals("ok", response.body.string())
         }
 
-        // (c) Brotli: the engine's own Accept-Encoding always includes br, so Cronet decodes
-        // the br response exactly like gzip and the bridge strips the encoding headers -
-        // raw brotli bytes are never surfaced to OkHttp (which itself cannot decode br).
-        client.newCall(Request.Builder().url("$ORIGIN/compress/br").build()).execute().use { response ->
+        assertCronetServed(minCount = 2)
+    }
+
+    @Test
+    fun brotliDecodedOnBorrowedEngine() {
+        // /compress/br forces Content-Encoding: br. The Sarie-built engine leaves brotli off,
+        // so the successful decode runs on a borrowed engine that enables it.
+        installBorrowed(brotli = true)
+        OkHttpClient().newCall(Request.Builder().url("$ORIGIN/compress/br").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertNull(
                 "expected Cronet to decode br, headers=${response.headers}",
@@ -328,7 +350,7 @@ class CronetSuite {
             )
             assertEquals("br-payload-ok", response.body.string())
         }
-        assertCronetServed(minCount = 3)
+        assertCronetServed()
     }
 
     @Test
@@ -336,13 +358,11 @@ class CronetSuite {
         installCronet(quicHintHost = null)
         val client = OkHttpClient()
 
-        // (a) An explicit caller Accept-Encoding does NOT reach the wire on the pinned engine
-        // (cronet-embedded 143.7445.0, observed server-side): the engine replaces it with its
-        // own "gzip, deflate, br" and transparently decodes. There is no per-request control
-        // (no API on UrlRequest.Builder; the mapper hook also runs at the builder level, but
-        // the replacement happens natively at request execution) and engine-level
-        // enableBrotli only affects brotli ADVERTISING - so the bridge keeps Cronet's decode
-        // and strips Content-Encoding/Content-Length for all-engine-handled encodings.
+        // (a) An explicit caller Accept-Encoding does NOT reach the wire: Cronet replaces it.
+        // The Sarie-built engine has brotli off, so the advertisement is "gzip, deflate"
+        // (no br). There is no per-request control (the replacement happens natively at
+        // request execution). The bridge keeps Cronet's decode and strips
+        // Content-Encoding/Content-Length for all-engine-handled encodings.
         client.newCall(
             Request.Builder().url("$ORIGIN/headers")
                 .header("Accept-Encoding", "identity")
@@ -352,8 +372,12 @@ class CronetSuite {
             val echoed = response.body.string()
             println("AE-ECHO-BEGIN\n$echoed\nAE-ECHO-END")
             assertTrue(
-                "pinned engine must replace the caller Accept-Encoding, got:\n$echoed",
-                echoed.contains("Accept-Encoding: [gzip, deflate, br]"),
+                "Sarie-built engine must advertise gzip, deflate (no br), got:\n$echoed",
+                echoed.contains("Accept-Encoding: [gzip, deflate]"),
+            )
+            assertFalse(
+                "brotli must not be advertised on the Sarie-built engine, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [gzip, deflate, br]") || echoed.contains("[br]"),
             )
             assertFalse(
                 "the caller's explicit Accept-Encoding must not survive:\n$echoed",
@@ -486,5 +510,193 @@ class CronetSuite {
             assertEquals("ok", response.body.string())
         }
         assertStockServed(Metrics.Reason.engine_missing)
+    }
+
+    @Test
+    fun correctPinNegotiatesH3() {
+        // Stock probe learns the live SPKI pin. The Sarie-built engine installs that pin and
+        // the same client is allowed through; cloudflare-quic.com is h3-only.
+        val pin = OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
+            .execute()
+            .use { response ->
+                CertificatePinner.pin(checkNotNull(response.handshake).peerCertificates.first())
+            }
+        Metrics.resetForTest()
+        val client = OkHttpClient.Builder()
+            .certificatePinner(CertificatePinner.Builder().add("cloudflare-quic.com", pin).build())
+            .build()
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_CRONET,
+            quicHintHost = "cloudflare-quic.com",
+            quicHintPort = 443,
+            client = client,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+
+        client.newCall(Request.Builder().url("https://cloudflare-quic.com/").build()).execute().use { response ->
+            assertEquals(Protocol.HTTP_3, response.protocol)
+            assertEquals(200, response.code)
+        }
+        assertCronetServed()
+    }
+
+    @Test
+    fun wrongPinIsPeerUnverifiedWithoutRetryOrStock() {
+        val client = OkHttpClient.Builder()
+            .certificatePinner(
+                CertificatePinner.Builder()
+                    .add("cloudflare-quic.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                    .build(),
+            )
+            .build()
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_CRONET,
+            quicHintHost = "cloudflare-quic.com",
+            quicHintPort = 443,
+            client = client,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+
+        val thrown = assertThrows(SSLPeerUnverifiedException::class.java) {
+            client.newCall(Request.Builder().url("https://cloudflare-quic.com/").build()).execute()
+        }
+        // Exact message: stock's failure includes the peer chain after this prefix.
+        assertEquals("Certificate pinning failure!", thrown.message)
+        assertEquals(0L, Metrics.retries.get())
+        assertTrue("pin failure must stay on Cronet, cronet=${Metrics.cronet.get()}", Metrics.cronet.get() >= 1)
+        assertEquals(0L, Metrics.okhttpFallback.get())
+        assertNull(Metrics.lastReason)
+    }
+
+    @Test
+    fun singleLabelWildcardPinFallsBack() {
+        // `*.0.2.2` matches 10.0.2.2 (one label) and has no Cronet equivalent, so it is not
+        // installed even when this client is the one Sarie built the engine from.
+        val client = OkHttpClient.Builder()
+            .certificatePinner(
+                CertificatePinner.Builder()
+                    .add("*.0.2.2", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                    .build(),
+            )
+            .build()
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_CRONET,
+            quicHintHost = null,
+            client = client,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().close()
+        } catch (_: IOException) {
+            // Stock pin check or connect failure. The routing reason is what this test locks.
+        }
+        assertStockServed(Metrics.Reason.pins)
+    }
+
+    @Test
+    fun secondEngineReusesH3WithoutQuicHint() {
+        // Open question: HTTP/3 server info survives disableCache + HTTP_CACHE_DISK_NO_HTTP.
+        // A failure here must stay obvious — do not accept h2 or a thrown connect error.
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
+            .execute()
+            .use { response ->
+                assertEquals(Protocol.HTTP_3, response.protocol)
+            }
+        val first = installedEngine
+        SarieBridge.uninstall()
+        // Storage dir is locked while the first engine is alive. Shutdown here is the test
+        // simulating process exit; SarieBridge never calls shutdown.
+        @Suppress("DEPRECATION")
+        first?.shutdown()
+        installedEngine = null
+        Metrics.resetForTest()
+
+        installCronet(quicHintHost = null)
+        OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
+            .execute()
+            .use { response ->
+                assertEquals(
+                    "second engine on the same storage path must negotiate h3 on its first " +
+                        "request with no QUIC hint (client saw ${response.protocol})",
+                    Protocol.HTTP_3,
+                    response.protocol,
+                )
+            }
+        assertCronetServed()
+    }
+
+    @Test
+    fun borrowedDiskCacheReachesOriginTwice() {
+        installBorrowed(diskCache = true)
+        val token = System.nanoTime().toString()
+        val url = "$ORIGIN/cacheable?t=$token"
+        val client = OkHttpClient()
+        repeat(2) {
+            client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                // Cronet path does not fabricate these. An OkHttp cache hit would set cacheResponse.
+                assertNull(response.networkResponse)
+                assertNull(response.cacheResponse)
+            }
+        }
+        assertCronetServed(minCount = 2)
+        // The emulator cannot read the host access log. Both GETs must reach the origin:
+        //   grep "cacheable?t=$token" scripts/bin/caddy-access.log
+        // Expect two JSON lines. One line means the borrowed HTTP_CACHE_DISK engine served
+        // the second GET and disableCache() did not stick.
+    }
+
+    @Test
+    fun wireHeaderParityStockVersusCronet() {
+        // Full echo of one request through stock and through the Sarie-built engine.
+        // Prepared to notice Cronet-added headers (do not strip or override them here),
+        // including Accept-Language, plus value changes on User-Agent, Accept-Encoding,
+        // and Connection. A diff fails this test so the set stays visible.
+        val request = Request.Builder()
+            .url("$ORIGIN/headers")
+            .header("X-Parity", "same")
+            .build()
+        val stockEcho = OkHttpClient().newCall(request).execute().use { it.body.string() }
+        Metrics.resetForTest()
+        installCronet(quicHintHost = null)
+        val cronetEcho = OkHttpClient().newCall(request).execute().use { it.body.string() }
+        assertCronetServed()
+
+        val stock = echoedHeaders(stockEcho)
+        val cronet = echoedHeaders(cronetEcho)
+        assertEquals(listOf("same"), cronet["X-Parity"])
+        val diff = headerDiff(stock, cronet)
+        assertTrue("wire header diff (Cronet-added names must be recorded, not stripped):\n$diff", diff.isEmpty())
+    }
+
+    /** Caddy `headers.tmpl`: `Name: [v1] [v2]`, plus a leading `Host: [...]` line. */
+    private fun echoedHeaders(body: String): Map<String, List<String>> {
+        val values = Regex("\\[([^\\]]*)\\]")
+        val headers = linkedMapOf<String, List<String>>()
+        for (line in body.lineSequence()) {
+            val colon = line.indexOf(':')
+            if (colon <= 0) continue
+            val name = line.substring(0, colon).trim()
+            val parsed = values.findAll(line.substring(colon + 1)).map { it.groupValues[1] }.toList()
+            if (name.isNotEmpty() && parsed.isNotEmpty()) headers[name] = parsed
+        }
+        return headers
+    }
+
+    private fun headerDiff(
+        stock: Map<String, List<String>>,
+        cronet: Map<String, List<String>>,
+    ): String {
+        val added = (cronet.keys - stock.keys).sorted()
+        val removed = (stock.keys - cronet.keys).sorted()
+        val changed = stock.keys.intersect(cronet.keys).filter { stock[it] != cronet[it] }.sorted()
+        return buildString {
+            if (added.isNotEmpty()) append("cronet-added: $added\n")
+            if (removed.isNotEmpty()) append("stock-only: $removed\n")
+            for (name in changed) append("$name stock=${stock[name]} cronet=${cronet[name]}\n")
+        }
     }
 }
