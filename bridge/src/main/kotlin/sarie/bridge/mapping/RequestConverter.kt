@@ -47,8 +47,10 @@ class RequestConverter(
         okHttpRequest: Request,
         readTimeoutMillis: Long,
         writeTimeoutMillis: Long,
+        requestBodyEvents: RequestBodyEvents? = null,
+        onResponseHeadersStart: (() -> Unit)? = null,
     ): ConvertedRequest {
-        val callback = OkHttpBridgeCallback(readTimeoutMillis)
+        val callback = OkHttpBridgeCallback(readTimeoutMillis, onResponseHeadersStart)
 
         // The callback methods are lightweight (queue inserts); run them directly on Cronet's
         // internal thread to avoid extra thread hops.
@@ -98,7 +100,12 @@ class RequestConverter(
                 }
 
                 builder.setUploadDataProvider(
-                    UploadDataProviders.create(body, bodyReaderExecutor, writeTimeoutMillis),
+                    UploadDataProviders.create(
+                        body,
+                        bodyReaderExecutor,
+                        writeTimeoutMillis,
+                        requestBodyEvents,
+                    ),
                     uploadDataProviderExecutor,
                 )
             }

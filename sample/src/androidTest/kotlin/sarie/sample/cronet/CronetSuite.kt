@@ -2,6 +2,7 @@ package sarie.sample.cronet
 
 import sarie.bridge.Metrics
 import sarie.bridge.SarieBridge
+import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -476,6 +477,33 @@ class CronetSuite {
         // Custom authenticator traffic stays stock by design (Metis B2: 407s crash follow-ups;
         // policy diverts the whole client pre-send with reason=authenticator).
         assertStockServed(Metrics.Reason.authenticator)
+    }
+
+    @Test
+    fun networkInterceptorsSeeRequestResponseAndHttp3() {
+        NetworkParity.loggingAndChuckerSeeHttp3 {
+            installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        }
+    }
+
+    @Test
+    fun networkInterceptorHeaderReachesOrigin() {
+        NetworkParity.addedHeaderReachesOrigin({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorUrlAndProceedGuards() {
+        NetworkParity.urlGuardsThrowStockMessages({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorReadTimeoutAbortsStall() {
+        NetworkParity.readTimeoutFromNetworkInterceptorAborts({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun eventListenerHeaderOrderAroundCronetHandoff() {
+        NetworkParity.eventListenerHeaderOrder({ installCronet(quicHintHost = null) }, ORIGIN)
     }
 
     @Test

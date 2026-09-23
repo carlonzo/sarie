@@ -94,11 +94,9 @@ abstract class VerifyOkHttpPinTask : DefaultTask() {
     }
 }
 
-private const val CONNECT_INTERCEPTOR_ENTRY = "okhttp3/internal/connection/ConnectInterceptor.class"
-
 /**
- * Re-hashes ConnectInterceptor.class inside the recipe's okhttp artifacts (android AAR + jvm
- * jar) and compares against the script-generated goldens; any drift fails the build unless
+ * Re-hashes every registered target class inside the recipe's okhttp artifacts (android AAR +
+ * jvm jar) and compares against the script-generated goldens; any drift fails the build unless
  * [VerifyOkHttpFingerprintTask.allowUnfingerprinted] downgrades it to a warning (the structural
  * bytecode guard still hard-fails shape drift).
  */
@@ -133,16 +131,24 @@ abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
         val recipe = RecipeRegistry.forVersion(versions.first())
         val allow = allowUnfingerprinted.get()
         val byExtension = fingerprintArtifacts.files.associateBy { it.extension }
-        for (variant in Variant.entries) {
-            val coordinates = recipe.fingerprintArtifacts.getValue(variant)
-            val artifact = byExtension[if (variant == Variant.ANDROID) "aar" else "jar"] ?: continue
-            val expected = recipe.fingerprints.getValue(variant)
-            val actual = connectInterceptorSha256(artifact, coordinates, variant)
-            val failure = fingerprintFailure(coordinates, expected, actual, allow) ?: continue
-            if (allow) {
-                logger.warn("[okhttp-cronet] $failure")
-            } else {
-                throw GradleException(failure)
+        for (target in InstrumentTarget.entries) {
+            for (variant in Variant.entries) {
+                val coordinates = recipe.fingerprintArtifacts.getValue(variant)
+                val artifact = byExtension[if (variant == Variant.ANDROID) "aar" else "jar"] ?: continue
+                val expected = recipe.fingerprints.getValue(target).getValue(variant)
+                val actual = classEntrySha256(artifact, coordinates, variant, target.classEntry)
+                val failure = fingerprintFailure(
+                    coordinates,
+                    expected,
+                    actual,
+                    allow,
+                    target.classEntry,
+                ) ?: continue
+                if (allow) {
+                    logger.warn("[okhttp-cronet] $failure")
+                } else {
+                    throw GradleException(failure)
+                }
             }
         }
     }
@@ -154,9 +160,10 @@ internal fun fingerprintFailure(
     expected: String,
     actual: String,
     allowUnfingerprinted: Boolean,
+    classEntry: String = InstrumentTarget.CONNECT_INTERCEPTOR.classEntry,
 ): String? {
     if (actual.equals(expected, ignoreCase = true)) return null
-    val message = "okhttp-cronet: ConnectInterceptor.class fingerprint mismatch for " +
+    val message = "okhttp-cronet: $classEntry fingerprint mismatch for " +
         "$coordinates (expected=$expected actual=$actual); the pinned rewrite is not safe " +
         "for this okhttp build. Align your okhttp version with the pinned one."
     return if (allowUnfingerprinted) {
@@ -167,35 +174,50 @@ internal fun fingerprintFailure(
     }
 }
 
+internal fun classEntrySha256(
+    artifact: File,
+    coordinates: String,
+    variant: Variant,
+    classEntry: String,
+): String = Fingerprint.sha256Hex(classEntryBytes(artifact, coordinates, variant, classEntry))
+
 internal fun connectInterceptorSha256(artifact: File, coordinates: String, variant: Variant): String =
-    Fingerprint.sha256Hex(connectInterceptorBytes(artifact, coordinates, variant))
+    classEntrySha256(artifact, coordinates, variant, InstrumentTarget.CONNECT_INTERCEPTOR.classEntry)
 
 /**
- * Extracts ConnectInterceptor.class from the variant's artifact: ANDROID = AAR with the class
- * nested inside classes.jar; JVM = flat jar with the class at the top level.
+ * Extracts [classEntry] from the variant's artifact: ANDROID = AAR with the class nested
+ * inside classes.jar; JVM = flat jar with the class at the top level.
  */
-internal fun connectInterceptorBytes(artifact: File, coordinates: String, variant: Variant): ByteArray {
+internal fun classEntryBytes(
+    artifact: File,
+    coordinates: String,
+    variant: Variant,
+    classEntry: String,
+): ByteArray {
     ZipInputStream(artifact.inputStream().buffered()).use { zip ->
         var entry = zip.nextEntry
         while (entry != null) {
-            if (entry.name == CONNECT_INTERCEPTOR_ENTRY) return zip.readBytes()
+            if (entry.name == classEntry) return zip.readBytes()
             if (variant == Variant.ANDROID && entry.name == "classes.jar") {
-                return connectInterceptorEntry(zip.readBytes())
+                return classEntryInJar(zip.readBytes(), classEntry)
                     ?: throw GradleException(
-                        "okhttp-cronet: $CONNECT_INTERCEPTOR_ENTRY not found inside classes.jar of $coordinates",
+                        "okhttp-cronet: $classEntry not found inside classes.jar of $coordinates",
                     )
             }
             entry = zip.nextEntry
         }
-        throw GradleException("okhttp-cronet: $CONNECT_INTERCEPTOR_ENTRY not found in $coordinates")
+        throw GradleException("okhttp-cronet: $classEntry not found in $coordinates")
     }
 }
 
-private fun connectInterceptorEntry(jarBytes: ByteArray): ByteArray? {
+internal fun connectInterceptorBytes(artifact: File, coordinates: String, variant: Variant): ByteArray =
+    classEntryBytes(artifact, coordinates, variant, InstrumentTarget.CONNECT_INTERCEPTOR.classEntry)
+
+private fun classEntryInJar(jarBytes: ByteArray, classEntry: String): ByteArray? {
     ZipInputStream(jarBytes.inputStream().buffered()).use { jarZip ->
         var entry = jarZip.nextEntry
         while (entry != null) {
-            if (entry.name == CONNECT_INTERCEPTOR_ENTRY) return jarZip.readBytes()
+            if (entry.name == classEntry) return jarZip.readBytes()
             entry = jarZip.nextEntry
         }
     }

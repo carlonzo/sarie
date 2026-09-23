@@ -13,7 +13,8 @@ data class Recipe(
     val okhttpVersion: String,
     val guard: GuardSpec,
     val fingerprintArtifacts: Map<Variant, String>,
-    val fingerprints: Map<Variant, String>,
+    /** One class-file fingerprint per rewrite target, per artifact variant. */
+    val fingerprints: Map<InstrumentTarget, Map<Variant, String>>,
 )
 
 /** Build-time verdict for a resolved okhttp version against the supported allowlist. */
@@ -95,10 +96,22 @@ object RecipeRegistry {
             Variant.ANDROID to "com.squareup.okhttp3:okhttp-android:$version",
             Variant.JVM to "com.squareup.okhttp3:okhttp-jvm:$version",
         ),
-        fingerprints = checkNotNull(GoldenFingerprints.fingerprintsFor(version)) {
-            "no generated fingerprints for okhttp $version; rerun plugin/scripts/generate-fingerprints.sh"
-        },
+        fingerprints = fingerprintsForRecipe(version),
     )
+
+    private fun fingerprintsForRecipe(version: String): Map<InstrumentTarget, Map<Variant, String>> {
+        val generated = checkNotNull(GoldenFingerprints.fingerprintsFor(version)) {
+            "no generated fingerprints for okhttp $version; rerun plugin/scripts/generate-fingerprints.sh"
+        }
+        for (target in InstrumentTarget.entries) {
+            val byVariant = generated[target]
+            check(byVariant != null && Variant.entries.all { it in byVariant }) {
+                "no generated fingerprints for okhttp $version target $target; " +
+                    "rerun plugin/scripts/generate-fingerprints.sh"
+            }
+        }
+        return generated
+    }
 }
 
 internal data class OkHttpVersion(val major: Int, val minor: Int, val patch: Int) : Comparable<OkHttpVersion> {

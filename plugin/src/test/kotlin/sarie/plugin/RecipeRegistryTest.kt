@@ -15,8 +15,12 @@ class RecipeRegistryTest {
         assertNotNull(recipe)
         assertEquals("com.squareup.okhttp3:okhttp-android:5.5.0", recipe!!.fingerprintArtifacts.getValue(Variant.ANDROID))
         assertEquals("com.squareup.okhttp3:okhttp-jvm:5.5.0", recipe.fingerprintArtifacts.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.OKHTTP_ANDROID_5_5_0, recipe.fingerprints.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.OKHTTP_JVM_5_5_0, recipe.fingerprints.getValue(Variant.JVM))
+        val connect = recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR)
+        val callServer = recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR)
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_ANDROID_5_5_0, connect.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_JVM_5_5_0, connect.getValue(Variant.JVM))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_ANDROID_5_5_0, callServer.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_JVM_5_5_0, callServer.getValue(Variant.JVM))
     }
 
     @Test
@@ -25,8 +29,12 @@ class RecipeRegistryTest {
         assertNotNull(recipe)
         assertEquals("com.squareup.okhttp3:okhttp-android:5.4.0", recipe!!.fingerprintArtifacts.getValue(Variant.ANDROID))
         assertEquals("com.squareup.okhttp3:okhttp-jvm:5.4.0", recipe.fingerprintArtifacts.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.OKHTTP_ANDROID_5_4_0, recipe.fingerprints.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.OKHTTP_JVM_5_4_0, recipe.fingerprints.getValue(Variant.JVM))
+        val connect = recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR)
+        val callServer = recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR)
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_ANDROID_5_4_0, connect.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_JVM_5_4_0, connect.getValue(Variant.JVM))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_ANDROID_5_4_0, callServer.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_JVM_5_4_0, callServer.getValue(Variant.JVM))
     }
 
     @Test

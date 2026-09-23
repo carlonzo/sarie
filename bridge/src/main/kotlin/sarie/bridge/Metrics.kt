@@ -17,6 +17,7 @@ object Metrics {
         cleartext,
         websocket,
         cache,
+        /** Retired. Network interceptors run before the Cronet hop and no longer produce this. */
         network_interceptors,
         h2_prior_knowledge,
         authenticator,
