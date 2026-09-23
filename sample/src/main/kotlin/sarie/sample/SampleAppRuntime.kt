@@ -2,10 +2,11 @@ package sarie.sample
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import java.io.File
+import okhttp3.OkHttpClient
+import org.chromium.net.CronetEngine
 import sarie.bridge.DefaultPolicy
 import sarie.bridge.SarieBridge
-import java.io.File
-import org.chromium.net.CronetEngine
 
 /**
  * Test-host installer. Only ever invoked from androidTest code: [ApplicationProvider] lives on
@@ -13,17 +14,22 @@ import org.chromium.net.CronetEngine
  * point (main sources compile against the cronet-api stubs only).
  *
  * Modes (instrumentation arg `mode`, default "stock"):
- * - "cronet": real embedded engine + baseline policy (allowlist + loopback HTTPS on).
- * - "fallback": same engine, policy permanently disabled -> every request falls back (disabled).
+ * - "cronet": Sarie builds the engine (`SarieBridge.install(context, client, configure)`).
+ *   QUIC hints go through [configure]. Brotli stays off. The bridge never shuts the engine down.
+ * - "borrowed": host-built engine passed to `SarieBridge.install(engine)`. Used by the HTTP
+ *   cache bypass test and the brotli decode test. No pins.
+ * - "fallback": Sarie-built engine, policy permanently disabled -> every request falls back.
  * - "stock": no snapshot; OkHttp runs entirely stock.
  *
- * CronetSuite passes [quicHintHost]/[quicHintPort] to force first-connection HTTP/3 and
- * [freshStorage] for an isolated storage dir (no cross-test QUIC server-config caching).
- * [lastEngine] exposes the borrowed engine so the owning suite can stop it in @After.
+ * [freshStorage] applies only to the borrowed engine. The Sarie-built engine always uses
+ * `<noBackupFilesDir>/sarie-cronet`, which [configure] cannot replace.
+ * [lastEngine] is the engine from the snapshot so the owning suite can stop it in @After.
+ * This object does not call [CronetEngine.shutdown].
  */
 object SampleAppRuntime {
 
     const val MODE_CRONET = "cronet"
+    const val MODE_BORROWED = "borrowed"
     const val MODE_FALLBACK = "fallback"
     const val MODE_STOCK = "stock"
 
@@ -36,29 +42,25 @@ object SampleAppRuntime {
         quicHintPort: Int = 443,
         freshStorage: Boolean = false,
         netLog: Boolean = false,
+        client: OkHttpClient? = null,
+        brotli: Boolean = false,
+        diskCache: Boolean = false,
     ) {
         if (mode == MODE_STOCK) return
         val context: Context = ApplicationProvider.getApplicationContext()
-        val builder = CronetEngine.Builder(context)
-            .enableQuic(true)
-            .enableHttp2(true)
-            .enableBrotli(true)
-            // The Caddy origin chains to the NSC raw-resource CA (a local trust anchor).
-            // Upstream default (true): chains anchored by local (NSC) CAs bypass pinning.
-            // Note: this flag does NOT enable local-root QUIC - that needed the origin to
-            // serve the full chain (scripts/gen-certs.sh fullchain.pem), netlog-verified.
-            .enablePublicKeyPinningBypassForLocalTrustAnchors(true)
-        if (freshStorage) {
-            val dir = File(context.cacheDir, "cronet-fresh-" + System.nanoTime())
-            dir.mkdirs()
-            builder.setStoragePath(dir.absolutePath)
+        val policy = samplePolicy(mode)
+        if (mode == MODE_BORROWED) {
+            installBorrowed(context, policy, quicHintHost, quicHintPort, freshStorage, brotli, diskCache)
         } else {
-            builder.setStoragePath(context.cacheDir.absolutePath)
+            // Sarie-built. Do not call enableBrotli(true) and do not shut the engine down.
+            SarieBridge.install(context, client, policy) { builder ->
+                if (quicHintHost != null) {
+                    builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
+                }
+            }
         }
-        if (quicHintHost != null) {
-            builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
-        }
-        val engine = builder.build()
+        val engine = SarieBridge.snapshot()?.engine
+            ?: error("SarieBridge.install did not publish an engine")
         if (netLog) {
             // Unique per engine: several suite engines may capture netlogs in one run.
             @Suppress("DEPRECATION")
@@ -68,25 +70,59 @@ object SampleAppRuntime {
             )
         }
         lastEngine = engine
-        val policy = DefaultPolicy(
-            allowedOrigins = setOf(
-                "10.0.2.2:8443",
-                "localhost",
-                "127.0.0.1",
-                // H3-only public origin (known-public-root cert): the embedded engine's QUIC
-                // proof verifier rejects locally-anchored chains outright, so the on-device
-                // h3 proof needs one allowlisted public host (see CronetSuite KDoc).
-                "cloudflare-quic.com",
-            ),
-            allowLoopbackHttps = true,
-            enabled = when (mode) {
-                MODE_FALLBACK -> ({ false })
-                MODE_CRONET -> ({ System.getProperty("okhttp.cronet.enabled", "true").toBoolean() })
-                else -> throw IllegalArgumentException("unknown mode: $mode")
-            },
-        )
-        SarieBridge.install(engine, policy)
     }
+
+    /**
+     * Host-built engine. [brotli] is the brotli-decode test; [diskCache] is the cache-bypass
+     * test (`HTTP_CACHE_DISK`). Pin bypass stays on so chains anchored by the NSC test CA are
+     * not treated as pin failures — the Sarie-built engine forces that flag off instead.
+     */
+    private fun installBorrowed(
+        context: Context,
+        policy: DefaultPolicy,
+        quicHintHost: String?,
+        quicHintPort: Int,
+        freshStorage: Boolean,
+        brotli: Boolean,
+        diskCache: Boolean,
+    ) {
+        val builder = CronetEngine.Builder(context)
+            .enableQuic(true)
+            .enableHttp2(true)
+            .enableBrotli(brotli)
+            .enablePublicKeyPinningBypassForLocalTrustAnchors(true)
+        val storage = if (freshStorage || diskCache) {
+            File(context.cacheDir, "cronet-borrowed-" + System.nanoTime()).apply { mkdirs() }
+        } else {
+            context.cacheDir
+        }
+        builder.setStoragePath(storage.absolutePath)
+        if (diskCache) {
+            builder.enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, 10L * 1024 * 1024)
+        }
+        if (quicHintHost != null) {
+            builder.addQuicHint(quicHintHost, quicHintPort, quicHintPort)
+        }
+        SarieBridge.install(builder.build(), policy)
+    }
+
+    private fun samplePolicy(mode: String): DefaultPolicy = DefaultPolicy(
+        allowedOrigins = setOf(
+            "10.0.2.2:8443",
+            "localhost",
+            "127.0.0.1",
+            // H3-only public origin (known-public-root cert): the embedded engine's QUIC
+            // proof verifier rejects locally-anchored chains outright, so the on-device
+            // h3 proof needs one allowlisted public host (see CronetSuite KDoc).
+            "cloudflare-quic.com",
+        ),
+        allowLoopbackHttps = true,
+        enabled = when (mode) {
+            MODE_FALLBACK -> ({ false })
+            MODE_CRONET, MODE_BORROWED -> ({ System.getProperty("okhttp.cronet.enabled", "true").toBoolean() })
+            else -> throw IllegalArgumentException("unknown mode: $mode")
+        },
+    )
 
     /** True when instrumentation args request Cronet NetLog capture (h3 diagnostics). */
     val netLogRequested: Boolean =

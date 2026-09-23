@@ -117,6 +117,19 @@ class SarieBridgeTest {
     }
 
     @Test
+    fun `borrowed install is not sarie-built and records no pins or provider`() {
+        val engine = FakeCronetEngine()
+        SarieBridge.install(engine, policy, mapper)
+
+        val snap = SarieBridge.snapshot()!!
+        assertFalse(snap.sarieBuilt)
+        assertTrue(snap.installedPins.isEmpty())
+        assertNull(snap.providerName)
+        assertNull(snap.providerVersion)
+        assertEquals(0, engine.shutdownCalls)
+    }
+
+    @Test
     fun `uninstall drops snapshot and disables`() {
         SarieBridge.install(FakeCronetEngine(), policy, mapper)
         SarieBridge.uninstall()

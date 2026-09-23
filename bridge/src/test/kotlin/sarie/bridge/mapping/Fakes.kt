@@ -149,7 +149,13 @@ class FakeUrlRequestBuilder(
         return this
     }
 
-    override fun disableCache(): UrlRequest.Builder = this
+    var cacheDisabled = false
+        private set
+
+    override fun disableCache(): UrlRequest.Builder {
+        cacheDisabled = true
+        return this
+    }
 
     override fun setPriority(priority: Int): UrlRequest.Builder = this
 

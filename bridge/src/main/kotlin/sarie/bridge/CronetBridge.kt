@@ -8,6 +8,7 @@ import sarie.bridge.mapping.ResponseConverter
 import java.io.IOException
 import java.net.ProtocolException
 import java.net.SocketTimeoutException
+import javax.net.ssl.SSLPeerUnverifiedException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -27,6 +28,7 @@ import okio.BufferedSource
 import okio.ForwardingSource
 import okio.buffer
 import org.chromium.net.CronetException
+import org.chromium.net.NetworkException
 import org.chromium.net.UrlRequest
 
 /**
@@ -63,8 +65,10 @@ import org.chromium.net.UrlRequest
  * call was not canceled and `client.retryOnConnectionFailure` is true. Never after
  * onResponseStarted (the server may have acted on the request), never for non-idempotent
  * methods, and no retry for header-wait timeouts (stock treats InterruptedIOException the same
- * way). Bodyless methods have no request body, so re-running the converter has no replay
- * hazard. Each retry is counted in [Metrics.retries].
+ * way). A pinning failure (`NetworkException.cronetInternalErrorCode == -150`) is mapped to
+ * [SSLPeerUnverifiedException] before that decision and is not retried; the call is not handed
+ * to stock after Cronet has started. Bodyless methods have no request body, so re-running the
+ * converter has no replay hazard. Each retry is counted in [Metrics.retries].
  *
  * Cancellation: 5-step ordered protocol (Metis B3) — pre-start checks plus a per-call
  * EventListener (public Call.addEventListener) that delivers exactly one engine cancel;
@@ -78,6 +82,9 @@ object CronetBridge {
     private const val CANCELED_MESSAGE = "Canceled"
     private const val PROXY_AUTH_MESSAGE =
         "Received HTTP_PROXY_AUTH (407) code while not using proxy"
+
+    /** Chromium `ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN`. */
+    private const val ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN = -150
 
     /** Methods safe to retry once on a pre-headers transport failure (RFC idempotent). */
     private val IDEMPOTENT_METHODS = setOf("GET", "HEAD", "OPTIONS")
@@ -183,16 +190,32 @@ object CronetBridge {
         }
     }
 
+    /** Stock's message prefix. Mapped before [isRetryable], and excluded there if it leaks through. */
+    private fun mapPinningFailure(error: IOException): IOException {
+        if (error is NetworkException &&
+            error.cronetInternalErrorCode == ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN
+        ) {
+            return SSLPeerUnverifiedException("Certificate pinning failure!")
+        }
+        return error
+    }
+
     /**
      * Whether a pre-headers failure qualifies for the single retry: transport-level
-     * CronetException only (header-wait timeouts and cancellations do not qualify), idempotent
-     * method, live call, and the stock `retryOnConnectionFailure` setting honored.
+     * CronetException only (header-wait timeouts, cancellations, and certificate-pin failures
+     * do not qualify), idempotent method, live call, and the stock `retryOnConnectionFailure`
+     * setting honored.
      */
-    private fun isRetryable(e: IOException, call: RealCall, request: Request): Boolean =
-        e is CronetException &&
+    private fun isRetryable(e: IOException, call: RealCall, request: Request): Boolean {
+        if (e is SSLPeerUnverifiedException) return false
+        if (e is NetworkException && e.cronetInternalErrorCode == ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN) {
+            return false
+        }
+        return e is CronetException &&
             !call.isCanceled() &&
             request.method in IDEMPOTENT_METHODS &&
             call.client.retryOnConnectionFailure
+    }
 
     /** Waits for headers within the read-timeout budget; on stall the request is canceled. */
     private fun awaitHeaders(
@@ -208,7 +231,9 @@ object CronetBridge {
             throw SocketTimeoutException("Timed out waiting for response headers")
         } catch (e: ExecutionException) {
             // Unwrap so "Canceled"/CronetException surfaces with its own message.
-            throw (e.cause as? IOException) ?: IOException(e.cause ?: e)
+            // Pin failures become SSLPeerUnverifiedException before the retry decision.
+            val cause = (e.cause as? IOException) ?: IOException(e.cause ?: e)
+            throw mapPinningFailure(cause)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             handle.cancelUrlRequestOnce()

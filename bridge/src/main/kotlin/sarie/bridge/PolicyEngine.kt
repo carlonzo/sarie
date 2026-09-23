@@ -30,7 +30,7 @@ data class Decision(val allow: Boolean, val reason: Metrics.Reason?)
  * 12. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
  * 13. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
  * 14. dns !== Dns.SYSTEM -> dns
- * 15. certificate pins -> pins (any non-empty certificatePinner.pins)
+ * 15. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
  * 16. TLS/trust fingerprint mismatch -> trust (Metis B1)
  * 17. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
  *     -> content_encoding
@@ -71,7 +71,15 @@ object PolicyEngine {
             return Decision(false, Metrics.Reason.hostname_verifier)
         }
         if (input.dns !== Dns.SYSTEM) return Decision(false, Metrics.Reason.dns)
-        if (input.certificatePinner.pins.isNotEmpty()) return Decision(false, Metrics.Reason.pins)
+        if (!pinsSatisfied(
+                input.certificatePinner,
+                input.request.url.host,
+                snapshot.sarieBuilt,
+                snapshot.installedPins,
+            )
+        ) {
+            return Decision(false, Metrics.Reason.pins)
+        }
         if (trustMismatched(input)) return Decision(false, Metrics.Reason.trust)
         if (contentEncodingDenied(input)) return Decision(false, Metrics.Reason.content_encoding)
         if (isLoopback(input.request.url.host) && !snapshot.policy.allowLoopbackHttps) {
