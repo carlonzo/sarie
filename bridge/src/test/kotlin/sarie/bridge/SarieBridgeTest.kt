@@ -117,6 +117,19 @@ class SarieBridgeTest {
     }
 
     @Test
+    fun `borrowed install is not sarie-built and records no pins or provider`() {
+        val engine = FakeCronetEngine()
+        SarieBridge.install(engine, policy, mapper)
+
+        val snap = SarieBridge.snapshot()!!
+        assertFalse(snap.sarieBuilt)
+        assertTrue(snap.installedPins.isEmpty())
+        assertNull(snap.providerName)
+        assertNull(snap.providerVersion)
+        assertEquals(0, engine.shutdownCalls)
+    }
+
+    @Test
     fun `uninstall drops snapshot and disables`() {
         SarieBridge.install(FakeCronetEngine(), policy, mapper)
         SarieBridge.uninstall()
@@ -189,12 +202,13 @@ class SarieBridgeTest {
     }
 
     @Test
-    fun `reason enum covers all 17 values`() {
+    fun `reason enum covers all 19 values`() {
         assertEquals(
             listOf(
                 "disabled", "engine_missing", "tag_opt_out", "allowlist", "cleartext", "websocket",
                 "cache", "network_interceptors", "h2_prior_knowledge", "authenticator", "proxy",
                 "socket_factory", "hostname_verifier", "pins", "trust", "protocols", "engine_cold",
+                "dns", "content_encoding",
             ),
             Metrics.Reason.values().map { it.name },
         )

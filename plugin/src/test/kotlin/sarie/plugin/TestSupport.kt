@@ -16,14 +16,21 @@ internal const val TRAMPOLINE_DESC: String = "(Lokhttp3/Interceptor\$Chain;)Lokh
 internal fun allRecipeVariants(): List<Pair<String, Variant>> =
     RecipeRegistry.recipes.keys.sorted().flatMap { version -> Variant.entries.map { version to it } }
 
-internal fun stock(version: String, variant: Variant): ByteArray =
+internal fun stock(
+    version: String,
+    variant: Variant,
+    fileName: String = InstrumentTarget.CONNECT_INTERCEPTOR.fileName,
+): ByteArray =
     checkNotNull(
         ConnectInterceptorRewriterTest::class.java.getResourceAsStream(
-            "/stock/$version/${variant.name.lowercase()}/ConnectInterceptor.class",
+            "/stock/$version/${variant.name.lowercase()}/$fileName",
         ),
     ) {
-        "missing golden resource /stock/$version/${variant.name.lowercase()}/ConnectInterceptor.class"
+        "missing golden resource /stock/$version/${variant.name.lowercase()}/$fileName"
     }.readBytes()
+
+internal fun callServerStock(version: String, variant: Variant): ByteArray =
+    stock(version, variant, InstrumentTarget.CALL_SERVER_INTERCEPTOR.fileName)
 
 /** Captures the recorded javap-style instruction strings of the intercept method. */
 internal fun recordedInsns(classBytes: ByteArray): List<String> {

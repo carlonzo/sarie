@@ -50,7 +50,7 @@ class BaselineSuite {
     @After
     fun tearDown() {
         server.close()
-        SarieBridge.uninstall()
+        SampleAppRuntime.reset()
         Metrics.resetForTest()
         installedMode = SampleAppRuntime.MODE_STOCK
     }

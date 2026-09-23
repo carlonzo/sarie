@@ -12,13 +12,20 @@ import org.objectweb.asm.Opcodes
 class ConnectInterceptorGuardVisitorTest {
 
     @Test
-    fun `target name matches only the exact ConnectInterceptor class`() {
+    fun `target name matches exactly the registered classes`() {
         assertTrue(isTargetClass("okhttp3.internal.connection.ConnectInterceptor"))
+        assertTrue(isTargetClass("okhttp3.internal.http.CallServerInterceptor"))
+        assertTrue(isTargetClass("okhttp3.Cache\$Entry"))
+        assertTrue(isTargetClass("okhttp3.internal.cache.CacheStrategy\$Factory"))
         for (name in listOf(
             "okhttp3.internal.connection.ConnectInterceptorKt",
             "okhttp3.internal.connection.ConnectInterceptor\$Chain",
             "okhttp3.internal.connection.ConnectInterceptorFactory",
+            "okhttp3.internal.http.CallServerInterceptorKt",
             "okhttp3.Interceptor",
+            "okhttp3.Cache",
+            "okhttp3.internal.cache.CacheStrategy",
+            "okhttp3.internal.cache.CacheInterceptor",
             "com.example.Foo",
             "",
         )) {

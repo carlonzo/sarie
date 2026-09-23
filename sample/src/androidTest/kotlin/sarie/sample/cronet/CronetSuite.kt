@@ -1,26 +1,41 @@
 package sarie.sample.cronet
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import sarie.bridge.Metrics
 import sarie.bridge.SarieBridge
+import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
+import java.io.File
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.Random
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import javax.net.ssl.SSLPeerUnverifiedException
 import okhttp3.Authenticator
+import okhttp3.Cache
+import okhttp3.CacheControl
+import okhttp3.Call
+import okhttp3.CertificatePinner
+import okhttp3.EventListener
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.Response
+import okhttp3.Route
 import okio.BufferedSink
 import org.chromium.net.CronetEngine
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -68,15 +83,12 @@ class CronetSuite {
 
     @After
     fun tearDown() {
-        SarieBridge.uninstall()
-        installedEngine?.let { engine ->
-            if (SampleAppRuntime.netLogRequested) {
-                @Suppress("DEPRECATION")
-                engine.stopNetLog()
-            }
-            @Suppress("DEPRECATION") // suite owns these engines; stop them to keep the emulator healthy
-            engine.shutdown()
+        if (SampleAppRuntime.netLogRequested) {
+            @Suppress("DEPRECATION")
+            installedEngine?.stopNetLog()
         }
+        // Stops the engine and wipes the Sarie storage dir (persisted QUIC state).
+        SampleAppRuntime.reset()
         installedEngine = null
         Metrics.resetForTest()
     }
@@ -89,6 +101,22 @@ class CronetSuite {
             quicHintPort = quicHintPort,
             freshStorage = true,
             netLog = SampleAppRuntime.netLogRequested,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+    }
+
+    /** Borrowed host-built engine. [brotli] and [diskCache] are the two tests that need one. */
+    private fun installBorrowed(
+        brotli: Boolean = false,
+        diskCache: Boolean = false,
+        quicHintHost: String? = null,
+    ) {
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_BORROWED,
+            quicHintHost = quicHintHost,
+            freshStorage = true,
+            brotli = brotli,
+            diskCache = diskCache,
         )
         installedEngine = SampleAppRuntime.lastEngine
     }
@@ -112,9 +140,8 @@ class CronetSuite {
 
     @Test
     fun h3NegotiatedAgainstPublicOrigin() {
-        // cloudflare-quic.com serves HTTP/3 ONLY (no TCP listener), so the request cannot
-        // downgrade to h2: if this returns, the device negotiated real h3 through the
-        // trampoline. Its cert chains to a known public root, which the embedded engine's
+        // cloudflare-quic.com also serves h2 over TCP now (checked 2026-09-23), so the
+        // assertion below, not the origin, is what proves h3 through the trampoline. Its cert chains to a known public root, which the embedded engine's
         // QUIC proof verifier requires - locally-anchored CAs are rejected (see the class
         // KDoc and h2LocalOriginWhileQuicBlocked).
         installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
@@ -305,11 +332,9 @@ class CronetSuite {
             assertEquals("gzip-payload-ok", response.body.string())
         }
 
-        // (b) Unencoded response: the bridge keeps Content-Length (identity passthrough
-        // clause of keepEncodingAffectedHeaders). Pinned cronet-embedded 143 REPLACES the
-        // caller's Accept-Encoding with its own "gzip, deflate, br" (observed server-side),
-        // so an identity request on /compress/gzip is not expressible on the Cronet path;
-        // an unencoded endpoint pins the same bridge behavior.
+        // (b) Unencoded response: the bridge keeps Content-Length. An explicit
+        // Accept-Encoding: identity is denied (content_encoding), so /ok pins that
+        // behavior on the Cronet path. The Sarie-built engine advertises gzip, deflate.
         client.newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertNull(response.header("Content-Encoding"))
@@ -317,10 +342,15 @@ class CronetSuite {
             assertEquals("ok", response.body.string())
         }
 
-        // (c) Brotli: the engine's own Accept-Encoding always includes br, so Cronet decodes
-        // the br response exactly like gzip and the bridge strips the encoding headers -
-        // raw brotli bytes are never surfaced to OkHttp (which itself cannot decode br).
-        client.newCall(Request.Builder().url("$ORIGIN/compress/br").build()).execute().use { response ->
+        assertCronetServed(minCount = 2)
+    }
+
+    @Test
+    fun brotliDecodedOnBorrowedEngine() {
+        // /compress/br forces Content-Encoding: br. The Sarie-built engine leaves brotli off,
+        // so the successful decode runs on a borrowed engine that enables it.
+        installBorrowed(brotli = true)
+        OkHttpClient().newCall(Request.Builder().url("$ORIGIN/compress/br").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertNull(
                 "expected Cronet to decode br, headers=${response.headers}",
@@ -328,7 +358,7 @@ class CronetSuite {
             )
             assertEquals("br-payload-ok", response.body.string())
         }
-        assertCronetServed(minCount = 3)
+        assertCronetServed()
     }
 
     @Test
@@ -336,13 +366,26 @@ class CronetSuite {
         installCronet(quicHintHost = null)
         val client = OkHttpClient()
 
-        // (a) An explicit caller Accept-Encoding does NOT reach the wire on the pinned engine
-        // (cronet-embedded 143.7445.0, observed server-side): the engine replaces it with its
-        // own "gzip, deflate, br" and transparently decodes. There is no per-request control
-        // (no API on UrlRequest.Builder; the mapper hook also runs at the builder level, but
-        // the replacement happens natively at request execution) and engine-level
-        // enableBrotli only affects brotli ADVERTISING - so the bridge keeps Cronet's decode
-        // and strips Content-Encoding/Content-Length for all-engine-handled encodings.
+        // Default request: no Accept-Encoding, so the call stays on Cronet. The Sarie-built
+        // engine has brotli off and advertises gzip, deflate.
+        client.newCall(Request.Builder().url("$ORIGIN/headers").build()).execute().use { response ->
+            assertEquals(200, response.code)
+            val echoed = response.body.string()
+            println("AE-ECHO-BEGIN\n$echoed\nAE-ECHO-END")
+            assertTrue(
+                "Sarie-built engine must advertise gzip, deflate (no br), got:\n$echoed",
+                echoed.contains("Accept-Encoding: [gzip, deflate]"),
+            )
+            assertFalse(
+                "brotli must not be advertised on the Sarie-built engine, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [gzip, deflate, br]") || echoed.contains(", br]"),
+            )
+        }
+        assertCronetServed()
+
+        Metrics.resetForTest()
+
+        // Explicit identity: the app owns decoding, so the call falls back to stock.
         client.newCall(
             Request.Builder().url("$ORIGIN/headers")
                 .header("Accept-Encoding", "identity")
@@ -350,36 +393,42 @@ class CronetSuite {
         ).execute().use { response ->
             assertEquals(200, response.code)
             val echoed = response.body.string()
-            println("AE-ECHO-BEGIN\n$echoed\nAE-ECHO-END")
+            println("AE-IDENTITY-ECHO-BEGIN\n$echoed\nAE-IDENTITY-ECHO-END")
             assertTrue(
-                "pinned engine must replace the caller Accept-Encoding, got:\n$echoed",
-                echoed.contains("Accept-Encoding: [gzip, deflate, br]"),
-            )
-            assertFalse(
-                "the caller's explicit Accept-Encoding must not survive:\n$echoed",
-                echoed.contains("[identity]"),
+                "stock must forward the caller Accept-Encoding, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [identity]"),
             )
         }
+        assertStockServed(Metrics.Reason.content_encoding)
+    }
 
-        // (b) Invariant (never double-decode, never a header/body mismatch): exactly ONE
-        // decode happens - the engine's - even when the caller asked for something else.
-        // If the bridge delivered encoded bytes with the headers stripped, this body would
-        // be raw gzip garbage; if it decoded AND OkHttp's BridgeInterceptor decoded, the
-        // GzipSource would throw on plaintext. Plaintext proves exactly one decode and
-        // consistent headers.
+    @Test
+    fun rangeRequestGoesViaCronetWithIdentityEncoding() {
+        installCronet(quicHintHost = null)
+        val client = OkHttpClient()
+
+        // No Accept-Encoding, but a Range header: BridgeInterceptor does not add gzip, and
+        // Chromium sends identity. The bridge must keep Content-Length.
         client.newCall(
-            Request.Builder().url("$ORIGIN/compress/gzip")
-                .header("Accept-Encoding", "identity")
+            Request.Builder().url("$ORIGIN/headers")
+                .header("Range", "bytes=0-")
                 .build(),
         ).execute().use { response ->
-            assertEquals(200, response.code)
-            assertNull(
-                "decoded body must not keep Content-Encoding, headers=${response.headers}",
-                response.header("Content-Encoding"),
+            assertTrue("unexpected status ${response.code}", response.code in 200..299)
+            val echoed = response.body.string()
+            println("RANGE-ECHO-BEGIN\n$echoed\nRANGE-ECHO-END")
+            assertTrue(
+                "expected Chromium Accept-Encoding identity, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [identity]"),
             )
-            assertEquals("gzip-payload-ok", response.body.string())
+            val length = response.header("Content-Length")
+            assertEquals(
+                "identity body must keep Content-Length, headers=${response.headers}",
+                echoed.toByteArray(Charsets.UTF_8).size.toString(),
+                length,
+            )
         }
-        assertCronetServed(minCount = 2)
+        assertCronetServed()
     }
 
     @Test
@@ -397,17 +446,14 @@ class CronetSuite {
             assertEquals(200, response.code)
             val echoed = response.body.string()
             println("HEADER-ECHO-BEGIN\n$echoed\nHEADER-ECHO-END")
-            // Pinned against cronet-embedded 143.7445.0 (observed, not assumed): the mapper
-            // adds both duplicate values, but the engine collapses them to the LAST value on
-            // the wire. Regression-visible contract for COMPATIBILITY.md: duplicate request
-            // headers do not survive the Cronet path - only the final value is sent.
+            // Repeated names are one field: ", "-joined. The server sees "one, two".
             assertTrue(
-                "expected only the last duplicate value on the wire, got:\n$echoed",
-                echoed.contains("X-Dup: [two]"),
+                "expected joined duplicate values on the wire, got:\n$echoed",
+                echoed.contains("X-Dup: [one, two]"),
             )
             assertFalse(
-                "earlier duplicate values must not reach the server, got:\n$echoed",
-                echoed.contains("[one]"),
+                "duplicates must not collapse to the last value, got:\n$echoed",
+                echoed.contains("X-Dup: [two]"),
             )
             // Host is derived from the URL by the engine stack.
             assertTrue(
@@ -463,19 +509,235 @@ class CronetSuite {
     }
 
     @Test
-    fun authenticatorRoutesToStockFallback() {
+    fun authenticatorRetries401OverCronet() {
         installCronet(quicHintHost = null)
+        val routes = mutableListOf<Route?>()
         val client = OkHttpClient.Builder()
-            .authenticator { _, _ -> null } // custom (non-NONE) authenticator -> stock contract
+            .authenticator { route, response ->
+                routes += route
+                if (response.request.header("Authorization") != null) {
+                    null
+                } else {
+                    response.request.newBuilder()
+                        .header("Authorization", "Bearer token")
+                        .build()
+                }
+            }
             .build()
 
         client.newCall(Request.Builder().url("$ORIGIN/auth").build()).execute().use { response ->
-            assertEquals(401, response.code)
-            assertEquals("unauthorized", response.body.string())
+            assertEquals(200, response.code)
+            assertEquals("ok", response.body.string())
+            // No quic hint, and local QUIC is blocked (h2LocalOriginWhileQuicBlocked),
+            // so this origin's Cronet response is HTTP_2. The plan's HTTP_3 end state
+            // is not observable here; two Cronet hops and route == null are.
+            assertEquals(Protocol.HTTP_2, response.protocol)
         }
-        // Custom authenticator traffic stays stock by design (Metis B2: 407s crash follow-ups;
-        // policy diverts the whole client pre-send with reason=authenticator).
-        assertStockServed(Metrics.Reason.authenticator)
+        assertEquals(listOf<Route?>(null), routes)
+        // 401 and the Authorization retry both stay on Cronet.
+        assertCronetServed(minCount = 2)
+    }
+
+    @Test
+    fun networkInterceptorsSeeRequestResponseAndHttp3() {
+        NetworkParity.loggingAndChuckerSeeHttp3 {
+            installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        }
+    }
+
+    @Test
+    fun networkInterceptorHeaderReachesOrigin() {
+        NetworkParity.addedHeaderReachesOrigin({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorUrlAndProceedGuards() {
+        NetworkParity.urlGuardsThrowStockMessages({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorReadTimeoutAbortsStall() {
+        NetworkParity.readTimeoutFromNetworkInterceptorAborts({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun eventListenerHeaderOrderAroundCronetHandoff() {
+        NetworkParity.eventListenerHeaderOrder({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun cacheableGetSecondRequestIsHitWithNullHandshake() {
+        // Local origin negotiates HTTP/2 (QUIC to this CA is blocked; see the class KDoc).
+        // A cache hit never re-enters the bridge, so the origin is not contacted again.
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        var cacheHits = 0
+        val client = OkHttpClient.Builder()
+            .cache(cache)
+            .eventListener(object : EventListener() {
+                override fun cacheHit(call: Call, response: Response) {
+                    cacheHits++
+                }
+            })
+            .build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNull(response.cacheResponse)
+                assertNull(response.handshake)
+            }
+            assertCronetServed()
+            val cronetAfterStore = Metrics.cronet.get()
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNotNull(response.cacheResponse)
+                assertNull(response.handshake)
+                assertNull(response.cacheResponse!!.handshake)
+            }
+            assertEquals(cronetAfterStore, Metrics.cronet.get())
+            assertEquals(1, cacheHits)
+            assertNull(Metrics.lastReason)
+        } finally {
+            cache.close()
+        }
+    }
+
+    @Test
+    fun etagRevalidationStaysOnCronet() {
+        // This origin negotiates HTTP/2, not HTTP/3 (local QUIC is blocked; see the class KDoc).
+        // The 304 is still the Cronet transport: Metrics.cronet and lastReason == null.
+        // Do not require Protocol.HTTP_3 here.
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/etag").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("\"sarie-etag\"", response.header("ETag"))
+                assertEquals("etag-body", response.body.string())
+            }
+            assertCronetServed()
+            client.newCall(Request.Builder().url("$ORIGIN/etag").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("etag-body", response.body.string())
+                assertNotNull(response.cacheResponse)
+                assertNotNull(response.networkResponse)
+                assertEquals(304, response.networkResponse!!.code)
+            }
+            assertCronetServed(minCount = 2)
+        } finally {
+            cache.close()
+        }
+    }
+
+    @Test
+    fun onlyIfCachedServesSarieEntry() {
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals("cacheable-ok", response.body.string())
+            }
+            val cronetAfterStore = Metrics.cronet.get()
+            client.newCall(
+                Request.Builder()
+                    .url("$ORIGIN/cacheable")
+                    .cacheControl(CacheControl.FORCE_CACHE)
+                    .build(),
+            ).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNotNull(response.cacheResponse)
+                assertNull(response.handshake)
+            }
+            assertEquals(cronetAfterStore, Metrics.cronet.get())
+            assertNull(Metrics.lastReason)
+        } finally {
+            cache.close()
+        }
+    }
+
+    @Test
+    fun killSwitchMissesSarieEntryAndStockRefetchHasHandshake() {
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertNull(response.handshake)
+                assertEquals("cacheable-ok", response.body.string())
+            }
+            assertCronetServed()
+            System.setProperty("okhttp.cronet.enabled", "false")
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertEquals("cacheable-ok", response.body.string())
+                assertNull(response.cacheResponse)
+                assertNotNull(response.networkResponse)
+                assertNotNull(response.handshake)
+            }
+            assertTrue(Metrics.okhttpFallback.get() >= 1)
+            assertEquals(Metrics.Reason.disabled, Metrics.lastReason)
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                assertNotNull(response.cacheResponse)
+                assertNotNull(response.handshake)
+                assertEquals("cacheable-ok", response.body.string())
+            }
+        } finally {
+            System.clearProperty("okhttp.cronet.enabled")
+            cache.close()
+        }
+    }
+
+    @Test
+    fun evictAllDropsSarieEntries() {
+        installCronet(quicHintHost = null)
+        val cache = newCache()
+        val client = OkHttpClient.Builder().cache(cache).build()
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable").build()).execute().use { response ->
+                assertEquals("cacheable-ok", response.body.string())
+            }
+            cache.evictAll()
+            assertFalse(cache.urls().hasNext())
+            val cronetAfterStore = Metrics.cronet.get()
+            client.newCall(
+                Request.Builder()
+                    .url("$ORIGIN/cacheable")
+                    .cacheControl(CacheControl.FORCE_CACHE)
+                    .build(),
+            ).execute().use { response ->
+                assertEquals(504, response.code)
+            }
+            assertEquals(cronetAfterStore, Metrics.cronet.get())
+        } finally {
+            cache.close()
+        }
+    }
+
+    private fun newCache(): Cache {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val dir = File(context.cacheDir, "okhttp-cache-" + System.nanoTime())
+        return Cache(dir, 10L * 1024 * 1024)
+    }
+
+    @Test
+    fun secondInstallReusesTheLiveEngine() {
+        // The first engine holds <noBackupFilesDir>/sarie-cronet. A second build on that path
+        // throws in Cronet; install must reuse the live engine instead.
+        installCronet(quicHintHost = null)
+        val first = installedEngine
+        installCronet(quicHintHost = null)
+        assertSame(first, installedEngine)
+        OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
+            assertEquals("ok", response.body.string())
+        }
+        assertCronetServed()
     }
 
     @Test
@@ -486,5 +748,202 @@ class CronetSuite {
             assertEquals("ok", response.body.string())
         }
         assertStockServed(Metrics.Reason.engine_missing)
+    }
+
+    @Test
+    fun correctPinNegotiatesH3() {
+        // Stock probe learns the live SPKI pin. The Sarie-built engine installs that pin and
+        // the same client is allowed through; cloudflare-quic.com is h3-only.
+        val pin = OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
+            .execute()
+            .use { response ->
+                CertificatePinner.pin(checkNotNull(response.handshake).peerCertificates.first())
+            }
+        Metrics.resetForTest()
+        val client = OkHttpClient.Builder()
+            .certificatePinner(CertificatePinner.Builder().add("cloudflare-quic.com", pin).build())
+            .build()
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_CRONET,
+            quicHintHost = "cloudflare-quic.com",
+            quicHintPort = 443,
+            client = client,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+
+        client.newCall(Request.Builder().url("https://cloudflare-quic.com/").build()).execute().use { response ->
+            assertEquals(Protocol.HTTP_3, response.protocol)
+            assertEquals(200, response.code)
+        }
+        assertCronetServed()
+    }
+
+    @Test
+    fun wrongPinIsPeerUnverifiedWithoutRetryOrStock() {
+        val client = OkHttpClient.Builder()
+            .certificatePinner(
+                CertificatePinner.Builder()
+                    .add("cloudflare-quic.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                    .build(),
+            )
+            .build()
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_CRONET,
+            quicHintHost = "cloudflare-quic.com",
+            quicHintPort = 443,
+            client = client,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+
+        val thrown = assertThrows(SSLPeerUnverifiedException::class.java) {
+            client.newCall(Request.Builder().url("https://cloudflare-quic.com/").build()).execute()
+        }
+        // Exact message: stock's failure includes the peer chain after this prefix.
+        assertEquals("Certificate pinning failure!", thrown.message)
+        assertEquals(0L, Metrics.retries.get())
+        assertTrue("pin failure must stay on Cronet, cronet=${Metrics.cronet.get()}", Metrics.cronet.get() >= 1)
+        assertEquals(0L, Metrics.okhttpFallback.get())
+        assertNull(Metrics.lastReason)
+    }
+
+    @Test
+    fun singleLabelWildcardPinFallsBack() {
+        // `*.0.2.2` matches 10.0.2.2 (one label) and has no Cronet equivalent, so it is not
+        // installed even when this client is the one Sarie built the engine from.
+        val client = OkHttpClient.Builder()
+            .certificatePinner(
+                CertificatePinner.Builder()
+                    .add("*.0.2.2", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                    .build(),
+            )
+            .build()
+        SampleAppRuntime.install(
+            mode = SampleAppRuntime.MODE_CRONET,
+            quicHintHost = null,
+            client = client,
+        )
+        installedEngine = SampleAppRuntime.lastEngine
+
+        try {
+            client.newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().close()
+        } catch (_: IOException) {
+            // Stock pin check or connect failure. The routing reason is what this test locks.
+        }
+        assertStockServed(Metrics.Reason.pins)
+    }
+
+    @Test
+    fun secondEngineReusesH3WithoutQuicHint() {
+        // Open question: HTTP/3 server info survives disableCache + HTTP_CACHE_DISK_NO_HTTP.
+        // A failure here must stay obvious — do not accept h2 or a thrown connect error.
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
+            .execute()
+            .use { response ->
+                assertEquals(Protocol.HTTP_3, response.protocol)
+            }
+        val first = installedEngine
+        SarieBridge.uninstall()
+        // Storage dir is locked while the first engine is alive. Shutdown here is the test
+        // simulating process exit; SarieBridge never calls shutdown.
+        @Suppress("DEPRECATION")
+        first?.shutdown()
+        installedEngine = null
+        Metrics.resetForTest()
+
+        installCronet(quicHintHost = null)
+        OkHttpClient().newCall(Request.Builder().url("https://cloudflare-quic.com/").build())
+            .execute()
+            .use { response ->
+                assertEquals(
+                    "second engine on the same storage path must negotiate h3 on its first " +
+                        "request with no QUIC hint (client saw ${response.protocol})",
+                    Protocol.HTTP_3,
+                    response.protocol,
+                )
+            }
+        assertCronetServed()
+    }
+
+    @Test
+    fun borrowedDiskCacheReachesOriginTwice() {
+        installBorrowed(diskCache = true)
+        val client = OkHttpClient()
+        val bodies = mutableListOf<String>()
+        repeat(2) {
+            client.newCall(Request.Builder().url("$ORIGIN/cacheable-unique").build()).execute().use { response ->
+                assertEquals(200, response.code)
+                // OkHttp's CacheInterceptor sets networkResponse on every network response, as in
+                // stock. No OkHttp cache here, so cacheResponse stays null.
+                assertNotNull(response.networkResponse)
+                assertNull(response.cacheResponse)
+                bodies += response.body.string()
+            }
+        }
+        assertEquals(2, bodies.size)
+        assertTrue(bodies.all { it.isNotBlank() })
+        assertTrue(
+            "borrowed HTTP_CACHE_DISK served the second GET (same body); disableCache() did not stick. " +
+                "bodies=$bodies",
+            bodies[0] != bodies[1],
+        )
+        assertCronetServed(minCount = 2)
+    }
+
+    @Test
+    fun wireHeaderParityStockVersusCronet() {
+        // Full echo of one request through stock and through the Sarie-built engine.
+        // Prepared to notice Cronet-added headers (do not strip or override them here),
+        // including Accept-Language, plus value changes on User-Agent, Accept-Encoding,
+        // and Connection. A diff fails this test so the set stays visible.
+        val request = Request.Builder()
+            .url("$ORIGIN/headers")
+            .header("X-Parity", "same")
+            .build()
+        val stockEcho = OkHttpClient().newCall(request).execute().use { it.body.string() }
+        Metrics.resetForTest()
+        installCronet(quicHintHost = null)
+        val cronetEcho = OkHttpClient().newCall(request).execute().use { it.body.string() }
+        assertCronetServed()
+
+        val stock = echoedHeaders(stockEcho)
+        val cronet = echoedHeaders(cronetEcho)
+        assertEquals(listOf("same"), cronet["X-Parity"])
+        // Recorded on cronet 500.0.2 (COMPATIBILITY row 24): Chromium adds an RFC 9218
+        // Priority header and advertises deflate next to gzip. Any other diff fails.
+        val diff = headerDiff(stock, cronet)
+        assertEquals(
+            "wire header diff changed; record it in COMPATIBILITY.md",
+            "cronet-added: [Priority]\nAccept-Encoding stock=[gzip] cronet=[gzip, deflate]\n",
+            diff,
+        )
+    }
+
+    /** Caddy `headers.tmpl`: `Name: [v1] [v2]`, plus a leading `Host: [...]` line. */
+    private fun echoedHeaders(body: String): Map<String, List<String>> {
+        val values = Regex("\\[([^\\]]*)\\]")
+        val headers = linkedMapOf<String, List<String>>()
+        for (line in body.lineSequence()) {
+            val colon = line.indexOf(':')
+            if (colon <= 0) continue
+            val name = line.substring(0, colon).trim()
+            val parsed = values.findAll(line.substring(colon + 1)).map { it.groupValues[1] }.toList()
+            if (name.isNotEmpty() && parsed.isNotEmpty()) headers[name] = parsed
+        }
+        return headers
+    }
+
+    private fun headerDiff(
+        stock: Map<String, List<String>>,
+        cronet: Map<String, List<String>>,
+    ): String {
+        val added = (cronet.keys - stock.keys).sorted()
+        val removed = (stock.keys - cronet.keys).sorted()
+        val changed = stock.keys.intersect(cronet.keys).filter { stock[it] != cronet[it] }.sorted()
+        return buildString {
+            if (added.isNotEmpty()) append("cronet-added: $added\n")
+            if (removed.isNotEmpty()) append("stock-only: $removed\n")
+            for (name in changed) append("$name stock=${stock[name]} cronet=${cronet[name]}\n")
+        }
     }
 }

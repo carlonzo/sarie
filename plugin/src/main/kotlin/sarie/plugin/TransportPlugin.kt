@@ -127,7 +127,7 @@ class TransportPlugin : Plugin<Project> {
             VerifyOkHttpFingerprintTask::class.java,
         ) { task ->
             task.group = "verification"
-            task.description = "SHA-256-checks ConnectInterceptor.class inside the recipe's okhttp " +
+            task.description = "SHA-256-checks every registered OkHttp target class inside the recipe's " +
                 "artifacts (android AAR + jvm jar); skipped with a warning for untested versions."
             task.okhttpVersions.set(versions)
             task.fingerprintArtifacts.from(artifactFiles)

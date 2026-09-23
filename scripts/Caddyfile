@@ -39,6 +39,23 @@
 		respond "ok" 200
 	}
 
+	# Stable body on every hit (no per-request token) so a second GET can be an OkHttp cache hit.
+	handle /cacheable {
+		header Cache-Control "public, max-age=3600"
+		respond "cacheable-ok" 200
+	}
+
+	# Immediately stale, with an ETag, so OkHttp revalidates. If-None-Match -> 304, else 200.
+	handle /etag {
+		header Cache-Control "max-age=0"
+		header ETag `"sarie-etag"`
+		@revalidate header If-None-Match *sarie-etag*
+		handle @revalidate {
+			respond "" 304
+		}
+		respond "etag-body" 200
+	}
+
 	# Echoes the request body; request headers are observed via /headers instead.
 	handle /echo {
 		respond * "{http.request.body}" 200
@@ -91,11 +108,27 @@
 		}
 	}
 
+	# 401 until the caller sends Authorization, then 200. Token-refresh authenticator test.
 	handle /auth {
-		respond "unauthorized" 401
+		@authorized header Authorization *
+		handle @authorized {
+			respond "ok" 200
+		}
+		handle {
+			respond "unauthorized" 401
+		}
 	}
 
 	handle /redirect {
 		redir * /ok 302
+	}
+
+	# A new body every origin hit. A Cronet HTTP-cache hit would repeat the first
+	# uuid (CronetSuite.borrowedDiskCacheReachesOriginTwice). Distinct from /cacheable,
+	# whose body stays stable so OkHttp can serve a disk hit.
+	handle /cacheable-unique {
+		header Cache-Control "public, max-age=300"
+		header Content-Type text/plain
+		respond "{http.request.uuid}" 200
 	}
 }

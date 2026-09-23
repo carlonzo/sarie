@@ -1,13 +1,14 @@
 package sarie.sample.minified
 
 import sarie.bridge.Metrics
-import sarie.bridge.SarieBridge
+import sarie.sample.NetworkParity
 import sarie.sample.SampleAppRuntime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -50,11 +51,8 @@ class MinifiedSuite {
     @After
     fun tearDown() {
         server.close()
-        SarieBridge.uninstall()
-        installedEngine?.let { engine ->
-            @Suppress("DEPRECATION") // suite owns these engines; stop them to keep the emulator healthy
-            engine.shutdown()
-        }
+        // Stops the engine and wipes the Sarie storage dir (persisted QUIC state).
+        SampleAppRuntime.reset()
         installedEngine = null
         Metrics.resetForTest()
     }
@@ -104,8 +102,8 @@ class MinifiedSuite {
 
     @Test
     fun publicOriginH3ThroughTrampoline() {
-        // cloudflare-quic.com serves HTTP/3 ONLY (no TCP listener), so no h2 downgrade can
-        // fake the result; its cert chains to a known public root, which the embedded
+        // cloudflare-quic.com also serves h2 over TCP now (checked 2026-09-23); the
+        // HTTP_3 assertion is the proof. Its cert chains to a known public root, which the embedded
         // engine's QUIC proof verifier requires. Strongest R8 proof: suppressed-internal
         // calls + trampoline + mapping all survive shrinking on a real h3 response.
         installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
@@ -173,6 +171,54 @@ class MinifiedSuite {
             assertEquals("cleartext-ok", response.body.string())
         }
         assertFallbackOnly(Metrics.Reason.cleartext)
+    }
+
+    @Test
+    fun callServerTrampolineSurvivesR8() {
+        // A network interceptor only reaches a Cronet response if the CallServerInterceptor
+        // prefix still calls CronetBridge.callServer after R8. Stock CallServer NPEs when
+        // the exchange is null, and a stripped invokestatic fails the call.
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        val seen = java.util.concurrent.atomic.AtomicBoolean(false)
+        val client = OkHttpClient.Builder()
+            .addNetworkInterceptor(Interceptor { chain ->
+                seen.set(true)
+                chain.proceed(chain.request())
+            })
+            .build()
+        client.newCall(Request.Builder().url("https://cloudflare-quic.com/").build()).execute().use { response ->
+            assertEquals(Protocol.HTTP_3, response.protocol)
+            assertEquals(200, response.code)
+        }
+        assertTrue(seen.get())
+        assertCronetServed()
+    }
+
+    @Test
+    fun networkInterceptorsSeeRequestResponseAndHttp3() {
+        NetworkParity.loggingAndChuckerSeeHttp3 {
+            installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        }
+    }
+
+    @Test
+    fun networkInterceptorHeaderReachesOrigin() {
+        NetworkParity.addedHeaderReachesOrigin({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorUrlAndProceedGuards() {
+        NetworkParity.urlGuardsThrowStockMessages({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun networkInterceptorReadTimeoutAbortsStall() {
+        NetworkParity.readTimeoutFromNetworkInterceptorAborts({ installCronet(quicHintHost = null) }, ORIGIN)
+    }
+
+    @Test
+    fun eventListenerHeaderOrderAroundCronetHandoff() {
+        NetworkParity.eventListenerHeaderOrder({ installCronet(quicHintHost = null) }, ORIGIN)
     }
 
     @Test

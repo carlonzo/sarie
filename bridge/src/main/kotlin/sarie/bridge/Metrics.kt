@@ -16,9 +16,13 @@ object Metrics {
         allowlist,
         cleartext,
         websocket,
+        /** Retired. OkHttp's cache runs on the Cronet path and no longer produces this. */
         cache,
+        /** Retired. Network interceptors run before the Cronet hop and no longer produce this. */
         network_interceptors,
         h2_prior_knowledge,
+
+        /** Retired: authenticators are allowed on the Cronet path. The name stays stable. */
         authenticator,
         proxy,
         socket_factory,
@@ -27,6 +31,8 @@ object Metrics {
         trust,
         protocols,
         engine_cold,
+        dns,
+        content_encoding,
     }
 
     val cronet = AtomicLong()

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Generate golden stock/rewritten ConnectInterceptor artifacts for every released okhttp 5.x
-# version, structurally verify each against the registered GuardSpec shape, and regenerate:
+# Generate golden stock/rewritten artifacts for every released okhttp 5.x version,
+# structurally verify each against the registered guard shapes, and regenerate:
 #   - plugin/src/test/resources/stock/<version>/{android,jvm}/ (goldens + Textifier dumps)
 #   - plugin/src/main/kotlin/sarie/plugin/GoldenFingerprints.kt
 #   - bridge/src/main/kotlin/sarie/bridge/VerifiedOkHttpVersions.kt
@@ -91,21 +91,135 @@ public class Dump {
         "INVOKEVIRTUAL okhttp3/internal/http/RealInterceptorChain.proceed (Lokhttp3/Request;)",
     };
 
+    static final String[] CALL_SERVER_PREFIX = {
+        "ALOAD 1",
+        "LDC chain",
+        "INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNullParameter (Ljava/lang/Object;Ljava/lang/String;)V",
+        "ALOAD 1",
+        "CHECKCAST okhttp3/internal/http/RealInterceptorChain",
+        "ASTORE 2",
+        "ALOAD 2",
+        "INVOKEVIRTUAL okhttp3/internal/http/RealInterceptorChain.getExchange$okhttp ()Lokhttp3/internal/connection/Exchange;",
+        "DUP",
+        "INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNull (Ljava/lang/Object;)V",
+        "ASTORE 3",
+    };
+
+    static final String ENTRY_INIT = "<init>";
+    static final String ENTRY_INIT_DESC = "(Lokio/Source;)V";
+    static final String COMPUTE_CANDIDATE = "computeCandidate";
+    static final String COMPUTE_CANDIDATE_DESC = "()Lokhttp3/internal/cache/CacheStrategy;";
+
     public static void main(String[] args) throws Exception {
         byte[] in = Files.readAllBytes(Path.of(args[0]));
+        String mode = args.length > 3 ? args[3] : "connect";
         dump(in, Path.of(args[1]));
-        dump(rewrite(in), Path.of(args[2]));
+        byte[] rewritten;
+        if (mode.equals("callserver")) rewritten = rewriteCallServer(in);
+        else if (mode.equals("cacheentry")) rewritten = rewriteCacheEntry(in);
+        else if (mode.equals("cachestrategy")) rewritten = rewriteCacheStrategy(in);
+        else rewritten = rewrite(in);
+        dump(rewritten, Path.of(args[2]));
         StringBuilder sb = new StringBuilder();
         for (byte b : MessageDigest.getInstance("SHA-256").digest(in)) sb.append(String.format("%02x", b));
         System.out.println(sb);
         List<String> insns = new ArrayList<>();
-        record(in, insns);
-        List<String> problems = verify(insns);
-        System.out.println("SHAPE " + SHAPE_NAME + (problems.isEmpty() ? " MATCH" : " NOMATCH"));
+        String shape;
+        List<String> problems;
+        if (mode.equals("callserver")) {
+            record(in, insns, INTERCEPT_NAME, INTERCEPT_DESC);
+            problems = verifyCallServerPrefix(insns);
+            shape = "callserver-prefix";
+        } else if (mode.equals("cacheentry")) {
+            record(in, insns, ENTRY_INIT, ENTRY_INIT_DESC);
+            problems = verifyCacheEntry(insns);
+            shape = "cache-entry";
+        } else if (mode.equals("cachestrategy")) {
+            record(in, insns, COMPUTE_CANDIDATE, COMPUTE_CANDIDATE_DESC);
+            problems = verifyCacheStrategy(insns);
+            shape = "cache-strategy";
+        } else {
+            record(in, insns, INTERCEPT_NAME, INTERCEPT_DESC);
+            problems = verify(insns);
+            shape = SHAPE_NAME;
+        }
+        System.out.println("SHAPE " + shape + (problems.isEmpty() ? " MATCH" : " NOMATCH"));
         for (String p : problems) System.out.println("PROBLEM " + p);
         if (!problems.isEmpty()) {
             for (String i : insns) System.out.println("INSN " + i);
         }
+    }
+
+    /** Mirrors CacheEntryGuard: one HttpUrl.isHttps, local 6 is the Okio.buffer result. */
+    static List<String> verifyCacheEntry(List<String> insns) {
+        List<String> problems = new ArrayList<>();
+        String https = "INVOKEVIRTUAL okhttp3/HttpUrl.isHttps ()Z";
+        String buffer = "INVOKESTATIC okio/Okio.buffer (Lokio/Source;)Lokio/BufferedSource;";
+        long httpsCount = insns.stream().filter(https::equals).count();
+        if (httpsCount != 1) {
+            problems.add("expected exactly one HttpUrl.isHttps in Cache.Entry.<init>(Source), found " + httpsCount);
+        }
+        long storeCount = insns.stream().filter(s -> s.equals("ASTORE 6")).count();
+        if (storeCount != 1) {
+            problems.add("expected exactly one ASTORE 6 (Okio.buffer result), found " + storeCount);
+        }
+        int bufferIdx = insns.indexOf(buffer);
+        if (bufferIdx < 0 || bufferIdx + 1 >= insns.size() || !insns.get(bufferIdx + 1).equals("ASTORE 6")) {
+            problems.add("local 6 is not the Okio.buffer result");
+        }
+        return problems;
+    }
+
+    /**
+     * Mirrors CacheStrategyGuard. The stock `&&` compiles to isHttps; ifeq L; then
+     * handshake(); ifnonnull L. Both jumps share L. isHttps is the only one replaced.
+     */
+    static List<String> verifyCacheStrategy(List<String> insns) {
+        List<String> problems = new ArrayList<>();
+        String https = "INVOKEVIRTUAL okhttp3/Request.isHttps ()Z";
+        int at = -1;
+        int count = 0;
+        for (int i = 0; i < insns.size(); i++) {
+            if (insns.get(i).equals(https)) {
+                count++;
+                at = i;
+            }
+        }
+        if (count != 1) {
+            problems.add("expected exactly one Request.isHttps in computeCandidate, found " + count);
+            return problems;
+        }
+        if (at + 5 >= insns.size() || !cacheStrategyWindow(insns, at)) {
+            problems.add("Request.isHttps must be followed by the handshake(); ifnonnull sequence");
+        }
+        return problems;
+    }
+
+    static boolean cacheStrategyWindow(List<String> insns, int at) {
+        String ifeq = insns.get(at + 1);
+        String ifnn = insns.get(at + 5);
+        if (!ifeq.startsWith("IFEQ ") || !ifnn.startsWith("IFNONNULL ")) return false;
+        if (!ifeq.substring("IFEQ ".length()).equals(ifnn.substring("IFNONNULL ".length()))) return false;
+        return insns.get(at + 2).equals("ALOAD 0")
+                && insns.get(at + 3).equals(
+                        "GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse Lokhttp3/Response;")
+                && insns.get(at + 4).equals("INVOKEVIRTUAL okhttp3/Response.handshake ()Lokhttp3/Handshake;");
+    }
+
+    /** F7 prefix of CallServerInterceptor.intercept. Label ids are not part of the prefix. */
+    static List<String> verifyCallServerPrefix(List<String> insns) {
+        List<String> problems = new ArrayList<>();
+        if (insns.size() < CALL_SERVER_PREFIX.length) {
+            problems.add("expected CallServerInterceptor.intercept to start with the pinned F7 prefix");
+            return problems;
+        }
+        for (int i = 0; i < CALL_SERVER_PREFIX.length; i++) {
+            if (!insns.get(i).equals(CALL_SERVER_PREFIX[i])) {
+                problems.add("expected CallServerInterceptor.intercept to start with the pinned F7 prefix");
+                return problems;
+            }
+        }
+        return problems;
     }
 
     /** Same checks, order and message texts as GuardSpec.verify. */
@@ -134,13 +248,15 @@ public class Dump {
         return problems;
     }
 
-    /** Records the intercept instruction stream in the plugin's RecordingMethodVisitor format. */
-    static void record(byte[] bytes, List<String> insns) {
+    /** Records one method in the plugin's RecordingMethodVisitor format. */
+    static void record(byte[] bytes, List<String> insns, String methodName, String methodDesc) {
+        LABELS.clear();
+        labelSeq = 0;
         new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor,
                     String signature, String[] exceptions) {
-                if (!name.equals(INTERCEPT_NAME) || !descriptor.equals(INTERCEPT_DESC)) return null;
+                if (!name.equals(methodName) || !descriptor.equals(methodDesc)) return null;
                 return new MethodVisitor(Opcodes.ASM9) {
                     @Override public void visitInsn(int opcode) {
                         insns.add(NAME.getOrDefault(opcode, "0x" + Integer.toHexString(opcode)));
@@ -162,7 +278,7 @@ public class Dump {
                         insns.add(NAME.getOrDefault(opcode, "?") + " " + owner + "." + name + " " + descriptor);
                     }
                     @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
-                        insns.add(NAME.getOrDefault(opcode, "?") + " L" + System.identityHashCode(label));
+                        insns.add(NAME.getOrDefault(opcode, "?") + " L" + labelId(label));
                     }
                     @Override public void visitLdcInsn(Object value) { insns.add("LDC " + value); }
                     @Override public void visitIincInsn(int value, int increment) {
@@ -192,6 +308,18 @@ public class Dump {
 
     // Readable names for the recorded stream; asm-util's Printer.OPCODES mirrors this but we
     // keep the plugin's hand-rolled map so both sides stay format-identical.
+    static final java.util.IdentityHashMap<org.objectweb.asm.Label, Integer> LABELS =
+        new java.util.IdentityHashMap<>();
+    static int labelSeq = 0;
+    static String labelId(org.objectweb.asm.Label label) {
+        Integer id = LABELS.get(label);
+        if (id == null) {
+            id = labelSeq++;
+            LABELS.put(label, id);
+        }
+        return "L" + id;
+    }
+
     static final Map<Integer, String> NAME = Map.ofEntries(
         Map.entry(Opcodes.NOP, "NOP"),
         Map.entry(Opcodes.ACONST_NULL, "ACONST_NULL"),
@@ -225,6 +353,7 @@ public class Dump {
         Map.entry(Opcodes.MONITOREXIT, "MONITOREXIT"),
         Map.entry(Opcodes.IFNULL, "IFNULL"),
         Map.entry(Opcodes.IFNONNULL, "IFNONNULL"),
+        Map.entry(Opcodes.IFEQ, "IFEQ"),
         Map.entry(Opcodes.LDC, "LDC")
     );
 
@@ -252,6 +381,167 @@ public class Dump {
                         target.visitMaxs(1, 2);
                     }
                     @Override public void visitEnd() { target.visitEnd(); }
+                };
+            }
+        }, ClassReader.SKIP_FRAMES);
+        return cw.toByteArray();
+    }
+
+    /** Prefix injection after the 3-instruction Kotlin preamble. Frames use a lenient hierarchy. */
+    static byte[] rewriteCallServer(byte[] bytes) {
+        ClassReader reader = new ClassReader(bytes);
+        ClassWriter cw = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                try {
+                    return super.getCommonSuperClass(type1, type2);
+                } catch (RuntimeException e) {
+                    return "java/lang/Object";
+                }
+            }
+        };
+        reader.accept(new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                    String signature, String[] exceptions) {
+                MethodVisitor target = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!name.equals(INTERCEPT_NAME) || !descriptor.equals(INTERCEPT_DESC)) return target;
+                return new MethodVisitor(Opcodes.ASM9) {
+                    int instructions = 0;
+                    boolean injected = false;
+                    @Override public void visitCode() { target.visitCode(); }
+                    @Override public void visitInsn(int opcode) {
+                        target.visitInsn(opcode);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitIntInsn(int opcode, int operand) {
+                        target.visitIntInsn(opcode, operand);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitVarInsn(int opcode, int value) {
+                        target.visitVarInsn(opcode, value);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitTypeInsn(int opcode, String type) {
+                        target.visitTypeInsn(opcode, type);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
+                        target.visitFieldInsn(opcode, owner, name, descriptor);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitMethodInsn(int opcode, String owner, String name,
+                            String descriptor, boolean isInterface) {
+                        target.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
+                        target.visitJumpInsn(opcode, label);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitLabel(org.objectweb.asm.Label label) { target.visitLabel(label); }
+                    @Override public void visitLdcInsn(Object value) {
+                        target.visitLdcInsn(value);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitIincInsn(int value, int increment) {
+                        target.visitIincInsn(value, increment);
+                        afterInstruction(target);
+                    }
+                    @Override public void visitTryCatchBlock(org.objectweb.asm.Label start, org.objectweb.asm.Label end,
+                            org.objectweb.asm.Label handler, String type) {
+                        target.visitTryCatchBlock(start, end, handler, type);
+                    }
+                    @Override public void visitLineNumber(int line, org.objectweb.asm.Label start) {
+                        target.visitLineNumber(line, start);
+                    }
+                    @Override public void visitMaxs(int maxStack, int maxLocals) {
+                        target.visitMaxs(maxStack + 2, maxLocals);
+                    }
+                    @Override public void visitEnd() { target.visitEnd(); }
+                    void afterInstruction(MethodVisitor target) {
+                        instructions++;
+                        if (!injected && instructions == 3) {
+                            org.objectweb.asm.Label stock = new org.objectweb.asm.Label();
+                            target.visitVarInsn(Opcodes.ALOAD, 1);
+                            target.visitMethodInsn(Opcodes.INVOKESTATIC, "sarie/bridge/CronetBridge",
+                                    "callServer", INTERCEPT_DESC, false);
+                            target.visitInsn(Opcodes.DUP);
+                            target.visitJumpInsn(Opcodes.IFNULL, stock);
+                            target.visitInsn(Opcodes.ARETURN);
+                            target.visitLabel(stock);
+                            target.visitInsn(Opcodes.POP);
+                            injected = true;
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_FRAMES);
+        return cw.toByteArray();
+    }
+
+    static ClassWriter framingWriter(ClassReader reader) {
+        return new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES) {
+            @Override
+            protected String getCommonSuperClass(String type1, String type2) {
+                try {
+                    return super.getCommonSuperClass(type1, type2);
+                } catch (RuntimeException e) {
+                    return "java/lang/Object";
+                }
+            }
+        };
+    }
+
+    /** Replaces the one HttpUrl.isHttps in Cache.Entry.<init>(Source). writeTo is untouched. */
+    static byte[] rewriteCacheEntry(byte[] bytes) {
+        ClassReader reader = new ClassReader(bytes);
+        ClassWriter cw = framingWriter(reader);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                    String signature, String[] exceptions) {
+                MethodVisitor target = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!name.equals(ENTRY_INIT) || !descriptor.equals(ENTRY_INIT_DESC)) return target;
+                return new MethodVisitor(Opcodes.ASM9, target) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
+                        if (opcode == Opcodes.INVOKEVIRTUAL && owner.equals("okhttp3/HttpUrl")
+                                && name.equals("isHttps") && descriptor.equals("()Z")) {
+                            target.visitVarInsn(Opcodes.ALOAD, 6);
+                            target.visitMethodInsn(Opcodes.INVOKESTATIC, "sarie/bridge/CacheHooks",
+                                    "expectTlsBlock", "(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z", false);
+                        } else {
+                            super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
+                        }
+                    }
+                };
+            }
+        }, ClassReader.SKIP_FRAMES);
+        return cw.toByteArray();
+    }
+
+    /** Replaces the one Request.isHttps in computeCandidate. The handshake sequence stays. */
+    static byte[] rewriteCacheStrategy(byte[] bytes) {
+        ClassReader reader = new ClassReader(bytes);
+        ClassWriter cw = framingWriter(reader);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                    String signature, String[] exceptions) {
+                MethodVisitor target = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!name.equals(COMPUTE_CANDIDATE) || !descriptor.equals(COMPUTE_CANDIDATE_DESC)) return target;
+                return new MethodVisitor(Opcodes.ASM9, target) {
+                    @Override
+                    public void visitMethodInsn(int opcode, String owner, String name, String descriptor, boolean isInterface) {
+                        if (opcode == Opcodes.INVOKEVIRTUAL && owner.equals("okhttp3/Request")
+                                && name.equals("isHttps") && descriptor.equals("()Z")) {
+                            target.visitMethodInsn(Opcodes.INVOKESTATIC, "sarie/bridge/CacheHooks",
+                                    "requireHandshake", "(Lokhttp3/Request;)Z", false);
+                        } else {
+                            super.visitMethodInsn(opcode, owner, name, descriptor, isInterface);
+                        }
+                    }
                 };
             }
         }, ClassReader.SKIP_FRAMES);
@@ -317,13 +607,128 @@ $(grep -E '^(PROBLEM|INSN) ' <<<"$ANDROID_OUT")
   for P in "${PINNED[@]}"; do
     if [ "$P" = "$V" ]; then PINNED_CELL=yes; fi
   done
-  REPORT_ROWS+="| $V | \`$ANDROID_HASH\` / \`$JVM_HASH\` | $( [ "${VERIFIED_MAP[$V]}" = yes ] && echo "$SHAPE_NAME" || echo '-' ) | $PINNED_CELL | $NOTES |
+
+  VER_ID="$(echo "$V" | tr '.-' '__')"
+  KT_BODY+="    val CONNECT_INTERCEPTOR_ANDROID_${VER_ID} = \"$ANDROID_HASH\"
+    val CONNECT_INTERCEPTOR_JVM_${VER_ID} = \"$JVM_HASH\"
+"
+  CALL_MAP=""
+  CACHE_MAP=""
+  CS_CELL="-"
+  CACHE_CELL="-"
+  # Historical dumps stay ConnectInterceptor-only. Pinned versions also fingerprint
+  # CallServerInterceptor and both cache sites on both artifacts; a shape miss fails the pin.
+  if [ "$PINNED_CELL" = yes ]; then
+    rm -rf "$CACHE/android-cs-$V" "$CACHE/jvm-cs-$V"
+    unzip -q -o "$CACHE/aar-x-$V/classes.jar" okhttp3/internal/http/CallServerInterceptor.class -d "$CACHE/android-cs-$V"
+    unzip -q -o "$CACHE/okhttp-jvm-$V.jar" okhttp3/internal/http/CallServerInterceptor.class -d "$CACHE/jvm-cs-$V"
+    cp "$CACHE/android-cs-$V/okhttp3/internal/http/CallServerInterceptor.class" "$VRES/android/CallServerInterceptor.class"
+    cp "$CACHE/jvm-cs-$V/okhttp3/internal/http/CallServerInterceptor.class" "$VRES/jvm/CallServerInterceptor.class"
+    CS_ANDROID_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/android/CallServerInterceptor.class" "$VRES/android/CallServerInterceptor.stock.txt" "$VRES/android/CallServerInterceptor.rewritten.txt" callserver)"
+    CS_JVM_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/jvm/CallServerInterceptor.class" "$VRES/jvm/CallServerInterceptor.stock.txt" "$VRES/jvm/CallServerInterceptor.rewritten.txt" callserver)"
+    CS_ANDROID_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CS_ANDROID_OUT")"
+    CS_JVM_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CS_JVM_OUT")"
+    KT_BODY+="    val CALL_SERVER_INTERCEPTOR_ANDROID_${VER_ID} = \"$CS_ANDROID_HASH\"
+    val CALL_SERVER_INTERCEPTOR_JVM_${VER_ID} = \"$CS_JVM_HASH\"
+"
+    CALL_MAP=",
+            InstrumentTarget.CALL_SERVER_INTERCEPTOR to mapOf(
+                Variant.ANDROID to CALL_SERVER_INTERCEPTOR_ANDROID_${VER_ID},
+                Variant.JVM to CALL_SERVER_INTERCEPTOR_JVM_${VER_ID},
+            )"
+    if grep -q "SHAPE callserver-prefix MATCH" <<<"$CS_ANDROID_OUT" && grep -q "SHAPE callserver-prefix MATCH" <<<"$CS_JVM_OUT"; then
+      CS_CELL="callserver-prefix"
+    else
+      VERIFIED_MAP[$V]=no
+      CS_CELL="NOMATCH"
+      REASON="CallServerInterceptor.intercept does not match the pinned F7 prefix"
+      NOTES="EXCLUDED: $REASON"
+      EXCLUDED_SECTIONS+="### $V CallServerInterceptor
+
+$REASON. Problems reported by the shape check (android variant; jvm equivalent omitted):
+
+\`\`\`
+$(grep -E '^(PROBLEM|INSN) ' <<<"$CS_ANDROID_OUT")
+\`\`\`
+
+"
+    fi
+    echo "$V callserver: android=$CS_ANDROID_HASH jvm=$CS_JVM_HASH shape=$CS_CELL"
+
+    rm -rf "$CACHE/android-ce-$V" "$CACHE/jvm-ce-$V" "$CACHE/android-cf-$V" "$CACHE/jvm-cf-$V"
+    unzip -q -o "$CACHE/aar-x-$V/classes.jar" 'okhttp3/Cache$Entry.class' -d "$CACHE/android-ce-$V"
+    unzip -q -o "$CACHE/okhttp-jvm-$V.jar" 'okhttp3/Cache$Entry.class' -d "$CACHE/jvm-ce-$V"
+    unzip -q -o "$CACHE/aar-x-$V/classes.jar" 'okhttp3/internal/cache/CacheStrategy$Factory.class' -d "$CACHE/android-cf-$V"
+    unzip -q -o "$CACHE/okhttp-jvm-$V.jar" 'okhttp3/internal/cache/CacheStrategy$Factory.class' -d "$CACHE/jvm-cf-$V"
+    cp "$CACHE/android-ce-$V/okhttp3/Cache\$Entry.class" "$VRES/android/Cache\$Entry.class"
+    cp "$CACHE/jvm-ce-$V/okhttp3/Cache\$Entry.class" "$VRES/jvm/Cache\$Entry.class"
+    cp "$CACHE/android-cf-$V/okhttp3/internal/cache/CacheStrategy\$Factory.class" "$VRES/android/CacheStrategy\$Factory.class"
+    cp "$CACHE/jvm-cf-$V/okhttp3/internal/cache/CacheStrategy\$Factory.class" "$VRES/jvm/CacheStrategy\$Factory.class"
+    CE_ANDROID_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/android/Cache\$Entry.class" "$VRES/android/Cache\$Entry.stock.txt" "$VRES/android/Cache\$Entry.rewritten.txt" cacheentry)"
+    CE_JVM_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/jvm/Cache\$Entry.class" "$VRES/jvm/Cache\$Entry.stock.txt" "$VRES/jvm/Cache\$Entry.rewritten.txt" cacheentry)"
+    CF_ANDROID_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/android/CacheStrategy\$Factory.class" "$VRES/android/CacheStrategy\$Factory.stock.txt" "$VRES/android/CacheStrategy\$Factory.rewritten.txt" cachestrategy)"
+    CF_JVM_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/jvm/CacheStrategy\$Factory.class" "$VRES/jvm/CacheStrategy\$Factory.stock.txt" "$VRES/jvm/CacheStrategy\$Factory.rewritten.txt" cachestrategy)"
+    CE_ANDROID_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CE_ANDROID_OUT")"
+    CE_JVM_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CE_JVM_OUT")"
+    CF_ANDROID_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CF_ANDROID_OUT")"
+    CF_JVM_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$CF_JVM_OUT")"
+    KT_BODY+="    val CACHE_ENTRY_ANDROID_${VER_ID} = \"$CE_ANDROID_HASH\"
+    val CACHE_ENTRY_JVM_${VER_ID} = \"$CE_JVM_HASH\"
+    val CACHE_STRATEGY_FACTORY_ANDROID_${VER_ID} = \"$CF_ANDROID_HASH\"
+    val CACHE_STRATEGY_FACTORY_JVM_${VER_ID} = \"$CF_JVM_HASH\"
+"
+    CACHE_MAP=",
+            InstrumentTarget.CACHE_ENTRY to mapOf(
+                Variant.ANDROID to CACHE_ENTRY_ANDROID_${VER_ID},
+                Variant.JVM to CACHE_ENTRY_JVM_${VER_ID},
+            ),
+            InstrumentTarget.CACHE_STRATEGY_FACTORY to mapOf(
+                Variant.ANDROID to CACHE_STRATEGY_FACTORY_ANDROID_${VER_ID},
+                Variant.JVM to CACHE_STRATEGY_FACTORY_JVM_${VER_ID},
+            )"
+    CE_OK=no
+    CF_OK=no
+    if grep -q "SHAPE cache-entry MATCH" <<<"$CE_ANDROID_OUT" && grep -q "SHAPE cache-entry MATCH" <<<"$CE_JVM_OUT"; then
+      CE_OK=yes
+    fi
+    if grep -q "SHAPE cache-strategy MATCH" <<<"$CF_ANDROID_OUT" && grep -q "SHAPE cache-strategy MATCH" <<<"$CF_JVM_OUT"; then
+      CF_OK=yes
+    fi
+    if [ "$CE_OK" = yes ] && [ "$CF_OK" = yes ]; then
+      CACHE_CELL="entry+strategy"
+    else
+      VERIFIED_MAP[$V]=no
+      CACHE_CELL="NOMATCH"
+      REASON="cache site shape mismatch (entry=$CE_OK strategy=$CF_OK)"
+      if [ "$NOTES" = "structurally verified" ]; then
+        NOTES="EXCLUDED: $REASON"
+      else
+        NOTES="$NOTES; $REASON"
+      fi
+      EXCLUDED_SECTIONS+="### $V cache sites
+
+$REASON. Problems reported by the shape check (android variant; jvm equivalent omitted):
+
+\`\`\`
+$(grep -E '^(PROBLEM|INSN) ' <<<"$CE_ANDROID_OUT")
+$(grep -E '^(PROBLEM|INSN) ' <<<"$CF_ANDROID_OUT")
+\`\`\`
+
+"
+    fi
+    echo "$V cache-entry: android=$CE_ANDROID_HASH jvm=$CE_JVM_HASH shape=$CE_OK"
+    echo "$V cache-strategy: android=$CF_ANDROID_HASH jvm=$CF_JVM_HASH shape=$CF_OK"
+  fi
+
+  REPORT_ROWS+="| $V | \`$ANDROID_HASH\` / \`$JVM_HASH\` | $( [ "${VERIFIED_MAP[$V]}" = yes ] && echo "$SHAPE_NAME" || echo '-' ) | $PINNED_CELL | $CS_CELL | $CACHE_CELL | $NOTES |
 "
 
-  KT_BODY+="    val OKHTTP_ANDROID_$(echo "$V" | tr '.-' '__') = \"$ANDROID_HASH\"
-    val OKHTTP_JVM_$(echo "$V" | tr '.-' '__') = \"$JVM_HASH\"
-"
-  KT_WHEN+="        \"$V\" -> mapOf(Variant.ANDROID to OKHTTP_ANDROID_$(echo "$V" | tr '.-' '__'), Variant.JVM to OKHTTP_JVM_$(echo "$V" | tr '.-' '__'))
+  KT_WHEN+="        \"$V\" -> mapOf(
+            InstrumentTarget.CONNECT_INTERCEPTOR to mapOf(
+                Variant.ANDROID to CONNECT_INTERCEPTOR_ANDROID_${VER_ID},
+                Variant.JVM to CONNECT_INTERCEPTOR_JVM_${VER_ID},
+            )${CALL_MAP}${CACHE_MAP},
+        )
 "
 
   echo "$V: android=$ANDROID_HASH jvm=$JVM_HASH verified=${VERIFIED_MAP[$V]}"
@@ -370,7 +775,7 @@ package sarie.plugin
 // artifacts (see plugin/recipe-verification-report.md). Do not hand-edit.
 object GoldenFingerprints {
 $KT_BODY
-    fun fingerprintsFor(version: String): Map<Variant, String>? = when (version) {
+    fun fingerprintsFor(version: String): Map<InstrumentTarget, Map<Variant, String>>? = when (version) {
 $KT_WHEN        else -> null
     }
 }
@@ -379,14 +784,15 @@ EOF
 REPORT_BODY="# OkHttp recipe verification report
 
 Generated by \`plugin/scripts/generate-fingerprints.sh\` (pinned Maven Central artifacts).
-Structural check = \`RecipeRegistry.CANONICAL_GUARD\` evaluated with ASM 9.7.1, mirroring
-\`GuardSpec.verify\` (single CHECKCAST to okhttp3/internal/http/RealInterceptorChain within the
-first 5 instructions, initExchange\$okhttp x1, copy\$okhttp\$default x1, proceed x1, ends ARETURN).
-A version is pinned in \`RecipeRegistry\` only when BOTH variants match; versions matching no
+ConnectInterceptor structural check = \`RecipeRegistry.CANONICAL_GUARD\` (ASM 9.7.1).
+Pinned versions also require the CallServerInterceptor F7 prefix and both cache sites
+(Cache.Entry source constructor, CacheStrategy.Factory.computeCandidate) on both artifacts.
+Historical (unpinned) versions stay ConnectInterceptor-only so an unpinned shape cannot fail the script.
+A version is pinned in \`RecipeRegistry\` only when every checked shape matches; versions matching no
 registered shape are excluded, never force-fit. Do not hand-edit; rerun the script.
 
-| okhttp version | ConnectInterceptor.class sha256 (android / jvm) | guard matched | pinned | notes |
-|---|---|---|---|---|
+| okhttp version | ConnectInterceptor.class sha256 (android / jvm) | connect guard | pinned | callserver guard | cache guards | notes |
+|---|---|---|---|---|---|---|
 $REPORT_ROWS
 $EXCLUDED_SECTIONS"
 

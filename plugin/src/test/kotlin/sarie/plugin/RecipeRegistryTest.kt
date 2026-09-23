@@ -15,8 +15,18 @@ class RecipeRegistryTest {
         assertNotNull(recipe)
         assertEquals("com.squareup.okhttp3:okhttp-android:5.5.0", recipe!!.fingerprintArtifacts.getValue(Variant.ANDROID))
         assertEquals("com.squareup.okhttp3:okhttp-jvm:5.5.0", recipe.fingerprintArtifacts.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.OKHTTP_ANDROID_5_5_0, recipe.fingerprints.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.OKHTTP_JVM_5_5_0, recipe.fingerprints.getValue(Variant.JVM))
+        val connect = recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR)
+        val callServer = recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR)
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_ANDROID_5_5_0, connect.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_JVM_5_5_0, connect.getValue(Variant.JVM))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_ANDROID_5_5_0, callServer.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_JVM_5_5_0, callServer.getValue(Variant.JVM))
+        val entry = recipe.fingerprints.getValue(InstrumentTarget.CACHE_ENTRY)
+        val strategy = recipe.fingerprints.getValue(InstrumentTarget.CACHE_STRATEGY_FACTORY)
+        assertEquals(GoldenFingerprints.CACHE_ENTRY_ANDROID_5_5_0, entry.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CACHE_ENTRY_JVM_5_5_0, entry.getValue(Variant.JVM))
+        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_ANDROID_5_5_0, strategy.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_JVM_5_5_0, strategy.getValue(Variant.JVM))
     }
 
     @Test
@@ -25,8 +35,18 @@ class RecipeRegistryTest {
         assertNotNull(recipe)
         assertEquals("com.squareup.okhttp3:okhttp-android:5.4.0", recipe!!.fingerprintArtifacts.getValue(Variant.ANDROID))
         assertEquals("com.squareup.okhttp3:okhttp-jvm:5.4.0", recipe.fingerprintArtifacts.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.OKHTTP_ANDROID_5_4_0, recipe.fingerprints.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.OKHTTP_JVM_5_4_0, recipe.fingerprints.getValue(Variant.JVM))
+        val connect = recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR)
+        val callServer = recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR)
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_ANDROID_5_4_0, connect.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_JVM_5_4_0, connect.getValue(Variant.JVM))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_ANDROID_5_4_0, callServer.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_JVM_5_4_0, callServer.getValue(Variant.JVM))
+        val entry = recipe.fingerprints.getValue(InstrumentTarget.CACHE_ENTRY)
+        val strategy = recipe.fingerprints.getValue(InstrumentTarget.CACHE_STRATEGY_FACTORY)
+        assertEquals(GoldenFingerprints.CACHE_ENTRY_ANDROID_5_4_0, entry.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CACHE_ENTRY_JVM_5_4_0, entry.getValue(Variant.JVM))
+        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_ANDROID_5_4_0, strategy.getValue(Variant.ANDROID))
+        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_JVM_5_4_0, strategy.getValue(Variant.JVM))
     }
 
     @Test

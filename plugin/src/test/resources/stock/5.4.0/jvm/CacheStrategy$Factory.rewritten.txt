@@ -1,0 +1,957 @@
+// class version 52.0 (52)
+// access flags 0x31
+public final class okhttp3/internal/cache/CacheStrategy$Factory {
+
+  // compiled from: CacheStrategy.kt
+
+  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={"\u0000@\n\u0002\u0018\u0002\n\u0002\u0010\u0000\n\u0000\n\u0002\u0010\u0009\n\u0000\n\u0002\u0018\u0002\n\u0000\n\u0002\u0018\u0002\n\u0002\u0008\u0005\n\u0002\u0018\u0002\n\u0000\n\u0002\u0010\u000e\n\u0002\u0008\u0007\n\u0002\u0010\u0008\n\u0000\n\u0002\u0010\u000b\n\u0000\n\u0002\u0018\u0002\n\u0002\u0008\u0005\u0018\u00002\u00020\u0001B!\u0012\u0006\u0010\u0002\u001a\u00020\u0003\u0012\u0006\u0010\u0004\u001a\u00020\u0005\u0012\u0008\u0010\u0006\u001a\u0004\u0018\u00010\u0007\u00a2\u0006\u0004\u0008\u0008\u0010\u0009J\u0008\u0010\u0018\u001a\u00020\u0019H\u0002J\u0006\u0010\u001a\u001a\u00020\u001bJ\u0008\u0010\u001c\u001a\u00020\u001bH\u0002J\u0008\u0010\u001d\u001a\u00020\u0003H\u0002J\u0008\u0010\u001e\u001a\u00020\u0003H\u0002J\u0010\u0010\u001f\u001a\u00020\u00192\u0006\u0010\u0004\u001a\u00020\u0005H\u0002R\u000e\u0010\u0002\u001a\u00020\u0003X\u0082\u0004\u00a2\u0006\u0002\n\u0000R\u0014\u0010\u0004\u001a\u00020\u0005X\u0080\u0004\u00a2\u0006\u0008\n\u0000\u001a\u0004\u0008\n\u0010\u000bR\u0010\u0010\u0006\u001a\u0004\u0018\u00010\u0007X\u0082\u0004\u00a2\u0006\u0002\n\u0000R\u0010\u0010\u000c\u001a\u0004\u0018\u00010\rX\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u0010\u0010\u000e\u001a\u0004\u0018\u00010\u000fX\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u0010\u0010\u0010\u001a\u0004\u0018\u00010\rX\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u0010\u0010\u0011\u001a\u0004\u0018\u00010\u000fX\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u0010\u0010\u0012\u001a\u0004\u0018\u00010\rX\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u000e\u0010\u0013\u001a\u00020\u0003X\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u000e\u0010\u0014\u001a\u00020\u0003X\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u0010\u0010\u0015\u001a\u0004\u0018\u00010\u000fX\u0082\u000e\u00a2\u0006\u0002\n\u0000R\u000e\u0010\u0016\u001a\u00020\u0017X\u0082\u000e\u00a2\u0006\u0002\n\u0000\u00a8\u0006 "}, d2={"Lokhttp3/internal/cache/CacheStrategy$Factory;", "", "nowMillis", "", "request", "Lokhttp3/Request;", "cacheResponse", "Lokhttp3/Response;", "<init>", "(JLokhttp3/Request;Lokhttp3/Response;)V", "getRequest$okhttp", "()Lokhttp3/Request;", "servedDate", "Ljava/util/Date;", "servedDateString", "", "lastModified", "lastModifiedString", "expires", "sentRequestMillis", "receivedResponseMillis", "etag", "ageSeconds", "", "isFreshnessLifetimeHeuristic", "", "compute", "Lokhttp3/internal/cache/CacheStrategy;", "computeCandidate", "computeFreshnessLifetime", "cacheResponseAge", "hasConditions", "okhttp"})
+  // access flags 0x19
+  public final static INNERCLASS okhttp3/Headers$Builder okhttp3/Headers Builder
+  // access flags 0x9
+  public static INNERCLASS okhttp3/Request$Builder okhttp3/Request Builder
+  // access flags 0x9
+  public static INNERCLASS okhttp3/Response$Builder okhttp3/Response Builder
+  // access flags 0x19
+  public final static INNERCLASS okhttp3/internal/cache/CacheStrategy$Companion okhttp3/internal/cache/CacheStrategy Companion
+  // access flags 0x19
+  public final static INNERCLASS okhttp3/internal/cache/CacheStrategy$Factory okhttp3/internal/cache/CacheStrategy Factory
+
+  // access flags 0x12
+  private final J nowMillis
+
+  // access flags 0x12
+  private final Lokhttp3/Request; request
+  @Lorg/jetbrains/annotations/NotNull;() // invisible
+
+  // access flags 0x12
+  private final Lokhttp3/Response; cacheResponse
+  @Lorg/jetbrains/annotations/Nullable;() // invisible
+
+  // access flags 0x2
+  private Ljava/util/Date; servedDate
+  @Lorg/jetbrains/annotations/Nullable;() // invisible
+
+  // access flags 0x2
+  private Ljava/lang/String; servedDateString
+  @Lorg/jetbrains/annotations/Nullable;() // invisible
+
+  // access flags 0x2
+  private Ljava/util/Date; lastModified
+  @Lorg/jetbrains/annotations/Nullable;() // invisible
+
+  // access flags 0x2
+  private Ljava/lang/String; lastModifiedString
+  @Lorg/jetbrains/annotations/Nullable;() // invisible
+
+  // access flags 0x2
+  private Ljava/util/Date; expires
+  @Lorg/jetbrains/annotations/Nullable;() // invisible
+
+  // access flags 0x2
+  private J sentRequestMillis
+
+  // access flags 0x2
+  private J receivedResponseMillis
+
+  // access flags 0x2
+  private Ljava/lang/String; etag
+  @Lorg/jetbrains/annotations/Nullable;() // invisible
+
+  // access flags 0x2
+  private I ageSeconds
+
+  // access flags 0x1
+  public <init>(JLokhttp3/Request;Lokhttp3/Response;)V
+    // annotable parameter count: 3 (invisible)
+    @Lorg/jetbrains/annotations/NotNull;() // invisible, parameter 1
+    @Lorg/jetbrains/annotations/Nullable;() // invisible, parameter 2
+   L0
+    ALOAD 3
+    LDC "request"
+    INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNullParameter (Ljava/lang/Object;Ljava/lang/String;)V
+   L1
+    LINENUMBER 52 L1
+    ALOAD 0
+    INVOKESPECIAL java/lang/Object.<init> ()V
+   L2
+    LINENUMBER 53 L2
+    ALOAD 0
+    LLOAD 1
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.nowMillis : J
+   L3
+    LINENUMBER 54 L3
+    ALOAD 0
+    ALOAD 3
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+   L4
+    LINENUMBER 55 L4
+    ALOAD 0
+    ALOAD 4
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+   L5
+    LINENUMBER 87 L5
+    ALOAD 0
+    ICONST_M1
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.ageSeconds : I
+   L6
+    LINENUMBER 95 L6
+    NOP
+   L7
+    LINENUMBER 96 L7
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    IFNULL L8
+   L9
+    LINENUMBER 97 L9
+    ALOAD 0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKEVIRTUAL okhttp3/Response.sentRequestAtMillis ()J
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.sentRequestMillis : J
+   L10
+    LINENUMBER 98 L10
+    ALOAD 0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKEVIRTUAL okhttp3/Response.receivedResponseAtMillis ()J
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.receivedResponseMillis : J
+   L11
+    LINENUMBER 99 L11
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKEVIRTUAL okhttp3/Response.headers ()Lokhttp3/Headers;
+    ASTORE 5
+   L12
+    LINENUMBER 100 L12
+    ICONST_0
+    ISTORE 6
+   L13
+    ALOAD 5
+    INVOKEVIRTUAL okhttp3/Headers.size ()I
+    ISTORE 7
+   L14
+   FRAME FULL [okhttp3/internal/cache/CacheStrategy$Factory J okhttp3/Request okhttp3/Response okhttp3/Headers I I] []
+    ILOAD 6
+    ILOAD 7
+    IF_ICMPGE L8
+   L15
+    LINENUMBER 101 L15
+    ALOAD 5
+    ILOAD 6
+    INVOKEVIRTUAL okhttp3/Headers.name (I)Ljava/lang/String;
+    ASTORE 8
+   L16
+    LINENUMBER 102 L16
+    ALOAD 5
+    ILOAD 6
+    INVOKEVIRTUAL okhttp3/Headers.value (I)Ljava/lang/String;
+    ASTORE 9
+   L17
+    LINENUMBER 103 L17
+    NOP
+   L18
+    LINENUMBER 104 L18
+    ALOAD 8
+    LDC "Date"
+    ICONST_1
+    INVOKESTATIC kotlin/text/StringsKt.equals (Ljava/lang/String;Ljava/lang/String;Z)Z
+    IFEQ L19
+   L20
+    LINENUMBER 105 L20
+    ALOAD 0
+    ALOAD 9
+    INVOKESTATIC okhttp3/internal/http/DateFormattingKt.toHttpDateOrNull (Ljava/lang/String;)Ljava/util/Date;
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.servedDate : Ljava/util/Date;
+   L21
+    LINENUMBER 106 L21
+    ALOAD 0
+    ALOAD 9
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.servedDateString : Ljava/lang/String;
+    GOTO L22
+   L19
+    LINENUMBER 109 L19
+   FRAME APPEND [java/lang/String java/lang/String]
+    ALOAD 8
+    LDC "Expires"
+    ICONST_1
+    INVOKESTATIC kotlin/text/StringsKt.equals (Ljava/lang/String;Ljava/lang/String;Z)Z
+    IFEQ L23
+   L24
+    LINENUMBER 110 L24
+    ALOAD 0
+    ALOAD 9
+    INVOKESTATIC okhttp3/internal/http/DateFormattingKt.toHttpDateOrNull (Ljava/lang/String;)Ljava/util/Date;
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.expires : Ljava/util/Date;
+    GOTO L22
+   L23
+    LINENUMBER 113 L23
+   FRAME SAME
+    ALOAD 8
+    LDC "Last-Modified"
+    ICONST_1
+    INVOKESTATIC kotlin/text/StringsKt.equals (Ljava/lang/String;Ljava/lang/String;Z)Z
+    IFEQ L25
+   L26
+    LINENUMBER 114 L26
+    ALOAD 0
+    ALOAD 9
+    INVOKESTATIC okhttp3/internal/http/DateFormattingKt.toHttpDateOrNull (Ljava/lang/String;)Ljava/util/Date;
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.lastModified : Ljava/util/Date;
+   L27
+    LINENUMBER 115 L27
+    ALOAD 0
+    ALOAD 9
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.lastModifiedString : Ljava/lang/String;
+    GOTO L22
+   L25
+    LINENUMBER 118 L25
+   FRAME SAME
+    ALOAD 8
+    LDC "ETag"
+    ICONST_1
+    INVOKESTATIC kotlin/text/StringsKt.equals (Ljava/lang/String;Ljava/lang/String;Z)Z
+    IFEQ L28
+   L29
+    LINENUMBER 119 L29
+    ALOAD 0
+    ALOAD 9
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.etag : Ljava/lang/String;
+    GOTO L22
+   L28
+    LINENUMBER 122 L28
+   FRAME SAME
+    ALOAD 8
+    LDC "Age"
+    ICONST_1
+    INVOKESTATIC kotlin/text/StringsKt.equals (Ljava/lang/String;Ljava/lang/String;Z)Z
+    IFEQ L22
+   L30
+    LINENUMBER 123 L30
+    ALOAD 0
+    ALOAD 9
+    ICONST_M1
+    INVOKESTATIC okhttp3/internal/_UtilCommonKt.toNonNegativeInt (Ljava/lang/String;I)I
+    PUTFIELD okhttp3/internal/cache/CacheStrategy$Factory.ageSeconds : I
+   L22
+    LINENUMBER 100 L22
+   FRAME SAME
+    IINC 6 1
+    GOTO L14
+   L8
+    LINENUMBER 128 L8
+   FRAME FULL [okhttp3/internal/cache/CacheStrategy$Factory J okhttp3/Request okhttp3/Response] []
+    NOP
+   L31
+    LINENUMBER 52 L31
+    RETURN
+   L32
+    LOCALVARIABLE fieldName Ljava/lang/String; L16 L22 8
+    LOCALVARIABLE value Ljava/lang/String; L17 L22 9
+    LOCALVARIABLE i I L13 L8 6
+    LOCALVARIABLE headers Lokhttp3/Headers; L12 L8 5
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L32 0
+    LOCALVARIABLE nowMillis J L0 L32 1
+    LOCALVARIABLE request Lokhttp3/Request; L0 L32 3
+    LOCALVARIABLE cacheResponse Lokhttp3/Response; L0 L32 4
+    MAXSTACK = 3
+    MAXLOCALS = 10
+
+  // access flags 0x11
+  public final getRequest$okhttp()Lokhttp3/Request;
+  @Lorg/jetbrains/annotations/NotNull;() // invisible
+   L0
+    LINENUMBER 54 L0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    ARETURN
+   L1
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L1 0
+    MAXSTACK = 1
+    MAXLOCALS = 1
+
+  // access flags 0x12
+  private final isFreshnessLifetimeHeuristic()Z
+   L0
+    LINENUMBER 93 L0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    DUP
+    INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNull (Ljava/lang/Object;)V
+    INVOKEVIRTUAL okhttp3/Response.cacheControl ()Lokhttp3/CacheControl;
+    INVOKEVIRTUAL okhttp3/CacheControl.maxAgeSeconds ()I
+    ICONST_M1
+    IF_ICMPNE L1
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.expires : Ljava/util/Date;
+    IFNONNULL L1
+    ICONST_1
+    GOTO L2
+   L1
+   FRAME SAME
+    ICONST_0
+   L2
+   FRAME SAME1 I
+    IRETURN
+   L3
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L3 0
+    MAXSTACK = 2
+    MAXLOCALS = 1
+
+  // access flags 0x11
+  public final compute()Lokhttp3/internal/cache/CacheStrategy;
+  @Lorg/jetbrains/annotations/NotNull;() // invisible
+   L0
+    LINENUMBER 132 L0
+    ALOAD 0
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy$Factory.computeCandidate ()Lokhttp3/internal/cache/CacheStrategy;
+    ASTORE 1
+   L1
+    LINENUMBER 135 L1
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/internal/cache/CacheStrategy.getNetworkRequest ()Lokhttp3/Request;
+    IFNULL L2
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    INVOKEVIRTUAL okhttp3/Request.cacheControl ()Lokhttp3/CacheControl;
+    INVOKEVIRTUAL okhttp3/CacheControl.onlyIfCached ()Z
+    IFEQ L2
+   L3
+    LINENUMBER 136 L3
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ACONST_NULL
+    ACONST_NULL
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L2
+    LINENUMBER 139 L2
+   FRAME APPEND [okhttp3/internal/cache/CacheStrategy]
+    ALOAD 1
+    ARETURN
+   L4
+    LOCALVARIABLE candidate Lokhttp3/internal/cache/CacheStrategy; L1 L4 1
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L4 0
+    MAXSTACK = 4
+    MAXLOCALS = 2
+
+  // access flags 0x12
+  private final computeCandidate()Lokhttp3/internal/cache/CacheStrategy;
+   L0
+    LINENUMBER 145 L0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    IFNONNULL L1
+   L2
+    LINENUMBER 146 L2
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    ACONST_NULL
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L1
+    LINENUMBER 150 L1
+   FRAME SAME
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    INVOKESTATIC sarie/bridge/CacheHooks.requireHandshake (Lokhttp3/Request;)Z
+    IFEQ L3
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKEVIRTUAL okhttp3/Response.handshake ()Lokhttp3/Handshake;
+    IFNONNULL L3
+   L4
+    LINENUMBER 151 L4
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    ACONST_NULL
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L3
+    LINENUMBER 157 L3
+   FRAME SAME
+    GETSTATIC okhttp3/internal/cache/CacheStrategy.Companion : Lokhttp3/internal/cache/CacheStrategy$Companion;
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    INVOKEVIRTUAL okhttp3/internal/cache/CacheStrategy$Companion.isCacheable (Lokhttp3/Response;Lokhttp3/Request;)Z
+    IFNE L5
+   L6
+    LINENUMBER 158 L6
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    ACONST_NULL
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L5
+    LINENUMBER 161 L5
+   FRAME SAME
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    INVOKEVIRTUAL okhttp3/Request.cacheControl ()Lokhttp3/CacheControl;
+    ASTORE 1
+   L7
+    LINENUMBER 162 L7
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.noCache ()Z
+    IFNE L8
+    ALOAD 0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy$Factory.hasConditions (Lokhttp3/Request;)Z
+    IFEQ L9
+   L8
+    LINENUMBER 163 L8
+   FRAME APPEND [okhttp3/CacheControl]
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    ACONST_NULL
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L9
+    LINENUMBER 166 L9
+   FRAME SAME
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKEVIRTUAL okhttp3/Response.cacheControl ()Lokhttp3/CacheControl;
+    ASTORE 2
+   L10
+    LINENUMBER 168 L10
+    ALOAD 0
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy$Factory.cacheResponseAge ()J
+    LSTORE 3
+   L11
+    LINENUMBER 169 L11
+    ALOAD 0
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy$Factory.computeFreshnessLifetime ()J
+    LSTORE 5
+   L12
+    LINENUMBER 171 L12
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.maxAgeSeconds ()I
+    ICONST_M1
+    IF_ICMPEQ L13
+   L14
+    LINENUMBER 172 L14
+    LLOAD 5
+    GETSTATIC java/util/concurrent/TimeUnit.SECONDS : Ljava/util/concurrent/TimeUnit;
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.maxAgeSeconds ()I
+    I2L
+    INVOKEVIRTUAL java/util/concurrent/TimeUnit.toMillis (J)J
+    INVOKESTATIC java/lang/Math.min (JJ)J
+   L15
+    LINENUMBER 172 L15
+    LSTORE 5
+   L13
+    LINENUMBER 175 L13
+   FRAME APPEND [okhttp3/CacheControl J J]
+    LCONST_0
+    LSTORE 7
+   L16
+    LINENUMBER 176 L16
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.minFreshSeconds ()I
+    ICONST_M1
+    IF_ICMPEQ L17
+   L18
+    LINENUMBER 177 L18
+    GETSTATIC java/util/concurrent/TimeUnit.SECONDS : Ljava/util/concurrent/TimeUnit;
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.minFreshSeconds ()I
+    I2L
+    INVOKEVIRTUAL java/util/concurrent/TimeUnit.toMillis (J)J
+    LSTORE 7
+   L17
+    LINENUMBER 180 L17
+   FRAME APPEND [J]
+    LCONST_0
+    LSTORE 9
+   L19
+    LINENUMBER 181 L19
+    ALOAD 2
+    INVOKEVIRTUAL okhttp3/CacheControl.mustRevalidate ()Z
+    IFNE L20
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.maxStaleSeconds ()I
+    ICONST_M1
+    IF_ICMPEQ L20
+   L21
+    LINENUMBER 182 L21
+    GETSTATIC java/util/concurrent/TimeUnit.SECONDS : Ljava/util/concurrent/TimeUnit;
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.maxStaleSeconds ()I
+    I2L
+    INVOKEVIRTUAL java/util/concurrent/TimeUnit.toMillis (J)J
+    LSTORE 9
+   L20
+    LINENUMBER 185 L20
+   FRAME APPEND [J]
+    ALOAD 2
+    INVOKEVIRTUAL okhttp3/CacheControl.noCache ()Z
+    IFNE L22
+    LLOAD 3
+    LLOAD 7
+    LADD
+    LLOAD 5
+    LLOAD 9
+    LADD
+    LCMP
+    IFGE L22
+   L23
+    LINENUMBER 186 L23
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKEVIRTUAL okhttp3/Response.newBuilder ()Lokhttp3/Response$Builder;
+    ASTORE 11
+   L24
+    LINENUMBER 187 L24
+    LLOAD 3
+    LLOAD 7
+    LADD
+    LLOAD 5
+    LCMP
+    IFLT L25
+   L26
+    LINENUMBER 188 L26
+    ALOAD 11
+    LDC "Warning"
+    LDC "110 HttpURLConnection \"Response is stale\""
+    INVOKEVIRTUAL okhttp3/Response$Builder.addHeader (Ljava/lang/String;Ljava/lang/String;)Lokhttp3/Response$Builder;
+    POP
+   L25
+    LINENUMBER 190 L25
+   FRAME APPEND [okhttp3/Response$Builder]
+    LDC 86400000L
+    LSTORE 12
+   L27
+    LINENUMBER 191 L27
+    LLOAD 3
+    LLOAD 12
+    LCMP
+    IFLE L28
+    ALOAD 0
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy$Factory.isFreshnessLifetimeHeuristic ()Z
+    IFEQ L28
+   L29
+    LINENUMBER 192 L29
+    ALOAD 11
+    LDC "Warning"
+    LDC "113 HttpURLConnection \"Heuristic expiration\""
+    INVOKEVIRTUAL okhttp3/Response$Builder.addHeader (Ljava/lang/String;Ljava/lang/String;)Lokhttp3/Response$Builder;
+    POP
+   L28
+    LINENUMBER 194 L28
+   FRAME APPEND [J]
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ACONST_NULL
+    ALOAD 11
+    INVOKEVIRTUAL okhttp3/Response$Builder.build ()Lokhttp3/Response;
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L22
+    LINENUMBER 199 L22
+   FRAME CHOP 2
+    ACONST_NULL
+    ASTORE 11
+   L30
+    LINENUMBER 200 L30
+    ACONST_NULL
+    ASTORE 12
+   L31
+    LINENUMBER 201 L31
+    NOP
+   L32
+    LINENUMBER 202 L32
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.etag : Ljava/lang/String;
+    IFNULL L33
+   L34
+    LINENUMBER 203 L34
+    LDC "If-None-Match"
+    ASTORE 11
+   L35
+    LINENUMBER 204 L35
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.etag : Ljava/lang/String;
+    ASTORE 12
+    GOTO L36
+   L33
+    LINENUMBER 207 L33
+   FRAME APPEND [N N]
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.lastModified : Ljava/util/Date;
+    IFNULL L37
+   L38
+    LINENUMBER 208 L38
+    LDC "If-Modified-Since"
+    ASTORE 11
+   L39
+    LINENUMBER 209 L39
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.lastModifiedString : Ljava/lang/String;
+    ASTORE 12
+    GOTO L36
+   L37
+    LINENUMBER 212 L37
+   FRAME SAME
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.servedDate : Ljava/util/Date;
+    IFNULL L40
+   L41
+    LINENUMBER 213 L41
+    LDC "If-Modified-Since"
+    ASTORE 11
+   L42
+    LINENUMBER 214 L42
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.servedDateString : Ljava/lang/String;
+    ASTORE 12
+    GOTO L36
+   L40
+    LINENUMBER 218 L40
+   FRAME SAME
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    ACONST_NULL
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L36
+    LINENUMBER 222 L36
+   FRAME FULL [okhttp3/internal/cache/CacheStrategy$Factory okhttp3/CacheControl okhttp3/CacheControl J J J J java/lang/String java/lang/String] []
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+    INVOKEVIRTUAL okhttp3/Request.headers ()Lokhttp3/Headers;
+    INVOKEVIRTUAL okhttp3/Headers.newBuilder ()Lokhttp3/Headers$Builder;
+    ASTORE 13
+   L43
+    LINENUMBER 223 L43
+    ALOAD 13
+    ALOAD 11
+    ALOAD 12
+    DUP
+    INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNull (Ljava/lang/Object;)V
+    INVOKEVIRTUAL okhttp3/Headers$Builder.addLenient$okhttp (Ljava/lang/String;Ljava/lang/String;)Lokhttp3/Headers$Builder;
+    POP
+   L44
+    LINENUMBER 226 L44
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.request : Lokhttp3/Request;
+   L45
+    LINENUMBER 227 L45
+    INVOKEVIRTUAL okhttp3/Request.newBuilder ()Lokhttp3/Request$Builder;
+   L46
+    LINENUMBER 228 L46
+    ALOAD 13
+    INVOKEVIRTUAL okhttp3/Headers$Builder.build ()Lokhttp3/Headers;
+    INVOKEVIRTUAL okhttp3/Request$Builder.headers (Lokhttp3/Headers;)Lokhttp3/Request$Builder;
+   L47
+    LINENUMBER 229 L47
+    INVOKEVIRTUAL okhttp3/Request$Builder.build ()Lokhttp3/Request;
+   L48
+    LINENUMBER 225 L48
+    ASTORE 14
+   L49
+    LINENUMBER 230 L49
+    NEW okhttp3/internal/cache/CacheStrategy
+    DUP
+    ALOAD 14
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKESPECIAL okhttp3/internal/cache/CacheStrategy.<init> (Lokhttp3/Request;Lokhttp3/Response;)V
+    ARETURN
+   L50
+    LOCALVARIABLE builder Lokhttp3/Response$Builder; L24 L22 11
+    LOCALVARIABLE oneDayMillis J L27 L22 12
+    LOCALVARIABLE requestCaching Lokhttp3/CacheControl; L7 L50 1
+    LOCALVARIABLE responseCaching Lokhttp3/CacheControl; L10 L50 2
+    LOCALVARIABLE ageMillis J L11 L50 3
+    LOCALVARIABLE freshMillis J L12 L50 5
+    LOCALVARIABLE minFreshMillis J L16 L50 7
+    LOCALVARIABLE maxStaleMillis J L19 L50 9
+    LOCALVARIABLE conditionName Ljava/lang/String; L30 L50 11
+    LOCALVARIABLE conditionValue Ljava/lang/String; L31 L50 12
+    LOCALVARIABLE conditionalRequestHeaders Lokhttp3/Headers$Builder; L43 L50 13
+    LOCALVARIABLE conditionalRequest Lokhttp3/Request; L49 L50 14
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L50 0
+    MAXSTACK = 6
+    MAXLOCALS = 15
+
+  // access flags 0x12
+  private final computeFreshnessLifetime()J
+   L0
+    LINENUMBER 238 L0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    DUP
+    INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNull (Ljava/lang/Object;)V
+    INVOKEVIRTUAL okhttp3/Response.cacheControl ()Lokhttp3/CacheControl;
+    ASTORE 1
+   L1
+    LINENUMBER 239 L1
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.maxAgeSeconds ()I
+    ICONST_M1
+    IF_ICMPEQ L2
+   L3
+    LINENUMBER 240 L3
+    GETSTATIC java/util/concurrent/TimeUnit.SECONDS : Ljava/util/concurrent/TimeUnit;
+    ALOAD 1
+    INVOKEVIRTUAL okhttp3/CacheControl.maxAgeSeconds ()I
+    I2L
+    INVOKEVIRTUAL java/util/concurrent/TimeUnit.toMillis (J)J
+    LRETURN
+   L2
+    LINENUMBER 243 L2
+   FRAME APPEND [okhttp3/CacheControl]
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.expires : Ljava/util/Date;
+    ASTORE 2
+   L4
+    LINENUMBER 244 L4
+    ALOAD 2
+    IFNULL L5
+   L6
+    LINENUMBER 245 L6
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.servedDate : Ljava/util/Date;
+    DUP
+    IFNULL L7
+    INVOKEVIRTUAL java/util/Date.getTime ()J
+    GOTO L8
+   L7
+   FRAME FULL [okhttp3/internal/cache/CacheStrategy$Factory okhttp3/CacheControl java/util/Date] [java/util/Date]
+    POP
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.receivedResponseMillis : J
+   L8
+   FRAME SAME1 J
+    LSTORE 3
+   L9
+    LINENUMBER 246 L9
+    ALOAD 2
+    INVOKEVIRTUAL java/util/Date.getTime ()J
+    LLOAD 3
+    LSUB
+    LSTORE 5
+   L10
+    LINENUMBER 247 L10
+    LLOAD 5
+    LCONST_0
+    LCMP
+    IFLE L11
+    LLOAD 5
+    GOTO L12
+   L11
+   FRAME APPEND [J J]
+    LCONST_0
+   L12
+   FRAME SAME1 J
+    LRETURN
+   L5
+    LINENUMBER 250 L5
+   FRAME CHOP 2
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.lastModified : Ljava/util/Date;
+    IFNULL L13
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.cacheResponse : Lokhttp3/Response;
+    INVOKEVIRTUAL okhttp3/Response.request ()Lokhttp3/Request;
+    INVOKEVIRTUAL okhttp3/Request.url ()Lokhttp3/HttpUrl;
+    INVOKEVIRTUAL okhttp3/HttpUrl.query ()Ljava/lang/String;
+    IFNONNULL L13
+   L14
+    LINENUMBER 254 L14
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.servedDate : Ljava/util/Date;
+    DUP
+    IFNULL L15
+    INVOKEVIRTUAL java/util/Date.getTime ()J
+    GOTO L16
+   L15
+   FRAME SAME1 java/util/Date
+    POP
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.sentRequestMillis : J
+   L16
+   FRAME SAME1 J
+    LSTORE 3
+   L17
+    LINENUMBER 255 L17
+    LLOAD 3
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.lastModified : Ljava/util/Date;
+    DUP
+    INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNull (Ljava/lang/Object;)V
+    INVOKEVIRTUAL java/util/Date.getTime ()J
+    LSUB
+    LSTORE 5
+   L18
+    LINENUMBER 256 L18
+    LLOAD 5
+    LCONST_0
+    LCMP
+    IFLE L19
+    LLOAD 5
+    BIPUSH 10
+    I2L
+    LDIV
+    GOTO L20
+   L19
+   FRAME APPEND [J J]
+    LCONST_0
+   L20
+   FRAME SAME1 J
+    LRETURN
+   L13
+    LINENUMBER 259 L13
+   FRAME CHOP 2
+    LCONST_0
+    LRETURN
+   L21
+    LOCALVARIABLE servedMillis J L9 L5 3
+    LOCALVARIABLE delta J L10 L5 5
+    LOCALVARIABLE servedMillis J L17 L13 3
+    LOCALVARIABLE delta J L18 L13 5
+    LOCALVARIABLE responseCaching Lokhttp3/CacheControl; L1 L21 1
+    LOCALVARIABLE expires Ljava/util/Date; L4 L21 2
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L21 0
+    MAXSTACK = 4
+    MAXLOCALS = 7
+
+  // access flags 0x12
+  private final cacheResponseAge()J
+   L0
+    LINENUMBER 267 L0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.servedDate : Ljava/util/Date;
+    ASTORE 1
+   L1
+    LINENUMBER 269 L1
+    ALOAD 1
+    IFNULL L2
+   L3
+    LINENUMBER 270 L3
+    LCONST_0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.receivedResponseMillis : J
+    ALOAD 1
+    INVOKEVIRTUAL java/util/Date.getTime ()J
+    LSUB
+    INVOKESTATIC java/lang/Math.max (JJ)J
+    GOTO L4
+   L2
+    LINENUMBER 272 L2
+   FRAME APPEND [java/util/Date]
+    LCONST_0
+   L4
+    LINENUMBER 269 L4
+    LINENUMBER 268 L4
+   FRAME SAME1 J
+    LSTORE 2
+   L5
+    LINENUMBER 276 L5
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.ageSeconds : I
+    ICONST_M1
+    IF_ICMPEQ L6
+    LLOAD 2
+   L7
+    LINENUMBER 277 L7
+    GETSTATIC java/util/concurrent/TimeUnit.SECONDS : Ljava/util/concurrent/TimeUnit;
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.ageSeconds : I
+    I2L
+    INVOKEVIRTUAL java/util/concurrent/TimeUnit.toMillis (J)J
+    INVOKESTATIC java/lang/Math.max (JJ)J
+    GOTO L8
+   L6
+    LINENUMBER 279 L6
+   FRAME APPEND [J]
+    LLOAD 2
+   L8
+    LINENUMBER 276 L8
+    LINENUMBER 275 L8
+   FRAME SAME1 J
+    LSTORE 4
+   L9
+    LINENUMBER 282 L9
+    LCONST_0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.receivedResponseMillis : J
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.sentRequestMillis : J
+    LSUB
+    INVOKESTATIC java/lang/Math.max (JJ)J
+   L10
+    LINENUMBER 282 L10
+    LSTORE 6
+   L11
+    LINENUMBER 283 L11
+    LCONST_0
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.nowMillis : J
+    ALOAD 0
+    GETFIELD okhttp3/internal/cache/CacheStrategy$Factory.receivedResponseMillis : J
+    LSUB
+    INVOKESTATIC java/lang/Math.max (JJ)J
+   L12
+    LINENUMBER 283 L12
+    LSTORE 8
+   L13
+    LINENUMBER 284 L13
+    LLOAD 4
+    LLOAD 6
+    LADD
+    LLOAD 8
+    LADD
+    LRETURN
+   L14
+    LOCALVARIABLE servedDate Ljava/util/Date; L1 L14 1
+    LOCALVARIABLE apparentReceivedAge J L5 L14 2
+    LOCALVARIABLE receivedAge J L9 L14 4
+    LOCALVARIABLE responseDuration J L11 L14 6
+    LOCALVARIABLE residentDuration J L13 L14 8
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L14 0
+    MAXSTACK = 6
+    MAXLOCALS = 10
+
+  // access flags 0x12
+  private final hasConditions(Lokhttp3/Request;)Z
+   L0
+    LINENUMBER 293 L0
+    ALOAD 1
+    LDC "If-Modified-Since"
+    INVOKEVIRTUAL okhttp3/Request.header (Ljava/lang/String;)Ljava/lang/String;
+    IFNONNULL L1
+    ALOAD 1
+    LDC "If-None-Match"
+    INVOKEVIRTUAL okhttp3/Request.header (Ljava/lang/String;)Ljava/lang/String;
+    IFNULL L2
+   L1
+   FRAME SAME
+    ICONST_1
+    GOTO L3
+   L2
+   FRAME SAME
+    ICONST_0
+   L3
+   FRAME SAME1 I
+    IRETURN
+   L4
+    LOCALVARIABLE this Lokhttp3/internal/cache/CacheStrategy$Factory; L0 L4 0
+    LOCALVARIABLE request Lokhttp3/Request; L0 L4 1
+    MAXSTACK = 2
+    MAXLOCALS = 2
+}

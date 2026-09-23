@@ -31,7 +31,7 @@ class OkHttpGuardTasksTest {
             ),
         )
         assertEquals(
-            recipe.fingerprints.getValue(Variant.ANDROID),
+            recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR).getValue(Variant.ANDROID),
             connectInterceptorSha256(aar, recipe.fingerprintArtifacts.getValue(Variant.ANDROID), Variant.ANDROID),
         )
     }
@@ -40,8 +40,68 @@ class OkHttpGuardTasksTest {
     fun `jvm flat jar extraction yields the golden class hash`() {
         val jar = zipOf(mapOf(CONNECT_INTERCEPTOR_TEST_ENTRY to stock("5.5.0", Variant.JVM)))
         assertEquals(
-            recipe.fingerprints.getValue(Variant.JVM),
+            recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR).getValue(Variant.JVM),
             connectInterceptorSha256(jar, recipe.fingerprintArtifacts.getValue(Variant.JVM), Variant.JVM),
+        )
+    }
+
+    @Test
+    fun `jvm jar extraction yields the CallServerInterceptor golden hash`() {
+        val entry = InstrumentTarget.CALL_SERVER_INTERCEPTOR.classEntry
+        val jar = zipOf(mapOf(entry to callServerStock("5.5.0", Variant.JVM)))
+        assertEquals(
+            recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR).getValue(Variant.JVM),
+            classEntrySha256(jar, recipe.fingerprintArtifacts.getValue(Variant.JVM), Variant.JVM, entry),
+        )
+    }
+
+    @Test
+    fun `jvm jar extraction yields the Cache Entry golden hash`() {
+        val entry = InstrumentTarget.CACHE_ENTRY.classEntry
+        val jar = zipOf(mapOf(entry to stock("5.5.0", Variant.JVM, InstrumentTarget.CACHE_ENTRY.fileName)))
+        assertEquals(
+            recipe.fingerprints.getValue(InstrumentTarget.CACHE_ENTRY).getValue(Variant.JVM),
+            classEntrySha256(jar, recipe.fingerprintArtifacts.getValue(Variant.JVM), Variant.JVM, entry),
+        )
+    }
+
+    @Test
+    fun `android AAR extraction yields the Cache Entry golden hash`() {
+        val entry = InstrumentTarget.CACHE_ENTRY.classEntry
+        val aar = zipOf(
+            mapOf(
+                "classes.jar" to jarOfEntry(entry, stock("5.5.0", Variant.ANDROID, InstrumentTarget.CACHE_ENTRY.fileName)),
+            ),
+        )
+        assertEquals(
+            recipe.fingerprints.getValue(InstrumentTarget.CACHE_ENTRY).getValue(Variant.ANDROID),
+            classEntrySha256(aar, recipe.fingerprintArtifacts.getValue(Variant.ANDROID), Variant.ANDROID, entry),
+        )
+    }
+
+    @Test
+    fun `jvm jar extraction yields the CacheStrategy Factory golden hash`() {
+        val entry = InstrumentTarget.CACHE_STRATEGY_FACTORY.classEntry
+        val jar = zipOf(
+            mapOf(entry to stock("5.4.0", Variant.JVM, InstrumentTarget.CACHE_STRATEGY_FACTORY.fileName)),
+        )
+        assertEquals(
+            recipe.fingerprints.getValue(InstrumentTarget.CACHE_STRATEGY_FACTORY).getValue(Variant.JVM),
+            classEntrySha256(jar, recipe.fingerprintArtifacts.getValue(Variant.JVM), Variant.JVM, entry),
+        )
+    }
+
+    @Test
+    fun `android AAR extraction yields the CallServerInterceptor golden hash`() {
+        val entry = InstrumentTarget.CALL_SERVER_INTERCEPTOR.classEntry
+        val aar = zipOf(
+            mapOf(
+                "classes.jar" to jarOfEntry(entry, callServerStock("5.5.0", Variant.ANDROID)),
+            ),
+        )
+        assertEquals(
+            recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR).getValue(Variant.ANDROID),
+            classEntrySha256(aar, recipe.fingerprintArtifacts.getValue(Variant.ANDROID), Variant.ANDROID, entry),
         )
     }
 
@@ -63,7 +123,10 @@ class OkHttpGuardTasksTest {
         }
         val jar = zipOf(mapOf(CONNECT_INTERCEPTOR_TEST_ENTRY to mutated))
         val actual = connectInterceptorSha256(jar, recipe.fingerprintArtifacts.getValue(Variant.JVM), Variant.JVM)
-        assertFalse(recipe.fingerprints.getValue(Variant.JVM).equals(actual, ignoreCase = true))
+        assertFalse(
+            recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR).getValue(Variant.JVM)
+                .equals(actual, ignoreCase = true),
+        )
     }
 
     @Test
@@ -150,10 +213,12 @@ private fun zipOf(entries: Map<String, ByteArray>): File {
 }
 
 /** Flat jar (okhttp-jvm layout) holding exactly one class entry. */
-private fun jarOf(classBytes: ByteArray): ByteArray {
+private fun jarOf(classBytes: ByteArray): ByteArray = jarOfEntry(CONNECT_INTERCEPTOR_TEST_ENTRY, classBytes)
+
+private fun jarOfEntry(entry: String, classBytes: ByteArray): ByteArray {
     val buffer = java.io.ByteArrayOutputStream()
     ZipOutputStream(buffer).use { zip ->
-        zip.putNextEntry(ZipEntry(CONNECT_INTERCEPTOR_TEST_ENTRY))
+        zip.putNextEntry(ZipEntry(entry))
         zip.write(classBytes)
         zip.closeEntry()
     }
