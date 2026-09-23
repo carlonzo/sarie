@@ -70,7 +70,7 @@ public enum class FallbackReason {
     cleartext,
 
     /**
-     * The request contains WebSocket upgrade headers (`Upgrade: websocket`).
+     * The call was opened with `OkHttpClient.newWebSocket`.
      *
      * Why Cronet cannot serve: Cronet's bidirectional stream API does not integrate with
      * OkHttp's WebSocket lifecycle or listener protocol.

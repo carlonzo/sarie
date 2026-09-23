@@ -89,7 +89,7 @@ public object SarieBridge {
     ) {
         val generation = generations.next()
         // Before the provider lookup: a failed install still reports engine_missing.
-        this.logger = config.debugLogger
+        this.logger = config.debugLogger?.let(::SwallowingLogger)
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
@@ -105,82 +105,37 @@ public object SarieBridge {
         }
     }
 
+    /**
+     * Runs the Play Services installer, then re-runs provider selection: Play Services on
+     * success, otherwise the next enabled provider (HttpEngine), otherwise engine_missing.
+     */
     private fun initPlayServicesAndBuild(
         context: Context,
         config: SarieConfig,
         providers: List<LiveCronetProvider>,
         generation: Int,
     ) {
-        try {
+        val task = try {
             com.google.android.gms.net.CronetProviderInstaller.installProvider(context)
-                .addOnCompleteListener(installerExecutor) { task ->
-                    if (!generations.isCurrent(generation)) return@addOnCompleteListener
-                    val fresh = CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) }
-                    if (task.isSuccessful) {
-                        // Not the caller's thread: a throw here would crash the process.
-                        try {
-                            buildAndPublishEngine(context, config, fresh, generation)
-                        } catch (t: Throwable) {
-                            logger?.log(
-                                Log.WARN,
-                                "Building the Play Services Cronet engine failed; " +
-                                    "leaving requests on stock OkHttp (engine_missing).",
-                                t,
-                            )
-                        }
-                    } else {
-                        val fallback = selectCronetProvider(fresh)
-                        if (fallback != null) {
-                            logger?.log(
-                                Log.WARN,
-                                "Play Services CronetProviderInstaller failed; " +
-                                    "falling back to ${fallback.name}.",
-                                task.exception,
-                            )
-                            try {
-                                buildAndPublishEngine(context, config, fresh, generation)
-                            } catch (t: Throwable) {
-                                logger?.log(
-                                    Log.WARN,
-                                    "Building the fallback Cronet engine failed; " +
-                                        "leaving requests on stock OkHttp (engine_missing).",
-                                    t,
-                                )
-                            }
-                        } else {
-                            logger?.log(
-                                Log.WARN,
-                                "Play Services CronetProviderInstaller failed; " +
-                                    "leaving requests on stock OkHttp (engine_missing).",
-                                task.exception,
-                            )
-                        }
-                    }
-                }
         } catch (t: Throwable) {
-            val fallback = selectCronetProvider(providers)
-            if (fallback != null) {
+            logger?.log(Log.WARN, "Play Services CronetProviderInstaller failed to start.", t)
+            buildAndPublishEngine(context, config, providers, generation)
+            return
+        }
+        task.addOnCompleteListener(installerExecutor) { done ->
+            if (!generations.isCurrent(generation)) return@addOnCompleteListener
+            if (!done.isSuccessful) {
+                logger?.log(Log.WARN, "Play Services CronetProviderInstaller failed.", done.exception)
+            }
+            // Not the caller's thread: a throw here would crash the process.
+            try {
+                val fresh = CronetProvider.getAllProviders(context).map { LiveCronetProvider(it) }
+                buildAndPublishEngine(context, config, fresh, generation)
+            } catch (t: Throwable) {
                 logger?.log(
                     Log.WARN,
-                    "Play Services CronetProviderInstaller failed to start; " +
-                        "falling back to ${fallback.name}.",
-                    t,
-                )
-                try {
-                    buildAndPublishEngine(context, config, providers, generation)
-                } catch (e: Throwable) {
-                    logger?.log(
-                        Log.WARN,
-                        "Building the fallback Cronet engine failed; " +
-                            "leaving requests on stock OkHttp (engine_missing).",
-                        e,
-                    )
-                }
-            } else {
-                logger?.log(
-                    Log.WARN,
-                    "Play Services CronetProviderInstaller failed to start; " +
-                        "leaving requests on stock OkHttp (engine_missing).",
+                    "Building the Cronet engine failed; leaving requests on stock OkHttp " +
+                        "(engine_missing).",
                     t,
                 )
             }
@@ -321,7 +276,7 @@ public object SarieBridge {
             "configure cannot be used with a borrowed CronetEngine"
         }
         val generation = generations.next()
-        this.logger = config.debugLogger
+        this.logger = config.debugLogger?.let(::SwallowingLogger)
         this.listener = config.listener
         warmTrustBaseline()
         warnIfUnverified(OkHttp.VERSION)
@@ -427,4 +382,17 @@ internal class InstallGeneration {
     fun next(): Int = counter.incrementAndGet()
 
     fun isCurrent(generation: Int): Boolean = counter.get() == generation
+}
+
+/**
+ * Host loggers run inside network calls and on Cronet and executor threads; a throw from one
+ * must never fail a request or crash a background thread.
+ */
+private class SwallowingLogger(private val delegate: SarieLogger) : SarieLogger {
+    override fun log(priority: Int, message: String, throwable: Throwable?) {
+        try {
+            delegate.log(priority, message, throwable)
+        } catch (_: Throwable) {
+        }
+    }
 }

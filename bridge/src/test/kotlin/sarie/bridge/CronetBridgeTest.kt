@@ -805,6 +805,25 @@ class CronetBridgeTest {
     }
 
     @Test
+    fun `throwing debugLogger still returns the response`() {
+        val engine = ScriptedCronetEngine()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
+        SarieBridge.install(engine) {
+            policy(
+                object : CronetPolicy {
+                    override val allowedOrigins: Set<String> = setOf("example.com")
+                },
+            )
+            mapper(mapper)
+            debugLogger { _, _, _ -> throw IllegalStateException("host logger") }
+        }
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val response = CronetBridge.intercept(chain)
+        assertEquals(200, response.code)
+        response.close()
+    }
+
+    @Test
     fun `debugLogger receives routing lines and negotiated protocol`() {
         val messages = mutableListOf<String>()
         val testLogger = SarieLogger { _, message, _ ->

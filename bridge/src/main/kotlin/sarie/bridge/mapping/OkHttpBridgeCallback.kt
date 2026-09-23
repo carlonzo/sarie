@@ -86,14 +86,11 @@ internal class OkHttpBridgeCallback(
 
     private fun deliverResponseHeaders(urlResponseInfo: UrlResponseInfo) {
         responseHeadersDelivered = true
-        try {
-            SarieBridge.logger?.log(
-                Log.DEBUG,
-                "${urlResponseInfo.url} -> ${urlResponseInfo.negotiatedProtocol}",
-                null,
-            )
-        } catch (_: Throwable) {
-        }
+        SarieBridge.logger?.log(
+            Log.DEBUG,
+            "${urlResponseInfo.url} -> ${urlResponseInfo.negotiatedProtocol}",
+            null,
+        )
         // Direct executor: this runs on a Cronet thread. The listener call itself does no I/O.
         onResponseHeadersStart?.invoke()
     }

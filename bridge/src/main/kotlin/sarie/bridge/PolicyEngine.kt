@@ -177,15 +177,15 @@ internal object PolicyEngine {
      */
     private fun contentTypeDenied(request: Request): Boolean {
         val body = request.body ?: return false
+        if (body.contentType() != null) return false
+        if (!request.header(CONTENT_TYPE).isNullOrBlank()) return false
+        // Last: contentLength() can be costly (multipart sums its parts).
         val length = try {
             body.contentLength()
         } catch (_: IOException) {
             -1L
         }
-        if (length == 0L) return false
-        if (body.contentType() != null) return false
-        val header = request.header(CONTENT_TYPE)
-        return header == null || header.trim().isEmpty()
+        return length != 0L
     }
 
     private const val ACCEPT_ENCODING = "Accept-Encoding"
