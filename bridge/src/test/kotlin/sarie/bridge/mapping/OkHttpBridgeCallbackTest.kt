@@ -74,6 +74,22 @@ class OkHttpBridgeCallbackTest {
     }
 
     @Test
+    fun `onFailed with null response info fails the headers future`() {
+        // Cronet passes null info for failures before any response (TLS, pins, DNS, connect).
+        val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000)
+        val cause = FakeCronetException("handshake failed")
+
+        cb.onFailed(newRequest(cb), null, cause)
+
+        try {
+            cb.headersFuture.get(1, TimeUnit.SECONDS)
+            throw AssertionError("headersFuture should have failed")
+        } catch (expected: java.util.concurrent.ExecutionException) {
+            assertEquals(cause, expected.cause)
+        }
+    }
+
+    @Test
     fun `onFailed before response started fails both futures`() {
         val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000)
         val request = newRequest(cb)

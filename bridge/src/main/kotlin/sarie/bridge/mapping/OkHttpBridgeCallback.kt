@@ -148,9 +148,12 @@ class OkHttpBridgeCallback(
         callbackResults.add(CallbackResult(CallbackStep.ON_SUCCESS, null))
     }
 
+    // urlResponseInfo is null when the failure precedes any response (DNS, connect, TLS, pins).
+    // A non-null Kotlin parameter would throw inside Cronet's callback, the futures would never
+    // complete, and the call would hang until the read timeout.
     override fun onFailed(
         urlRequest: UrlRequest,
-        urlResponseInfo: UrlResponseInfo,
+        urlResponseInfo: UrlResponseInfo?,
         e: CronetException,
     ) {
         // If this was called before we start reading the body, the exception will propagate in
