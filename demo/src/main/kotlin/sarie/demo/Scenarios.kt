@@ -184,6 +184,16 @@ object Scenarios {
         clients: Clients,
         onImageReceived: ((index: Int, bitmap: Bitmap?, stack: Stack) -> Unit)? = null,
     ): ParallelImagesResult {
+        val warmupRequest = Request.Builder()
+            .url("https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=100&q=60")
+            .build()
+        try {
+            clients.stockClient.newCall(warmupRequest).execute().close()
+        } catch (_: Exception) {}
+        try {
+            clients.sarieClient.newCall(warmupRequest).execute().close()
+        } catch (_: Exception) {}
+
         val runSequence = listOf(
             Stack.STOCK,
             Stack.SARIE,
@@ -199,7 +209,6 @@ object Scenarios {
         for (stack in runSequence) {
             when (stack) {
                 Stack.STOCK -> {
-                    clients.stockClient.connectionPool.evictAll()
                     val run = executeParallelRun(clients.stockClient, stack, onImageReceived)
                     stockRuns.add(run)
                 }
