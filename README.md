@@ -11,7 +11,7 @@ Sarie is a lightweight transport bridge for Android apps that use OkHttp (and Re
 Crucially:
 - **No OkHttp fork**: Your app continues using official OkHttp coordinates.
 - **No user-visible interceptors**: You do not need to add or reorder interceptors or replace your `OkHttpClient` with a custom `Call.Factory`.
-- **Pre-send safety**: Requests with configurations Cronet cannot support (e.g. WebSockets, custom proxies, pins Sarie did not install, or a custom `Dns`) automatically and safely route to stock OkHttp *before* any network I/O begins.
+- **Pre-send safety**: Requests with configurations Cronet cannot support (e.g. WebSockets, custom proxies, or pins Sarie did not install) automatically and safely route to stock OkHttp *before* any network I/O begins.
 
 ---
 
@@ -20,7 +20,7 @@ Crucially:
 1. **Build-time bytecode rewriting**: The Sarie Gradle plugin rewrites four internal OkHttp call sites at APK packaging time: `ConnectInterceptor` (the bridge trampoline), `CallServerInterceptor` (a prefix), and two cache `isHttps` checks.
 2. **Pre-send policy routing**: Every request reaching the connection stage passes through an internal pre-send policy engine:
    - **Allowed HTTPS requests** are converted and dispatched over the high-performance Cronet engine. An OkHttp cache, network interceptors, and a custom authenticator stay on that path.
-   - **Unsupported or opt-out requests** (cleartext HTTP, WebSockets, custom trust managers, proxies, a custom `Dns`, or explicit opt-outs) fall back to stock OkHttp's native connection pipeline.
+   - **Unsupported or opt-out requests** (cleartext HTTP, WebSockets, custom trust managers, proxies, or explicit opt-outs) fall back to stock OkHttp's native connection pipeline.
 3. **Transparent to application interceptors**: Because the swap happens at `ConnectInterceptor` (the lowest layer of OkHttp's interceptor chain), your logging, tracing, authentication, and header interceptors run normally above the bridge and observe all responses.
 
 ---
@@ -167,7 +167,7 @@ val retrofit = Retrofit.Builder()
 
 ```kotlin
 SarieBridge.install(engine) {
-    // Configure policy, mapper, debugLogger, bypassableDns
+    // Configure policy, mapper, listener, debugLogger
 }
 ```
 
@@ -196,15 +196,12 @@ SarieBridge.install(context) {
 }
 ```
 
-#### DNS bypass opt-in (`bypassableDns`)
-By default, any client with a custom `Dns` (`client.dns !== Dns.SYSTEM`) falls back to stock OkHttp (`reason=dns`). If your custom `Dns` is safe to bypass (Cronet resolves hostnames independently using Chromium's resolver), opt it in:
+#### Custom `Dns` is ignored on Cronet
 
-```kotlin
-SarieBridge.install(context) {
-    certificatePinner(client.certificatePinner)
-    bypassableDns(customDns) // repeatable; uses identity match
-}
-```
+> [!WARNING]
+> Cronet resolves hostnames with Chromium's own resolver and has no API to plug in a resolver. A custom `Dns` on your `OkHttpClient` (`client.dns`) is **never called** for requests Sarie routes to Cronet. It still runs for requests that fall back to stock OkHttp. Google's `cronet-transport-for-okhttp` behaves the same way. If a client depends on its `Dns` for correctness (host overrides, DNS-over-HTTPS for censorship or privacy, blocking), keep it off Cronet with `CronetOptOut` or the allowlist.
+
+Tune Cronet's resolver directly in `configure` (built install only), for example with `setDnsOptions` (`persistHostCache`, stale DNS, and so on). `setDnsOptions` replaces Sarie's stale-DNS defaults, so set everything you want in the same call.
 
 #### First-connection HTTP/3 (`addQuicHint`)
 Cronet normally discovers HTTP/3 after the first connection receives an `Alt-Svc` response header over TCP. Pass a QUIC hint in `configure` so the **very first connection** attempts HTTP/3. `configure` runs before Sarie overwrites brotli, the HTTP cache, the storage path, and local-trust pin bypass:
@@ -313,7 +310,6 @@ The debug logger prints `-> okhttp (reason=<value>)`. Use this table to understa
 | `FallbackReason` | Category | Trigger | Host Action / Resolution | Contract |
 | --- | --- | --- | --- | --- |
 | `pins` | Fixable via builder | Host matches a certificate pin, but the engine is borrowed, pins differ from the installed set, or a single-label `*.host` wildcard pattern was used | Call `certificatePinner(client.certificatePinner)` on the built install, and use exact hostnames or `**.host` double-wildcards (`*.host` is not supported by Cronet's pin engine) | [COMPATIBILITY row 13](COMPATIBILITY.md) |
-| `dns` | Fixable via builder | `client.dns !== Dns.SYSTEM` and DNS instance was not registered via `bypassableDns` | If the custom `Dns` is safe to bypass (Cronet resolves hostnames independently via its own resolver), register it with `bypassableDns(dns)` | [COMPATIBILITY row 15](COMPATIBILITY.md) |
 | `allowlist` | Fixable via builder | Request host (or `host:port`) is not in `policy.allowedOrigins` | Add the origin to `DefaultPolicy { allowedOrigins(setOf(...)) }`, or use an empty set / `"*"` to admit all HTTPS origins | [COMPATIBILITY row 18](COMPATIBILITY.md) |
 | `content_type` | Fixable via builder | Request body has nonzero or unknown (-1) length and no `Content-Type` was set on the body or headers | Set a `Content-Type` on the `RequestBody` or include a `Content-Type` header (avoids Cronet auto-injecting `application/octet-stream`) | [COMPATIBILITY row 35](COMPATIBILITY.md) |
 | `engine_missing` | Fixable (setup) | `install` has not returned, no enabled provider exists, or Play Services installer is still initializing in the background | Add an enabled provider dependency (`cronet-embedded` or `play-services-cronet`), and invoke `install(context)` early off the main thread | [COMPATIBILITY rows 20, 31, 33](COMPATIBILITY.md) |

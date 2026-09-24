@@ -202,7 +202,6 @@ public object SarieBridge {
                 installedPins = previous.installedPins,
                 providerName = previous.providerName,
                 providerVersion = previous.providerVersion,
-                bypassableDns = config.bypassableDns,
             )
             publishIfCurrentGeneration(generation, reused)
             logger?.log(
@@ -221,7 +220,6 @@ public object SarieBridge {
             installedPins = translation.installedPins,
             providerName = chosen.name,
             providerVersion = chosen.version,
-            bypassableDns = config.bypassableDns,
         )
         lastBuilt = snapshot
         publishIfCurrentGeneration(generation, snapshot)
@@ -261,7 +259,7 @@ public object SarieBridge {
      *
      * @param engine Host-built engine. The host owns its lifecycle. Compression and HTTP cache
      *   are whatever the host set; Sarie still disables the cache on each request.
-     * @param config Configuration for routing policy, mapper, listener, logger, and bypassable DNS.
+     * @param config Configuration for routing policy, mapper, listener, and logger.
      *   Setting `certificatePinner` or `configure` throws [IllegalArgumentException].
      * @throws IllegalArgumentException if `config.certificatePinner` or `config.configure` is set.
      */
@@ -287,7 +285,6 @@ public object SarieBridge {
                 policy = config.policy,
                 mapper = config.mapper,
                 installedAtMillis = System.currentTimeMillis(),
-                bypassableDns = config.bypassableDns,
             ),
         )
         logger?.log(

@@ -3,7 +3,6 @@
 package sarie.bridge
 
 import java.io.IOException
-import okhttp3.Dns
 import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.internal.tls.OkHostnameVerifier
@@ -50,21 +49,21 @@ internal fun parseAllowedOrigins(allowed: Set<String>): List<ParsedOrigin>? {
  * 9. explicit proxy or non-baseline proxySelector -> proxy
  * 10. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
  * 11. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
- * 12. dns !== Dns.SYSTEM and not in bypassableDns -> dns
- * 13. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
- * 14. TLS/trust fingerprint mismatch -> trust (Metis B1)
- * 15. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
+ * 12. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
+ * 13. TLS/trust fingerprint mismatch -> trust (Metis B1)
+ * 14. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
  *     -> content_encoding
- * 16. nonzero or unknown length body missing Content-Type -> content_type
- * 17. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
+ * 15. nonzero or unknown length body missing Content-Type -> content_type
+ * 16. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
  *     is a local-test-server concern, not a distinct transport incompatibility)
- * 18. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
- * 19. else allow
+ * 17. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
+ * 18. else allow
  *
  * Authenticators are not a routing rule. A 401 is returned so OkHttp calls
  * authenticator.authenticate(route = null, response).
  * OkHttp's cache is not a deny. Hits and 304 revalidation stay on OkHttp's chain.
  * Network interceptors are not a deny. They run on OkHttp's own chain before the Cronet hop.
+ * A custom Dns is not a deny. Cronet resolves hosts itself and never calls it.
  */
 internal object PolicyEngine {
 
@@ -98,9 +97,6 @@ internal object PolicyEngine {
         }
         if (input.hostnameVerifier !== OkHostnameVerifier) {
             return FallbackReason.hostname_verifier
-        }
-        if (input.dns !== Dns.SYSTEM && input.dns !in snapshot.bypassableDns) {
-            return FallbackReason.dns
         }
         if (!pinsSatisfied(
                 input.certificatePinner,

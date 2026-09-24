@@ -44,7 +44,6 @@ public final class sarie/bridge/FallbackReason : java/lang/Enum {
 	public static final field content_encoding Lsarie/bridge/FallbackReason;
 	public static final field content_type Lsarie/bridge/FallbackReason;
 	public static final field disabled Lsarie/bridge/FallbackReason;
-	public static final field dns Lsarie/bridge/FallbackReason;
 	public static final field engine_missing Lsarie/bridge/FallbackReason;
 	public static final field h2_prior_knowledge Lsarie/bridge/FallbackReason;
 	public static final field hostname_verifier Lsarie/bridge/FallbackReason;
@@ -86,7 +85,6 @@ public final class sarie/bridge/SarieConfig {
 	public static final field Companion Lsarie/bridge/SarieConfig$Companion;
 	public static final field DEFAULT Lsarie/bridge/SarieConfig;
 	public synthetic fun <init> (Lsarie/bridge/SarieConfig$Builder;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
-	public final fun getBypassableDns ()Ljava/util/Set;
 	public final fun getCertificatePinner ()Lokhttp3/CertificatePinner;
 	public final fun getConfigure ()Lkotlin/jvm/functions/Function1;
 	public final fun getDebugLogger ()Lsarie/bridge/SarieLogger;
@@ -99,7 +97,6 @@ public final class sarie/bridge/SarieConfig {
 public final class sarie/bridge/SarieConfig$Builder {
 	public fun <init> ()V
 	public final fun build ()Lsarie/bridge/SarieConfig;
-	public final fun bypassableDns (Lokhttp3/Dns;)Lsarie/bridge/SarieConfig$Builder;
 	public final fun certificatePinner (Lokhttp3/CertificatePinner;)Lsarie/bridge/SarieConfig$Builder;
 	public final fun configure (Lkotlin/jvm/functions/Function1;)Lsarie/bridge/SarieConfig$Builder;
 	public final fun debugLogger (Lsarie/bridge/SarieLogger;)Lsarie/bridge/SarieConfig$Builder;

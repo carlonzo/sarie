@@ -8,7 +8,6 @@ import org.chromium.net.CronetEngine
 import org.chromium.net.UrlRequest
 import android.util.Log
 import okhttp3.CertificatePinner
-import okhttp3.Dns
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -193,7 +192,7 @@ class SarieBridgeTest {
             listOf(
                 "disabled", "engine_missing", "tag_opt_out", "allowlist", "cleartext", "websocket",
                 "h2_prior_knowledge", "proxy", "socket_factory", "hostname_verifier", "pins",
-                "trust", "dns", "content_encoding", "policy_error", "content_type",
+                "trust", "content_encoding", "policy_error", "content_type",
             ),
             FallbackReason.values().map { it.name },
         )
@@ -258,29 +257,16 @@ class SarieBridgeTest {
     }
 
     @Test
-    fun `install records bypassable dns on snapshot`() {
-        val dns = Dns { emptyList() }
-        val cfg = SarieConfig { bypassableDns(dns) }
-        SarieBridge.install(FakeCronetEngine(), cfg)
-        val snap = SarieBridge.snapshot()
-        assertNotNull(snap)
-        assertTrue(dns in snap!!.bypassableDns)
-    }
-
-    @Test
     fun `install with trailing lambda config builds the same snapshot as explicit config`() {
         val engine = FakeCronetEngine()
-        val dns = Dns { emptyList() }
         SarieBridge.install(engine) {
             policy(this@SarieBridgeTest.policy)
             mapper(this@SarieBridgeTest.mapper)
-            bypassableDns(dns)
         }
         val snap = SarieBridge.snapshot()!!
         assertSame(engine, snap.engine)
         assertSame(policy, snap.policy)
         assertSame(mapper, snap.mapper)
-        assertTrue(dns in snap.bypassableDns)
     }
 
     @Test
@@ -307,7 +293,6 @@ class SarieBridgeTest {
 
     @Test
     fun `SarieConfig DSL builds identical config to Builder`() {
-        val dns = Dns { emptyList() }
         val testLogger = SarieLogger { _, _, _ -> }
         val pinner = CertificatePinner.Builder().build()
         val pol = DefaultPolicy()
@@ -317,7 +302,6 @@ class SarieBridgeTest {
             .mapper(RequestToUrlRequestMapper.NOOP)
             .certificatePinner(pinner)
             .debugLogger(testLogger)
-            .bypassableDns(dns)
             .build()
 
         val fromDsl = SarieConfig {
@@ -325,14 +309,12 @@ class SarieBridgeTest {
             mapper(RequestToUrlRequestMapper.NOOP)
             certificatePinner(pinner)
             debugLogger(testLogger)
-            bypassableDns(dns)
         }
 
         assertSame(fromBuilder.policy, fromDsl.policy)
         assertSame(fromBuilder.mapper, fromDsl.mapper)
         assertSame(fromBuilder.certificatePinner, fromDsl.certificatePinner)
         assertSame(fromBuilder.debugLogger, fromDsl.debugLogger)
-        assertEquals(fromBuilder.bypassableDns, fromDsl.bypassableDns)
     }
 }
 

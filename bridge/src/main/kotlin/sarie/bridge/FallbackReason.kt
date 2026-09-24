@@ -6,7 +6,7 @@ package sarie.bridge
  * [SarieLogger.Logcat]. When a request is served by Cronet, the reason is null.
  *
  * Reasons fall into three categories:
- * - Fixable via [SarieConfig.Builder] or request adjustments ([pins], [dns], [allowlist],
+ * - Fixable via [SarieConfig.Builder] or request adjustments ([pins], [allowlist],
  *   [content_type], [engine_missing], [content_encoding], and loopback [cleartext]).
  * - Intentional controls ([disabled], [tag_opt_out]).
  * - Unsupported by Cronet, staying on OkHttp by design ([cleartext], [websocket],
@@ -145,19 +145,6 @@ public enum class FallbackReason {
      * Resolution: Stays on OkHttp by design.
      */
     trust,
-
-    /**
-     * The client uses a custom [okhttp3.Dns] implementation (`client.dns !== Dns.SYSTEM`)
-     * that has not been opted in via [SarieConfig.Builder.bypassableDns].
-     *
-     * Why Cronet cannot serve: Cronet performs DNS resolution internally through Chromium's
-     * resolver and does not invoke OkHttp's `Dns` interface.
-     *
-     * Resolution: If Cronet's independent resolution is acceptable for this client, register
-     * the DNS instance via [SarieConfig.Builder.bypassableDns]. Otherwise, stays on OkHttp
-     * by design to respect custom DNS routing.
-     */
-    dns,
 
     /**
      * The request sets a manual `Accept-Encoding` header, or overrides compression headers
