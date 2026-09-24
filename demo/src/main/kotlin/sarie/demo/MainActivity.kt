@@ -372,7 +372,9 @@ class MainActivity : AppCompatActivity() {
     private fun runDownloadScenario() {
         setRunButtonsEnabled(false)
         btnRunDownload.text = "Running..."
+        pbStock.isIndeterminate = false
         pbStock.progress = 0
+        pbSarie.isIndeterminate = false
         pbSarie.progress = 0
         tvStockProgress.text = "0.0 MB"
         tvSarieProgress.text = "0.0 MB"
@@ -387,42 +389,12 @@ class MainActivity : AppCompatActivity() {
                     clients = DemoApp.instance.clients,
                     onStockProgress = { progress ->
                         runOnUiThread {
-                            val total = if (progress.totalBytes > 0) progress.totalBytes else 8_927_529L
-                            val pct = ((progress.bytesRead.toDouble() / total.toDouble()) * 100).toInt().coerceIn(0, 100)
-                            pbStock.progress = pct
-                            val mb = progress.bytesRead / (1024.0 * 1024.0)
-                            tvStockProgress.text = String.format(java.util.Locale.US, "%.1f MB", mb)
-                            if (progress.isComplete) {
-                                if (progress.error == null) {
-                                    tvStockStatus.text = "ok"
-                                    tvStockStatus.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                                } else {
-                                    tvStockStatus.text = "err: ${progress.error}"
-                                    tvStockStatus.setTextColor(android.graphics.Color.parseColor("#F44336"))
-                                }
-                            } else {
-                                tvStockStatus.text = "downloading..."
-                            }
+                            updateDownloadProgress(progress, pbStock, tvStockProgress, tvStockStatus)
                         }
                     },
                     onSarieProgress = { progress ->
                         runOnUiThread {
-                            val total = if (progress.totalBytes > 0) progress.totalBytes else 8_927_529L
-                            val pct = ((progress.bytesRead.toDouble() / total.toDouble()) * 100).toInt().coerceIn(0, 100)
-                            pbSarie.progress = pct
-                            val mb = progress.bytesRead / (1024.0 * 1024.0)
-                            tvSarieProgress.text = String.format(java.util.Locale.US, "%.1f MB", mb)
-                            if (progress.isComplete) {
-                                if (progress.error == null) {
-                                    tvSarieStatus.text = "ok"
-                                    tvSarieStatus.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-                                } else {
-                                    tvSarieStatus.text = "err: ${progress.error}"
-                                    tvSarieStatus.setTextColor(android.graphics.Color.parseColor("#F44336"))
-                                }
-                            } else {
-                                tvSarieStatus.text = "downloading..."
-                            }
+                            updateDownloadProgress(progress, pbSarie, tvSarieProgress, tvSarieStatus)
                         }
                     },
                 )
@@ -432,6 +404,40 @@ class MainActivity : AppCompatActivity() {
                     setRunButtonsEnabled(true)
                 }
             }
+        }
+    }
+
+    private fun updateDownloadProgress(
+        progress: DownloadProgress,
+        indicator: com.google.android.material.progressindicator.LinearProgressIndicator,
+        tvProgress: TextView,
+        tvStatus: TextView,
+    ) {
+        val mb = progress.bytesRead / (1024.0 * 1024.0)
+        tvProgress.text = String.format(java.util.Locale.US, "%.1f MB", mb)
+
+        if (progress.totalBytes > 0) {
+            indicator.isIndeterminate = false
+            val pct = ((progress.bytesRead.toDouble() / progress.totalBytes.toDouble()) * 100).toInt().coerceIn(0, 100)
+            indicator.progress = pct
+        } else {
+            indicator.isIndeterminate = !progress.isComplete
+        }
+
+        if (progress.isComplete) {
+            indicator.isIndeterminate = false
+            if (progress.error == null) {
+                if (progress.totalBytes <= 0) {
+                    indicator.progress = 100
+                }
+                tvStatus.text = "ok"
+                tvStatus.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+            } else {
+                tvStatus.text = "err: ${progress.error}"
+                tvStatus.setTextColor(android.graphics.Color.parseColor("#F44336"))
+            }
+        } else {
+            tvStatus.text = "downloading..."
         }
     }
 
