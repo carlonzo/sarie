@@ -2,6 +2,7 @@ package sarie.bridge
 
 import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.CertificatePinner
+import okhttp3.Dns
 import org.chromium.net.CronetEngine
 import sarie.bridge.mapping.RequestConverter
 import sarie.bridge.mapping.ResponseConverter
@@ -26,6 +27,7 @@ internal class RuntimeSnapshot(
     val installedPins: Set<CertificatePinner.Pin> = emptySet(),
     val providerName: String? = null,
     val providerVersion: String? = null,
+    val bypassableDns: Set<Dns> = emptySet(),
 ) {
     /** Null admits every origin (empty allowlist or `"*"`). Parsed once from [policy]. */
     val originRules: List<ParsedOrigin>? = parseAllowedOrigins(policy.allowedOrigins)

@@ -6,12 +6,16 @@ import java.net.URLStreamHandlerFactory
 import java.util.concurrent.Executor
 import org.chromium.net.CronetEngine
 import org.chromium.net.UrlRequest
+import android.util.Log
+import okhttp3.CertificatePinner
+import okhttp3.Dns
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -49,6 +53,10 @@ class SarieBridgeTest {
     }
 
     private val mapper = RequestToUrlRequestMapper { _, _ -> }
+    private val config = SarieConfig {
+        policy(this@SarieBridgeTest.policy)
+        mapper(this@SarieBridgeTest.mapper)
+    }
 
     @Before
     fun setUp() {
@@ -87,7 +95,7 @@ class SarieBridgeTest {
     @Test
     fun `install stores snapshot`() {
         val engine = FakeCronetEngine()
-        SarieBridge.install(engine, policy, mapper)
+        SarieBridge.install(engine, config)
 
         val snap = SarieBridge.snapshot()
         assertNotNull(snap)
@@ -103,9 +111,9 @@ class SarieBridgeTest {
         val engine1 = FakeCronetEngine()
         val engine2 = FakeCronetEngine()
 
-        SarieBridge.install(engine1, policy, mapper)
+        SarieBridge.install(engine1, config)
         val first = SarieBridge.snapshot()!!
-        SarieBridge.install(engine2, policy, mapper)
+        SarieBridge.install(engine2, config)
         val second = SarieBridge.snapshot()!!
 
         assertSame(engine2, second.engine)
@@ -117,7 +125,7 @@ class SarieBridgeTest {
     @Test
     fun `borrowed install is not sarie-built and records no pins or provider`() {
         val engine = FakeCronetEngine()
-        SarieBridge.install(engine, policy, mapper)
+        SarieBridge.install(engine, config)
 
         val snap = SarieBridge.snapshot()!!
         assertFalse(snap.sarieBuilt)
@@ -128,8 +136,31 @@ class SarieBridgeTest {
     }
 
     @Test
+    fun `borrowed install rejects certificatePinner`() {
+        val engine = FakeCronetEngine()
+        val pinner = CertificatePinner.Builder()
+            .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+            .build()
+        val pinnerConfig = SarieConfig { certificatePinner(pinner) }
+        val err = assertThrows(IllegalArgumentException::class.java) {
+            SarieBridge.install(engine, pinnerConfig)
+        }
+        assertTrue(err.message!!.contains("certificatePinner"))
+    }
+
+    @Test
+    fun `borrowed install rejects configure`() {
+        val engine = FakeCronetEngine()
+        val configureConfig = SarieConfig { configure { } }
+        val err = assertThrows(IllegalArgumentException::class.java) {
+            SarieBridge.install(engine, configureConfig)
+        }
+        assertTrue(err.message!!.contains("configure"))
+    }
+
+    @Test
     fun `uninstall drops snapshot and disables`() {
-        SarieBridge.install(FakeCronetEngine(), policy, mapper)
+        SarieBridge.install(FakeCronetEngine(), config)
         SarieBridge.uninstall()
 
         assertNull(SarieBridge.snapshot())
@@ -138,7 +169,7 @@ class SarieBridgeTest {
 
     @Test
     fun `kill switch system property disables and restores`() {
-        SarieBridge.install(FakeCronetEngine(), policy, mapper)
+        SarieBridge.install(FakeCronetEngine(), config)
         assertTrue(SarieBridge.isEnabled())
 
         try {
@@ -157,26 +188,151 @@ class SarieBridgeTest {
     }
 
     @Test
-    @Suppress("DEPRECATION")
-    fun `CronetRuntime alias points to SarieBridge`() {
-        val engine = FakeCronetEngine()
-        CronetRuntime.install(engine)
-        assertSame(engine, SarieBridge.snapshot()?.engine)
-        assertSame(engine, CronetRuntime.snapshot()?.engine)
-        assertTrue(CronetRuntime.isEnabled())
-        CronetRuntime.uninstall()
-        assertNull(SarieBridge.snapshot())
-    }
-
-    @Test
     fun `reason enum lists the pre-send denies`() {
         assertEquals(
             listOf(
                 "disabled", "engine_missing", "tag_opt_out", "allowlist", "cleartext", "websocket",
                 "h2_prior_knowledge", "proxy", "socket_factory", "hostname_verifier", "pins",
-                "trust", "dns", "content_encoding", "policy_error",
+                "trust", "dns", "content_encoding", "policy_error", "content_type",
             ),
             FallbackReason.values().map { it.name },
         )
     }
+
+    @Test
+    fun `logger receives unverified okhttp warning`() {
+        val messages = mutableListOf<String>()
+        val priorities = mutableListOf<Int>()
+        val testLogger = SarieLogger { priority, message, _ ->
+            priorities += priority
+            messages += message
+        }
+        val engine = FakeCronetEngine()
+        SarieBridge.install(engine, SarieConfig { debugLogger(testLogger) })
+        warnIfUnverified("9.9.9")
+        assertEquals(listOf(Log.INFO, Log.WARN), priorities)
+        assertTrue(messages.any { it.contains("9.9.9") })
+    }
+
+    @Test
+    fun `borrowed install logs summary line`() {
+        val messages = mutableListOf<String>()
+        val priorities = mutableListOf<Int>()
+        val testLogger = SarieLogger { priority, message, _ ->
+            priorities += priority
+            messages += message
+        }
+        val engine = FakeCronetEngine()
+        SarieBridge.install(engine, SarieConfig { debugLogger(testLogger) })
+        assertEquals(listOf(Log.INFO), priorities)
+        assertEquals(
+            "Cronet installed (borrowed): version=fake, pins=0",
+            messages.single(),
+        )
+    }
+
+    @Test
+    fun `SarieLogger Logcat smoke test`() {
+        SarieLogger.Logcat.log(Log.INFO, "test info", null)
+        SarieLogger.Logcat.log(Log.WARN, "test warn", RuntimeException("boom"))
+    }
+
+    @Test
+    fun `a newer install generation makes the older one stale`() {
+        val generations = InstallGeneration()
+        val older = generations.next()
+        assertTrue(generations.isCurrent(older))
+        val newer = generations.next()
+        assertFalse(generations.isCurrent(older))
+        assertTrue(generations.isCurrent(newer))
+    }
+
+    @Test
+    fun `rejected borrowed install keeps the current snapshot`() {
+        val engine = FakeCronetEngine()
+        SarieBridge.install(engine, config)
+        assertThrows(IllegalArgumentException::class.java) {
+            SarieBridge.install(FakeCronetEngine(), SarieConfig { configure { } })
+        }
+        assertSame(engine, SarieBridge.snapshot()?.engine)
+    }
+
+    @Test
+    fun `install records bypassable dns on snapshot`() {
+        val dns = Dns { emptyList() }
+        val cfg = SarieConfig { bypassableDns(dns) }
+        SarieBridge.install(FakeCronetEngine(), cfg)
+        val snap = SarieBridge.snapshot()
+        assertNotNull(snap)
+        assertTrue(dns in snap!!.bypassableDns)
+    }
+
+    @Test
+    fun `install with trailing lambda config builds the same snapshot as explicit config`() {
+        val engine = FakeCronetEngine()
+        val dns = Dns { emptyList() }
+        SarieBridge.install(engine) {
+            policy(this@SarieBridgeTest.policy)
+            mapper(this@SarieBridgeTest.mapper)
+            bypassableDns(dns)
+        }
+        val snap = SarieBridge.snapshot()!!
+        assertSame(engine, snap.engine)
+        assertSame(policy, snap.policy)
+        assertSame(mapper, snap.mapper)
+        assertTrue(dns in snap.bypassableDns)
+    }
+
+    @Test
+    fun `DefaultPolicy DSL builds identical policy to Builder`() {
+        val fromBuilder = DefaultPolicy.Builder()
+            .allowedOrigins(setOf("example.com", "api.example.com"))
+            .allowLoopbackHttps(true)
+            .sdkPins(setOf("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
+            .enabled { true }
+            .build()
+
+        val fromDsl = DefaultPolicy {
+            allowedOrigins(setOf("example.com", "api.example.com"))
+            allowLoopbackHttps(true)
+            sdkPins(setOf("sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="))
+            enabled { true }
+        }
+
+        assertEquals(fromBuilder.allowedOrigins, fromDsl.allowedOrigins)
+        assertEquals(fromBuilder.allowLoopbackHttps, fromDsl.allowLoopbackHttps)
+        assertEquals(fromBuilder.sdkPins, fromDsl.sdkPins)
+        assertEquals(fromBuilder.enabled(), fromDsl.enabled())
+    }
+
+    @Test
+    fun `SarieConfig DSL builds identical config to Builder`() {
+        val dns = Dns { emptyList() }
+        val testLogger = SarieLogger { _, _, _ -> }
+        val pinner = CertificatePinner.Builder().build()
+        val pol = DefaultPolicy()
+
+        val fromBuilder = SarieConfig.Builder()
+            .policy(pol)
+            .mapper(RequestToUrlRequestMapper.NOOP)
+            .certificatePinner(pinner)
+            .debugLogger(testLogger)
+            .bypassableDns(dns)
+            .build()
+
+        val fromDsl = SarieConfig {
+            policy(pol)
+            mapper(RequestToUrlRequestMapper.NOOP)
+            certificatePinner(pinner)
+            debugLogger(testLogger)
+            bypassableDns(dns)
+        }
+
+        assertSame(fromBuilder.policy, fromDsl.policy)
+        assertSame(fromBuilder.mapper, fromDsl.mapper)
+        assertSame(fromBuilder.certificatePinner, fromDsl.certificatePinner)
+        assertSame(fromBuilder.debugLogger, fromDsl.debugLogger)
+        assertEquals(fromBuilder.bypassableDns, fromDsl.bypassableDns)
+    }
 }
+

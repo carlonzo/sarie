@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.maven.publish)
+    alias(libs.plugins.bcv)
 }
 
 android {
@@ -9,6 +10,7 @@ android {
 
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     compileOptions {
@@ -25,6 +27,7 @@ android {
 }
 
 kotlin {
+    explicitApi()
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
@@ -36,6 +39,7 @@ kotlin {
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
     if (name.contains("UnitTest")) {
         compilerOptions.optIn.add("okhttp3.internal.OkHttpInternalApi")
+        compilerOptions.optIn.add("sarie.bridge.SarieInternalApi")
     }
 }
 
@@ -47,6 +51,7 @@ val okhttpVersionForTests: String =
 dependencies {
     compileOnly(libs.okhttp.min)
     compileOnly(libs.cronet.api)
+    compileOnly(libs.play.services.cronet)
     testImplementation(libs.cronet.api)
     testImplementation("com.squareup.okhttp3:okhttp:$okhttpVersionForTests")
     testImplementation(libs.junit)
@@ -82,6 +87,53 @@ tasks.register("checkCronetCompileOnly") {
         }
     }
 }
+tasks.register("checkPlayServicesCompileOnly") {
+    group = "verification"
+    description = "Fails if play-services-cronet is resolved on the bridge runtime classpath."
+    doLast {
+        val found = configurations.getByName("debugRuntimeClasspath")
+            .incoming.resolutionResult.allComponents
+            .mapNotNull { it.moduleVersion }
+            .filter { it.group == "com.google.android.gms" }
+        check(found.isEmpty()) {
+            "bridge must not ship play-services on its runtime classpath; found $found"
+        }
+    }
+}
 tasks.named("check") {
-    dependsOn("checkOkHttpCompileOnly", "checkCronetCompileOnly")
+    dependsOn("checkOkHttpCompileOnly", "checkCronetCompileOnly", "checkPlayServicesCompileOnly")
+}
+
+dependencies {
+    "bcv-rt-jvm-cp"("org.jetbrains.kotlin:kotlin-metadata-jvm:${libs.versions.kotlin.get()}")
+}
+
+val apiBuild = tasks.register<kotlinx.validation.KotlinApiBuildTask>("apiBuild") {
+    group = "verification"
+    description = "Builds the public API dump for the bridge module."
+    inputClassesDirs.from(
+        tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileReleaseKotlin")
+            .flatMap { it.destinationDirectory }
+    )
+    outputApiFile.set(layout.buildDirectory.file("api/bridge.api"))
+    nonPublicMarkers.add("sarie.bridge.SarieInternalApi")
+}
+
+val apiCheck = tasks.register<kotlinx.validation.KotlinApiCompareTask>("apiCheck") {
+    group = "verification"
+    description = "Checks that the public API dump matches the project API declaration."
+    projectApiFile.set(layout.projectDirectory.file("api/bridge.api"))
+    generatedApiFile.set(apiBuild.flatMap { it.outputApiFile })
+}
+
+tasks.register<Copy>("apiDump") {
+    group = "verification"
+    description = "Updates the public API dump file in api/bridge.api."
+    from(apiBuild.flatMap { it.outputApiFile })
+    into(layout.projectDirectory.dir("api"))
+    rename { "bridge.api" }
+}
+
+tasks.named("check") {
+    dependsOn(apiCheck)
 }

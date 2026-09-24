@@ -739,7 +739,7 @@ class CronetSuite {
 
     @Test
     fun secondInstallReusesTheLiveEngine() {
-        // The first engine holds <noBackupFilesDir>/sarie-cronet. A second build on that path
+        // The first engine holds <cacheDir>/cronet-cache. A second build on that path
         // throws in Cronet; install must reuse the live engine instead.
         installCronet(quicHintHost = null)
         val first = installedEngine

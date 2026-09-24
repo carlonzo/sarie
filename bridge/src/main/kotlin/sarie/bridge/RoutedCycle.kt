@@ -39,6 +39,4 @@ internal object RoutedCycle {
     fun close(call: RealCall) {
         cycles.remove(call)
     }
-
-    internal fun clearForTest() = cycles.clear()
 }

@@ -11,12 +11,18 @@ import org.chromium.net.UrlRequest
  * traffic-stats uid, request annotations). Do not mutate the OkHttp request.
  * Most hosts never need one: [SarieBridge.install] defaults to [NOOP].
  */
-fun interface RequestToUrlRequestMapper {
-    fun map(request: Request, builder: UrlRequest.Builder)
+public fun interface RequestToUrlRequestMapper {
+    /**
+     * Customizes the Cronet request builder before the request is built and dispatched.
+     *
+     * @param request The original OkHttp [Request].
+     * @param builder The Cronet [UrlRequest.Builder] populated with converted request properties.
+     */
+    public fun map(request: Request, builder: UrlRequest.Builder): Unit
 
-    companion object {
+    public companion object {
         /** Identity mapper: leave the builder as [RequestConverter] filled it. */
         @JvmField
-        val NOOP: RequestToUrlRequestMapper = RequestToUrlRequestMapper { _, _ -> }
+        public val NOOP: RequestToUrlRequestMapper = RequestToUrlRequestMapper { _, _ -> }
     }
 }

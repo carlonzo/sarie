@@ -2,6 +2,7 @@
 
 package sarie.bridge
 
+import java.io.IOException
 import okhttp3.Dns
 import okhttp3.Protocol
 import okhttp3.Request
@@ -49,15 +50,16 @@ internal fun parseAllowedOrigins(allowed: Set<String>): List<ParsedOrigin>? {
  * 9. explicit proxy or non-baseline proxySelector -> proxy
  * 10. socketFactory class != default class -> socket_factory (class check, never instance — Metis B1)
  * 11. hostnameVerifier != OkHostnameVerifier -> hostname_verifier
- * 12. dns !== Dns.SYSTEM -> dns
+ * 12. dns !== Dns.SYSTEM and not in bypassableDns -> dns
  * 13. certificate pins the Sarie-built engine did not install, or any `*.` pin -> pins
  * 14. TLS/trust fingerprint mismatch -> trust (Metis B1)
  * 15. Accept-Encoding the app owns, or a swap Accept-Encoding that does not list gzip
  *     -> content_encoding
- * 16. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
+ * 16. nonzero or unknown length body missing Content-Type -> content_type
+ * 17. loopback https without allowLoopbackHttps -> cleartext (cleartext reason reused: loopback
  *     is a local-test-server concern, not a distinct transport incompatibility)
- * 17. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
- * 18. else allow
+ * 18. origin not allowlisted -> allowlist (empty set or "*" admits every origin)
+ * 19. else allow
  *
  * Authenticators are not a routing rule. A 401 is returned so OkHttp calls
  * authenticator.authenticate(route = null, response).
@@ -97,7 +99,9 @@ internal object PolicyEngine {
         if (input.hostnameVerifier !== OkHostnameVerifier) {
             return FallbackReason.hostname_verifier
         }
-        if (input.dns !== Dns.SYSTEM) return FallbackReason.dns
+        if (input.dns !== Dns.SYSTEM && input.dns !in snapshot.bypassableDns) {
+            return FallbackReason.dns
+        }
         if (!pinsSatisfied(
                 input.certificatePinner,
                 input.request.url.host,
@@ -109,6 +113,7 @@ internal object PolicyEngine {
         }
         if (trustMismatched(input)) return FallbackReason.trust
         if (contentEncodingDenied(input)) return FallbackReason.content_encoding
+        if (contentTypeDenied(input.request)) return FallbackReason.content_type
         if (isLoopback(input.request.url.host) && !snapshot.policy.allowLoopbackHttps) {
             return FallbackReason.cleartext
         }
@@ -165,5 +170,24 @@ internal object PolicyEngine {
         return false
     }
 
+    /**
+     * Cronet requires a Content-Type for any upload data provider; if missing, it injects
+     * application/octet-stream. Requests with a nonzero or unknown-length (-1) body must have a
+     * Content-Type from either the body or headers.
+     */
+    private fun contentTypeDenied(request: Request): Boolean {
+        val body = request.body ?: return false
+        if (body.contentType() != null) return false
+        if (!request.header(CONTENT_TYPE).isNullOrBlank()) return false
+        // Last: contentLength() can be costly (multipart sums its parts).
+        val length = try {
+            body.contentLength()
+        } catch (_: IOException) {
+            -1L
+        }
+        return length != 0L
+    }
+
     private const val ACCEPT_ENCODING = "Accept-Encoding"
+    private const val CONTENT_TYPE = "Content-Type"
 }

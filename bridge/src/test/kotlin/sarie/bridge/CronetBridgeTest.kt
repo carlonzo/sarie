@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
@@ -204,8 +205,6 @@ class CronetBridgeTest {
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
         routes.clear()
-        CallRegistry.clearForTest()
-        RoutedCycle.clearForTest()
     }
 
     @After
@@ -213,18 +212,20 @@ class CronetBridgeTest {
         System.clearProperty("okhttp.cronet.enabled")
         SarieBridge.uninstall()
         routes.clear()
-        CallRegistry.clearForTest()
-        RoutedCycle.clearForTest()
     }
 
     private fun install(engine: CronetEngine, vararg origins: String) {
         SarieBridge.install(
             engine,
-            object : CronetPolicy {
-                override val allowedOrigins: Set<String> = origins.toSet()
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = origins.toSet()
+                    },
+                )
+                mapper(mapper)
+                listener(routes)
             },
-            mapper,
-            routes,
         )
     }
 
@@ -353,7 +354,6 @@ class CronetBridgeTest {
         assertEquals(200, response.code)
         assertEquals(cronetBefore + 1, routes.cronetCount())
         assertNull(routes.lastReason())
-        assertEquals(1, CallRegistry.activeCount())
 
         val fake = engine.builtRequests.single()
         assertEquals(1, fake.startCalls)
@@ -376,7 +376,8 @@ class CronetBridgeTest {
         assertEquals(0, fake.cancelCalls)
 
         source.close()
-        assertEquals(0, CallRegistry.activeCount())
+        call.cancel()
+        assertEquals(0, fake.cancelCalls)
     }
 
     // --- the three release-blocker cancel interleavings ---
@@ -400,7 +401,6 @@ class CronetBridgeTest {
         val fake = engine.builtRequests.single()
         assertEquals(0, fake.startCalls)
         assertEquals(0, fake.cancelCalls)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     @Test
@@ -425,7 +425,6 @@ class CronetBridgeTest {
         val callback = engine.builders.single().callback as OkHttpBridgeCallback
         assertTrue("headersFuture must be settled", callback.headersFuture.isDone)
         assertTrue("bodySourceFuture must be settled", callback.bodySourceFuture.isDone)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     @Test
@@ -461,7 +460,6 @@ class CronetBridgeTest {
         assertTrue("expected IOException but was $thrown", thrown is IOException)
         assertEquals("Canceled", thrown.message)
         assertEquals(1, fake.cancelCalls)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     // --- 407 guard ---
@@ -474,7 +472,7 @@ class CronetBridgeTest {
             statusText = "Proxy Authentication Required",
         )
         install(engine, "example.com")
-        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
 
         val thrown = assertThrows(ProtocolException::class.java) { CronetBridge.intercept(chain) }
 
@@ -486,7 +484,9 @@ class CronetBridgeTest {
         assertEquals(1, engine.builtRequests.size)
         // Closing the body quietly cancels the still-unfinished engine request.
         assertEquals(1, engine.builtRequests.single().cancelCalls)
-        assertEquals(0, CallRegistry.activeCount())
+        // Unregistered: a later cancel does not reach the engine again.
+        call.cancel()
+        assertEquals(1, engine.builtRequests.single().cancelCalls)
     }
 
     // --- transport-failure retry (idempotent, pre-headers only, once) ---
@@ -512,7 +512,8 @@ class CronetBridgeTest {
         engine.builtRequests.forEach { assertEquals(1, it.startCalls) }
         // Closing the unread body cancels attempt 2 and unregisters.
         response.body.close()
-        assertEquals(0, CallRegistry.activeCount())
+        call.cancel()
+        assertEquals(1, engine.builtRequests[1].cancelCalls)
     }
 
     @Test
@@ -520,7 +521,7 @@ class CronetBridgeTest {
         val engine = ScriptedCronetEngine()
         engine.preHeaderFailures = 2
         install(engine, "example.com")
-        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val (call, chain) = cronetChain(OkHttpClient(), "https://example.com/")
 
         val thrown = assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
@@ -528,7 +529,9 @@ class CronetBridgeTest {
         // (it is an IOException), which is exactly what the retry predicate matches on.
         assertTrue("expected the CronetException to surface", thrown is FakeCronetException)
         assertEquals(2, engine.builtRequests.size)
-        assertEquals(0, CallRegistry.activeCount())
+        // Unregistered: a cancel after the failure does not reach either engine request.
+        call.cancel()
+        engine.builtRequests.forEach { assertEquals(0, it.cancelCalls) }
     }
 
     @Test
@@ -560,7 +563,7 @@ class CronetBridgeTest {
             OkHttpClient(),
             "https://example.com/",
             method = "POST",
-            body = "x".toRequestBody(null),
+            body = "x".toRequestBody("text/plain".toMediaType()),
         )
 
         assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
@@ -585,7 +588,6 @@ class CronetBridgeTest {
         assertTrue("expected IOException but was $thrown", thrown is IOException)
         assertEquals("Canceled", thrown.message)
         assertEquals(1, engine.builtRequests.size)
-        assertEquals(0, CallRegistry.activeCount())
     }
 
     @Test
@@ -754,12 +756,16 @@ class CronetBridgeTest {
         val engine = ScriptedCronetEngine()
         SarieBridge.install(
             engine,
-            object : CronetPolicy {
-                override val allowedOrigins: Set<String> = emptySet()
-                override fun enabled(): Boolean = throw IllegalStateException("host policy")
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = emptySet()
+                        override fun enabled(): Boolean = throw IllegalStateException("host policy")
+                    },
+                )
+                mapper(mapper)
+                listener(routes)
             },
-            mapper,
-            routes,
         )
         val closedPort = ServerSocket(0).use { it.localPort }
         val chain = fallbackChain(OkHttpClient(), "https://127.0.0.2:$closedPort/")
@@ -776,14 +782,20 @@ class CronetBridgeTest {
         engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
         SarieBridge.install(
             engine,
-            object : CronetPolicy {
-                override val allowedOrigins: Set<String> = setOf("example.com")
-            },
-            mapper,
-            object : SarieListener {
-                override fun onRouted(call: Call, reason: FallbackReason?) {
-                    throw IllegalStateException("host listener")
-                }
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                listener(
+                    object : SarieListener {
+                        override fun onRouted(call: Call, reason: FallbackReason?) {
+                            throw IllegalStateException("host listener")
+                        }
+                    },
+                )
             },
         )
         val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
@@ -791,4 +803,61 @@ class CronetBridgeTest {
         assertEquals(200, response.code)
         response.close()
     }
+
+    @Test
+    fun `throwing debugLogger still returns the response`() {
+        val engine = ScriptedCronetEngine()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
+        SarieBridge.install(engine) {
+            policy(
+                object : CronetPolicy {
+                    override val allowedOrigins: Set<String> = setOf("example.com")
+                },
+            )
+            mapper(mapper)
+            debugLogger { _, _, _ -> throw IllegalStateException("host logger") }
+        }
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val response = CronetBridge.intercept(chain)
+        assertEquals(200, response.code)
+        response.close()
+    }
+
+    @Test
+    fun `debugLogger receives routing lines and negotiated protocol`() {
+        val messages = mutableListOf<String>()
+        val testLogger = SarieLogger { _, message, _ ->
+            messages += message
+        }
+        val engine = ScriptedCronetEngine()
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                debugLogger(testLogger)
+            },
+        )
+        // 1. Deny route
+        val denied = fallbackChain(OkHttpClient(), "https://other.example/")
+        assertThrows(IOException::class.java) { CronetBridge.intercept(denied) }
+        assertTrue(messages.any { it == "GET https://other.example/ -> okhttp (reason=allowlist)" })
+
+        // 2. Allow route and headers arrived
+        engine.responseInfo = FakeUrlResponseInfo(
+            url = "https://example.com/api",
+            statusCode = 200,
+            negotiatedProtocol = "h3",
+        )
+        val (_, allowed) = cronetChain(OkHttpClient(), "https://example.com/api")
+        CronetBridge.intercept(allowed).close()
+
+        assertTrue(messages.any { it == "GET https://example.com/api -> cronet" })
+        assertTrue(messages.any { it == "https://example.com/api -> h3" })
+    }
 }
+

@@ -25,6 +25,11 @@ import javax.net.ssl.X509TrustManager
 import okhttp3.Cache
 import okhttp3.CertificatePinner
 import okhttp3.Dns
+import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import okio.ByteString.Companion.toByteString
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
@@ -37,6 +42,7 @@ import org.chromium.net.UrlRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -153,6 +159,7 @@ class PolicyEngineTest {
     private fun snap(
         policy: CronetPolicy = policy("example.com"),
         installedPins: Set<CertificatePinner.Pin>? = null,
+        bypassableDns: Set<Dns> = emptySet(),
     ): RuntimeSnapshot = RuntimeSnapshot(
         engine,
         policy,
@@ -160,6 +167,7 @@ class PolicyEngineTest {
         System.currentTimeMillis(),
         sarieBuilt = installedPins != null,
         installedPins = installedPins.orEmpty(),
+        bypassableDns = bypassableDns,
     )
 
     /** Builds a REAL chain through the suppressed internal constructor and extracts PolicyInput. */
@@ -200,16 +208,19 @@ class PolicyEngineTest {
     @Before
     fun setUp() {
         System.clearProperty("okhttp.cronet.enabled")
-        TrustBaseline.clearMemoForTest()
-        // isEnabled() requires a snapshot present in SarieBridge itself.
-        SarieBridge.install(engine, policy("example.com"), mapper)
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(policy("example.com"))
+                mapper(mapper)
+            },
+        )
     }
 
     @After
     fun tearDown() {
         System.clearProperty("okhttp.cronet.enabled")
         SarieBridge.uninstall()
-        TrustBaseline.clearMemoForTest()
     }
 
     // --- every rule, first hit wins ---
@@ -374,12 +385,70 @@ class PolicyEngineTest {
         val client = OkHttpClient.Builder()
             .dns { throw UnsupportedOperationException("not called") }
             .certificatePinner(
-                CertificatePinner.Builder()
-                    .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                    .build(),
+                 CertificatePinner.Builder()
+                     .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+                     .build(),
             )
             .build()
         assertEquals(FallbackReason.dns, decision(input = inputFor(client = client)))
+    }
+
+    @Test
+    fun `listed bypassable dns is allowed`() {
+        val customDns = Dns { emptyList() }
+        val customClient = OkHttpClient.Builder().dns(customDns).build()
+        val snapshot = snap(bypassableDns = setOf(customDns))
+        assertNull(decision(input = inputFor(client = customClient), snapshot = snapshot))
+    }
+
+    @Test
+    fun `custom dns not listed in bypassable dns is still denied`() {
+        val allowedDns = Dns { emptyList() }
+        val otherDns = Dns { emptyList() }
+        val otherClient = OkHttpClient.Builder().dns(otherDns).build()
+        val snapshot = snap(bypassableDns = setOf(allowedDns))
+        assertEquals(FallbackReason.dns, decision(input = inputFor(client = otherClient), snapshot = snapshot))
+    }
+
+    @Test
+    fun `bypassable dns uses identity match`() {
+        class ValueDns(val id: String) : Dns {
+            override fun lookup(hostname: String) = emptyList<java.net.InetAddress>()
+            override fun equals(other: Any?): Boolean = other is ValueDns && other.id == id
+            override fun hashCode(): Int = id.hashCode()
+        }
+        val registered = ValueDns("shared")
+        val unregistered = ValueDns("shared")
+        val config = SarieConfig {
+            bypassableDns(registered)
+        }
+        val snapshot = snap(bypassableDns = config.bypassableDns)
+        val registeredClient = OkHttpClient.Builder().dns(registered).build()
+        val unregisteredClient = OkHttpClient.Builder().dns(unregistered).build()
+
+        assertNull(decision(input = inputFor(client = registeredClient), snapshot = snapshot))
+        assertEquals(FallbackReason.dns, decision(input = inputFor(client = unregisteredClient), snapshot = snapshot))
+    }
+
+    @Test
+    fun `bypassable dns on config builder is repeatable`() {
+        val dns1 = Dns { emptyList() }
+        val dns2 = Dns { emptyList() }
+        val config = SarieConfig {
+            bypassableDns(dns1)
+            bypassableDns(dns2)
+        }
+        assertTrue(dns1 in config.bypassableDns)
+        assertTrue(dns2 in config.bypassableDns)
+        assertEquals(2, config.bypassableDns.size)
+    }
+
+    @Test
+    fun `newBuilder preserves bypassable dns`() {
+        val dns = Dns { emptyList() }
+        val config = SarieConfig { bypassableDns(dns) }
+        val rebuilt = config.newBuilder().build()
+        assertTrue(dns in rebuilt.bypassableDns)
     }
 
     @Test
@@ -617,6 +686,51 @@ class PolicyEngineTest {
     }
 
     @Test
+    fun `no type with a body yields content_type`() {
+        val body = "hello".toRequestBody(null)
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertEquals(FallbackReason.content_type, decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `zero-length body without type is allowed`() {
+        val body = "".toRequestBody(null)
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertNull(decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `type from header with body is allowed`() {
+        val body = "hello".toRequestBody(null)
+        val req = Request.Builder()
+            .url("https://example.com/")
+            .header("Content-Type", "text/plain")
+            .post(body)
+            .build()
+        assertNull(decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `type from body is allowed`() {
+        val body = "hello".toRequestBody("text/plain".toMediaType())
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertNull(decision(input = chainInput(original = req)))
+    }
+
+    @Test
+    fun `unknown length body without type yields content_type`() {
+        val body = object : RequestBody() {
+            override fun contentType(): MediaType? = null
+            override fun contentLength(): Long = -1L
+            override fun writeTo(sink: BufferedSink) {
+                sink.writeUtf8("chunked")
+            }
+        }
+        val req = Request.Builder().url("https://example.com/").post(body).build()
+        assertEquals(FallbackReason.content_type, decision(input = chainInput(original = req)))
+    }
+
+    @Test
     fun `loopback https denied yields cleartext (cleartext reason reused for loopback)`() {
         val d = decision(input = inputFor(url = "https://localhost/"), snapshot = snap(policy("localhost")))
         assertEquals(FallbackReason.cleartext, d)
@@ -706,25 +820,19 @@ class PolicyEngineTest {
     // --- trust verdict memoization (Metis B1) ---
 
     @Test
-    fun `trust verdicts memoized per TM instance and bounded at 1024`() {
-        TrustBaseline.clearMemoForTest()
-        try {
-            val tm = OkHttpClient().x509TrustManager!!
-            val before = TrustBaseline.memoizedCount()
-            val first = TrustBaseline.verdictFor(tm)
-            assertEquals(before + 1, TrustBaseline.memoizedCount())
-            val second = TrustBaseline.verdictFor(tm)
-            assertSame(first, second)
-            assertEquals(before + 1, TrustBaseline.memoizedCount())
+    fun `trust verdicts memoized per TM instance and cleared on overflow`() {
+        val memo = TrustVerdictMemo(max = 4)
+        val tm = OkHttpClient().x509TrustManager!!
+        val first = memo.verdictFor(tm)
+        assertSame(first, memo.verdictFor(tm))
 
-            repeat(1100) { TrustBaseline.verdictFor(UniqueTrustManager()) }
-            assertTrue(
-                "memo must stay <= 1024, was ${TrustBaseline.memoizedCount()}",
-                TrustBaseline.memoizedCount() <= 1024,
-            )
-        } finally {
-            TrustBaseline.clearMemoForTest()
-        }
+        // Still memoized below the bound, and not only via the last-seen fast path.
+        repeat(2) { memo.verdictFor(UniqueTrustManager()) }
+        assertSame(first, memo.verdictFor(tm))
+
+        // The insert that hits the bound clears the map, so tm is recomputed.
+        repeat(4) { memo.verdictFor(UniqueTrustManager()) }
+        assertNotSame(first, memo.verdictFor(tm))
     }
 
     // --- reasons that belong to engine lifecycle, not routing ---

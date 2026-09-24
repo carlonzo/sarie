@@ -69,8 +69,4 @@ internal object CallRegistry {
     fun unregister(call: RealCall) {
         requests.remove(call)?.listener?.deactivate()
     }
-
-    internal fun activeCount(): Int = requests.size
-
-    internal fun clearForTest() = requests.clear()
 }

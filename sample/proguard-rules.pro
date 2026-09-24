@@ -144,3 +144,9 @@
 # (6) logging-interceptor (androidTest, NetworkParity) calls okhttp3.internal.isProbablyUtf8,
 # which the app never calls, so R8 removes it (NoClassDefFoundError on device). One facade only.
 -keep class okhttp3.internal.IsProbablyUtf8Kt { *; }
+
+# The bridge's optional Play Services path references play-services-tasks, which this app
+# does not package. The bridge's consumer rules cover the app R8 run; the androidTest R8 run
+# (keepAllForTest) sees the tested app's classes but not those rules.
+-dontwarn com.google.android.gms.net.CronetProviderInstaller
+-dontwarn com.google.android.gms.tasks.**

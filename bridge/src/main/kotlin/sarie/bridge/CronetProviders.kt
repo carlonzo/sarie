@@ -21,8 +21,8 @@ internal const val PLAY_SERVICES_CRONET_PROVIDER = "Google-Play-Services-Cronet-
  */
 internal val CRONET_PROVIDER_PREFERENCE: List<String> = listOf(
     CronetProvider.PROVIDER_NAME_APP_PACKAGED,
-    CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE,
     PLAY_SERVICES_CRONET_PROVIDER,
+    CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE,
 )
 
 /**
@@ -37,6 +37,44 @@ internal fun <T : CronetProviderCandidate> selectCronetProvider(providers: List<
     }
     return null
 }
+
+internal enum class ProviderDecision {
+    BUILD_NOW,
+    RUN_INSTALLER,
+    GIVE_UP,
+}
+
+/**
+ * Decides whether to build the engine immediately, initialize Play Services asynchronously,
+ * or give up (engine_missing).
+ */
+internal fun <T : CronetProviderCandidate> decideProviderPlan(
+    providers: List<T>,
+    installerAvailable: Boolean = isPlayServicesInstallerAvailable(),
+): ProviderDecision {
+    val enabled = providers.filter { it.isEnabled() }
+    if (enabled.any { it.name == CronetProvider.PROVIDER_NAME_APP_PACKAGED }) {
+        return ProviderDecision.BUILD_NOW
+    }
+    if (enabled.any { it.name == PLAY_SERVICES_CRONET_PROVIDER }) {
+        return ProviderDecision.BUILD_NOW
+    }
+    if (installerAvailable) {
+        return ProviderDecision.RUN_INSTALLER
+    }
+    if (enabled.any { it.name == CronetProvider.PROVIDER_NAME_HTTPENGINE_NATIVE }) {
+        return ProviderDecision.BUILD_NOW
+    }
+    return ProviderDecision.GIVE_UP
+}
+
+internal fun isPlayServicesInstallerAvailable(): Boolean =
+    try {
+        Class.forName("com.google.android.gms.net.CronetProviderInstaller")
+        true
+    } catch (_: Throwable) {
+        false
+    }
 
 internal class LiveCronetProvider(
     val source: CronetProvider,

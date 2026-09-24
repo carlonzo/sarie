@@ -22,8 +22,8 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
   runs the Cronet path. Deny is still `initExchange` + `copy(exchange=)` + `proceed`
   (`index` has no getter). `callServer` returns null when `exchange != null` so the stock
   body runs.
-- The host may call `SarieBridge.install(context, client)`, which builds the engine.
-  `install(engine)` remains the borrowed path. The bridge never calls `shutdown()`.
+- The host may call `SarieBridge.install(context, config)`, which builds the engine.
+  `install(engine, config)` remains the borrowed path. The bridge never calls `shutdown()`.
 - Build guards `verifyOkHttpPin` and `verifyOkHttpFingerprint` fail closed; a structural
   bytecode guard fails the build on any unexpected target shape.
 
@@ -75,4 +75,3 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
 ## Where truth lives
 
 - `COMPATIBILITY.md`: behavior contract, every row test-cited. Reference it; do not duplicate.
-- `ROLLBACK.md`: kill switch and recovery paths.

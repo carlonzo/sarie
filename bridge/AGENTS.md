@@ -49,13 +49,17 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   exist is `COMPATIBILITY.md`.
 - `CacheHooks.kt`: the two cache `isHttps` replacements. `SarieBridge.isEnabled()` false
   makes them the stock checks.
-- `SarieBridge.kt`, `SarieEngineBuilder.kt`, `CronetProviders.kt`, `PinTranslation.kt`,
-  `RuntimeSnapshot.kt`, `CronetPolicy.kt`, `DefaultPolicy.kt`, `CronetOptOut.kt`: lifecycle.
-  The host may call `install(context, client)`, which builds the engine. `install(engine)`
-  remains the borrowed path. The bridge never calls `shutdown()` on either. `RequestConverter`
-  and `ResponseConverter` are built once onto the snapshot. `DefaultPolicy()`
-  admits every origin that passes the other rules; a non-empty `allowedOrigins` is optional.
-  Kill switch via system property `okhttp.cronet.enabled=false`.
+- `SarieBridge.kt`, `SarieConfig.kt`, `SarieEngineBuilder.kt`, `CronetProviders.kt`,
+  `CronetStorage.kt`, `PinTranslation.kt`, `RuntimeSnapshot.kt`, `CronetPolicy.kt`,
+  `DefaultPolicy.kt`, `CronetOptOut.kt`, `SarieLogger.kt`: lifecycle, configuration, and logging.
+  The host may call `install(context, config)`, which builds the engine. `install(engine, config)`
+  remains the borrowed path. The bridge never calls `shutdown()` on either. `SarieConfig` holds
+  policy, mapper, listener, pins, engine configuration, and the optional `SarieLogger`.
+  `CronetStorage.kt` isolates the storage dir per process (`<cacheDir>/cronet-cache` or
+  `<cacheDir>/cronet-cache-<suffix>`). Bridge logs route to `SarieLogger` using `android.util.Log`
+  priority constants. `RequestConverter` and `ResponseConverter` are built once onto the snapshot.
+  `DefaultPolicy()` admits every origin that passes the other rules; a non-empty `allowedOrigins`
+  is optional. Kill switch via system property `okhttp.cronet.enabled=false`.
 - `RoutedCycle.kt`: per-call scheme, host, and port for the allow branch, plus whether the terminal hop was reached.
 - `CallRegistry.kt`: cancellation. 5-step ordered protocol with a per-call `EventListener`
   (public `Call.addEventListener`) and a single-delivery CAS so the engine is canceled exactly
@@ -88,6 +92,7 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   `RetryAndFollowUpInterceptor`.
 - OkHttp internals access pattern: `@file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")`
   plus compiled references only. Never use reflection for internals.
+- Public API changes need an `.api` dump update in the same commit.
 
 ## Test map
 

@@ -6,21 +6,38 @@ import okhttp3.Call
 import org.chromium.net.RequestFinishedInfo
 
 /**
- * Optional host observer. Routing does not depend on it: a throw from either method is logged
- * once and swallowed.
+ * Optional observer for request routing decisions and Cronet transport metrics.
+ *
+ * Configured via [SarieConfig.Builder.listener]. Applies to both built and borrowed installs.
+ * Routing does not depend on listener execution: any exception thrown from either callback is
+ * logged as a warning and swallowed, and will not crash the thread or affect request outcome.
  */
-interface SarieListener {
+public interface SarieListener {
     /**
-     * Caller thread, before any I/O. [reason] is null when the call is going to Cronet. Fires
-     * once per network hop: each redirect and each authenticator retry reports again.
+     * Invoked on the OkHttp caller thread before any network I/O begins.
+     *
+     * Fires once per network hop: follow-ups from redirects and 401 authenticator retries report again.
+     *
+     * @param call The OkHttp [Call] being dispatched. Request tags can be read from `call.request()`.
+     * @param reason `null` when the call was routed to Cronet; a [FallbackReason] when falling back
+     *   to stock OkHttp.
      */
-    fun onRouted(call: Call, reason: FallbackReason?) {}
+    public fun onRouted(call: Call, reason: FallbackReason?): Unit {}
 
     /**
-     * Sarie listener thread, once per Cronet UrlRequest. A retry reports twice. The thread is
-     * shared and its queue is unbounded: keep this cheap, or hand off to your own executor.
+     * Invoked on Sarie's background listener thread when a Cronet request finishes.
+     *
+     * Emitted once per Cronet `UrlRequest`. If an idempotent request is retried after a pre-headers
+     * transport failure, this method will be invoked for each attempt.
+     *
+     * The background listener thread is shared across the process: implementations should perform
+     * minimal work or hand off processing to their own executor.
+     *
+     * @param call The OkHttp [Call] that finished.
+     * @param info Cronet's [RequestFinishedInfo] detailing wire byte counts, protocol timing metrics,
+     *   socket reuse, and transport errors.
      */
-    fun onFinished(call: Call, info: RequestFinishedInfo) {}
+    public fun onFinished(call: Call, info: RequestFinishedInfo): Unit {}
 }
 
 /**

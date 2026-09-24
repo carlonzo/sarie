@@ -13,8 +13,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import java.util.logging.Level
-import java.util.logging.Logger
+import android.util.Log
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.Interceptor
@@ -79,9 +78,9 @@ import org.chromium.net.UrlRequest
  * EventListener (public Call.addEventListener) that delivers exactly one engine cancel;
  * post-terminal the listener is a no-op and drops its references.
  */
-object CronetBridge {
+@SarieInternalApi
+public object CronetBridge {
 
-    private val logger = Logger.getLogger(CronetBridge::class.java.name)
     private val loggedOnce = AtomicBoolean(false)
     private val listenerLoggedOnce = AtomicBoolean(false)
 
@@ -95,9 +94,20 @@ object CronetBridge {
     /** Methods safe to retry once on a pre-headers transport failure (RFC idempotent). */
     private val IDEMPOTENT_METHODS = setOf("GET", "HEAD", "OPTIONS")
 
+    /**
+     * Intercepts OkHttp's connection phase, evaluated by the rewritten `ConnectInterceptor`.
+     *
+     * Evaluates pre-send routing policy via [PolicyEngine]. If allowed, proceeds without an
+     * exchange so network interceptors run before reaching [callServer]. If denied, executes
+     * the stock connection fallback.
+     *
+     * @param chain The active OkHttp interceptor chain.
+     * @return The response returned by either Cronet or stock OkHttp.
+     * @throws IOException on network or protocol errors.
+     */
     @JvmStatic
     @Throws(IOException::class)
-    fun intercept(chain: Interceptor.Chain): Response {
+    public fun intercept(chain: Interceptor.Chain): Response {
         val realChain = chain as RealInterceptorChain
         val snapshot = SarieBridge.snapshot()
         val reason = try {
@@ -136,10 +146,14 @@ object CronetBridge {
      *
      * The checks are the ones [okhttp3.internal.http.RealInterceptorChain.proceed] skips when
      * `exchange == null` (OkHttp 5.5.0, RealInterceptorChain.kt:317-339).
+     *
+     * @param chain The active OkHttp interceptor chain.
+     * @return The Cronet response if routed through Cronet, or null if stock OkHttp should execute.
+     * @throws IOException on network or protocol errors.
      */
     @JvmStatic
     @Throws(IOException::class)
-    fun callServer(chain: Interceptor.Chain): Response? {
+    public fun callServer(chain: Interceptor.Chain): Response? {
         val realChain = chain as RealInterceptorChain
         if (realChain.exchange != null) return null
         val call = realChain.call
@@ -355,19 +369,29 @@ object CronetBridge {
     }
 
     private fun notifyRouted(call: Call, reason: FallbackReason?) {
+        val request = call.request()
+        SarieBridge.logger?.log(
+            Log.DEBUG,
+            if (reason == null) {
+                "${request.method} ${request.url} -> cronet"
+            } else {
+                "${request.method} ${request.url} -> okhttp (reason=$reason)"
+            },
+            null,
+        )
         val listener = SarieBridge.listener ?: return
         try {
             listener.onRouted(call, reason)
         } catch (t: Throwable) {
             if (listenerLoggedOnce.compareAndSet(false, true)) {
-                logger.log(Level.WARNING, "SarieListener.onRouted threw; routing continues", t)
+                SarieBridge.logger?.log(Log.WARN, "SarieListener.onRouted threw; routing continues", t)
             }
         }
     }
 
     private fun logOnce(t: Throwable) {
         if (loggedOnce.compareAndSet(false, true)) {
-            logger.log(Level.SEVERE, "policy evaluation failed; failing closed to stock OkHttp", t)
+            SarieBridge.logger?.log(Log.ERROR, "policy evaluation failed; failing closed to stock OkHttp", t)
         }
     }
 }

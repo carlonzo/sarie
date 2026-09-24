@@ -43,36 +43,13 @@ internal object TrustBaseline {
         )
     }
 
-    private val verdicts = IdentityHashMap<X509TrustManager, Verdict>()
-    private val verdictsLock = Any()
-
-    private class Seen(val manager: X509TrustManager, val verdict: Verdict)
-
-    @Volatile
-    private var lastSeen: Seen? = null
-
-    private const val MEMO_MAX = 1024
+    private val memo = TrustVerdictMemo(1024)
 
     /**
      * Memoized (class, fingerprint) verdict for [trustManager]. The last manager is served
-     * from [lastSeen] without taking [verdictsLock]. Recomputed only after overflow.
+     * from the memo cache without taking the lock. Recomputed only after overflow.
      */
-    fun verdictFor(trustManager: X509TrustManager): Verdict {
-        val seen = lastSeen
-        if (seen != null && seen.manager === trustManager) return seen.verdict
-        return synchronized(verdictsLock) {
-            val again = lastSeen
-            if (again != null && again.manager === trustManager) return again.verdict
-            val verdict = verdicts[trustManager] ?: run {
-                val computed = Verdict(trustManager.javaClass, acceptedIssuersFingerprint(trustManager))
-                if (verdicts.size >= MEMO_MAX) verdicts.clear()
-                verdicts[trustManager] = computed
-                computed
-            }
-            lastSeen = Seen(trustManager, verdict)
-            verdict
-        }
-    }
+    fun verdictFor(trustManager: X509TrustManager): Verdict = memo.verdictFor(trustManager)
 
     /**
      * SHA-256 over the DER-encoded acceptedIssuers sorted by encoded bytes. ByteBuffer.compareTo
@@ -87,12 +64,39 @@ internal object TrustBaseline {
         return digest.digest().toHex()
     }
 
-    internal fun memoizedCount(): Int = synchronized(verdictsLock) { verdicts.size }
-
-    internal fun clearMemoForTest() = synchronized(verdictsLock) {
-        verdicts.clear()
-        lastSeen = null
-    }
-
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
+}
+
+internal class TrustVerdictMemo(private val max: Int = 1024) {
+    private val verdicts = IdentityHashMap<X509TrustManager, TrustBaseline.Verdict>()
+    private val verdictsLock = Any()
+
+    private class Seen(val manager: X509TrustManager, val verdict: TrustBaseline.Verdict)
+
+    @Volatile
+    private var lastSeen: Seen? = null
+
+    /**
+     * Memoized (class, fingerprint) verdict for [trustManager]. The last manager is served
+     * from [lastSeen] without taking [verdictsLock]. Recomputed only after overflow.
+     */
+    fun verdictFor(trustManager: X509TrustManager): TrustBaseline.Verdict {
+        val seen = lastSeen
+        if (seen != null && seen.manager === trustManager) return seen.verdict
+        return synchronized(verdictsLock) {
+            val again = lastSeen
+            if (again != null && again.manager === trustManager) return again.verdict
+            val verdict = verdicts[trustManager] ?: run {
+                val computed = TrustBaseline.Verdict(
+                    trustManager.javaClass,
+                    TrustBaseline.acceptedIssuersFingerprint(trustManager),
+                )
+                if (verdicts.size >= max) verdicts.clear()
+                verdicts[trustManager] = computed
+                computed
+            }
+            lastSeen = Seen(trustManager, verdict)
+            verdict
+        }
+    }
 }

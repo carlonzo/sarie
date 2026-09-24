@@ -98,7 +98,7 @@ class EngineSetupTest {
         val pins = CertificatePinner.Builder().add("example.com", sha).build().pins
         val translation = translatePins(pins)
         val recording = RecordingBuilder()
-        val storage = "/data/no_backup/sarie-cronet"
+        val storage = "/data/cache/cronet-cache"
 
         applyEngineConfiguration(recording, storage, translation.groups) {
             recording.enableQuic(false)

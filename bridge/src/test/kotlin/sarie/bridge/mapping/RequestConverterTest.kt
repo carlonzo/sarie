@@ -2,6 +2,7 @@ package sarie.bridge.mapping
 
 import sarie.bridge.RequestToUrlRequestMapper
 import sarie.bridge.SarieBridge
+import sarie.bridge.SarieConfig
 import sarie.bridge.SarieListener
 import java.util.concurrent.Executor
 import okhttp3.Call
@@ -73,7 +74,7 @@ class RequestConverterTest {
         converter().convert(request, 5_000, 5_000, call = call)
         assertNull(engine.builders.single().finishedListener)
 
-        SarieBridge.install(engine, listener = object : SarieListener {})
+        SarieBridge.install(engine, SarieConfig { listener(object : SarieListener {}) })
         converter().convert(request, 5_000, 5_000, call = call)
         assertNotNull(engine.builders.last().finishedListener)
     }
@@ -85,11 +86,15 @@ class RequestConverterTest {
         var delivered = 0
         SarieBridge.install(
             engine,
-            listener = object : SarieListener {
-                override fun onFinished(call: Call, info: RequestFinishedInfo) {
-                    delivered++
-                    throw IllegalStateException("host listener")
-                }
+            SarieConfig {
+                listener(
+                    object : SarieListener {
+                        override fun onFinished(call: Call, info: RequestFinishedInfo) {
+                            delivered++
+                            throw IllegalStateException("host listener")
+                        }
+                    },
+                )
             },
         )
         converter().convert(request, 5_000, 5_000, call = call)
@@ -114,7 +119,7 @@ class RequestConverterTest {
     fun `rejected finished listener does not fail convert`() {
         val request = get()
         val call: Call = OkHttpClient().newCall(request)
-        SarieBridge.install(engine, listener = object : SarieListener {})
+        SarieBridge.install(engine, SarieConfig { listener(object : SarieListener {}) })
         engine.rejectFinishedListener = true
         converter().convert(request, 5_000, 5_000, call = call)
         assertTrue(engine.builders.single().cacheDisabled)
@@ -275,7 +280,13 @@ class RequestConverterTest {
             seen.add(seenRequest)
             builder.addHeader("X-Mapped", "1")
         }
-        SarieBridge.install(engine, FakePolicy(), mapper)
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(FakePolicy())
+                mapper(mapper)
+            },
+        )
 
         converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
 
