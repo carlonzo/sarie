@@ -24,7 +24,6 @@ import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.Cache
 import okhttp3.CertificatePinner
-import okhttp3.Dns
 import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody
@@ -159,7 +158,6 @@ class PolicyEngineTest {
     private fun snap(
         policy: CronetPolicy = policy("example.com"),
         installedPins: Set<CertificatePinner.Pin>? = null,
-        bypassableDns: Set<Dns> = emptySet(),
     ): RuntimeSnapshot = RuntimeSnapshot(
         engine,
         policy,
@@ -167,7 +165,6 @@ class PolicyEngineTest {
         System.currentTimeMillis(),
         sarieBuilt = installedPins != null,
         installedPins = installedPins.orEmpty(),
-        bypassableDns = bypassableDns,
     )
 
     /** Builds a REAL chain through the suppressed internal constructor and extracts PolicyInput. */
@@ -366,89 +363,11 @@ class PolicyEngineTest {
     }
 
     @Test
-    fun `custom dns yields dns`() {
+    fun `custom dns is ignored`() {
         val custom = OkHttpClient.Builder()
             .dns { throw UnsupportedOperationException("not called") }
             .build()
-        val d = decision(input = inputFor(client = custom))
-        assertEquals(FallbackReason.dns, d)
-    }
-
-    @Test
-    fun `Dns SYSTEM does not deny`() {
-        val system = OkHttpClient.Builder().dns(Dns.SYSTEM).build()
-        assertNull(decision(input = inputFor(client = system)))
-    }
-
-    @Test
-    fun `dns deny precedes pins`() {
-        val client = OkHttpClient.Builder()
-            .dns { throw UnsupportedOperationException("not called") }
-            .certificatePinner(
-                 CertificatePinner.Builder()
-                     .add("example.com", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-                     .build(),
-            )
-            .build()
-        assertEquals(FallbackReason.dns, decision(input = inputFor(client = client)))
-    }
-
-    @Test
-    fun `listed bypassable dns is allowed`() {
-        val customDns = Dns { emptyList() }
-        val customClient = OkHttpClient.Builder().dns(customDns).build()
-        val snapshot = snap(bypassableDns = setOf(customDns))
-        assertNull(decision(input = inputFor(client = customClient), snapshot = snapshot))
-    }
-
-    @Test
-    fun `custom dns not listed in bypassable dns is still denied`() {
-        val allowedDns = Dns { emptyList() }
-        val otherDns = Dns { emptyList() }
-        val otherClient = OkHttpClient.Builder().dns(otherDns).build()
-        val snapshot = snap(bypassableDns = setOf(allowedDns))
-        assertEquals(FallbackReason.dns, decision(input = inputFor(client = otherClient), snapshot = snapshot))
-    }
-
-    @Test
-    fun `bypassable dns uses identity match`() {
-        class ValueDns(val id: String) : Dns {
-            override fun lookup(hostname: String) = emptyList<java.net.InetAddress>()
-            override fun equals(other: Any?): Boolean = other is ValueDns && other.id == id
-            override fun hashCode(): Int = id.hashCode()
-        }
-        val registered = ValueDns("shared")
-        val unregistered = ValueDns("shared")
-        val config = SarieConfig {
-            bypassableDns(registered)
-        }
-        val snapshot = snap(bypassableDns = config.bypassableDns)
-        val registeredClient = OkHttpClient.Builder().dns(registered).build()
-        val unregisteredClient = OkHttpClient.Builder().dns(unregistered).build()
-
-        assertNull(decision(input = inputFor(client = registeredClient), snapshot = snapshot))
-        assertEquals(FallbackReason.dns, decision(input = inputFor(client = unregisteredClient), snapshot = snapshot))
-    }
-
-    @Test
-    fun `bypassable dns on config builder is repeatable`() {
-        val dns1 = Dns { emptyList() }
-        val dns2 = Dns { emptyList() }
-        val config = SarieConfig {
-            bypassableDns(dns1)
-            bypassableDns(dns2)
-        }
-        assertTrue(dns1 in config.bypassableDns)
-        assertTrue(dns2 in config.bypassableDns)
-        assertEquals(2, config.bypassableDns.size)
-    }
-
-    @Test
-    fun `newBuilder preserves bypassable dns`() {
-        val dns = Dns { emptyList() }
-        val config = SarieConfig { bypassableDns(dns) }
-        val rebuilt = config.newBuilder().build()
-        assertTrue(dns in rebuilt.bypassableDns)
+        assertNull(decision(input = inputFor(client = custom)))
     }
 
     @Test

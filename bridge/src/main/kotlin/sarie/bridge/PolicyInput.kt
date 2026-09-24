@@ -10,7 +10,6 @@ import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
 import okhttp3.Cache
 import okhttp3.CertificatePinner
-import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.Protocol
 import okhttp3.Request
@@ -25,7 +24,7 @@ import okhttp3.internal.http.RealInterceptorChain
  * before ConnectInterceptor) is read from the chain. `networkInterceptors`, `protocols` and
  * `forWebSocket` are not on the chain and come from the [RealCall]/its [okhttp3.OkHttpClient].
  * [originalRequest] is [RealCall.originalRequest] (the app's request, before interceptors add
- * `Accept-Encoding`). `dns` is [Interceptor.Chain.dns].
+ * `Accept-Encoding`). [Interceptor.Chain.dns] is not read: Cronet resolves hosts itself.
  */
 internal class PolicyInput(
     val request: Request,
@@ -40,7 +39,6 @@ internal class PolicyInput(
     val proxySelector: ProxySelector,
     val socketFactory: SocketFactory,
     val hostnameVerifier: HostnameVerifier,
-    val dns: Dns,
     val certificatePinner: CertificatePinner,
     val sslSocketFactoryOrNull: SSLSocketFactory?,
     val x509TrustManagerOrNull: X509TrustManager?,
@@ -62,7 +60,6 @@ internal class PolicyInput(
                 proxySelector = chain.proxySelector,
                 socketFactory = chain.socketFactory,
                 hostnameVerifier = chain.hostnameVerifier,
-                dns = chain.dns,
                 certificatePinner = chain.certificatePinner,
                 sslSocketFactoryOrNull = chain.sslSocketFactoryOrNull,
                 x509TrustManagerOrNull = chain.x509TrustManagerOrNull,

@@ -1,9 +1,6 @@
 package sarie.bridge
 
-import java.util.Collections
-import java.util.IdentityHashMap
 import okhttp3.CertificatePinner
-import okhttp3.Dns
 import org.chromium.net.CronetEngine
 
 /**
@@ -20,8 +17,8 @@ import org.chromium.net.CronetEngine
  * Settings specify which install path they apply to:
  * - **Built install** ([SarieBridge.install] with `Context`): supports all settings.
  * - **Borrowed install** ([SarieBridge.install] with `CronetEngine`): supports [policy],
- *   [mapper], [listener], [debugLogger], and [bypassableDns]. Setting [certificatePinner] or
- *   [configure] on a borrowed install throws [IllegalArgumentException].
+ *   [mapper], [listener], and [debugLogger]. Setting [certificatePinner] or [configure] on a
+ *   borrowed install throws [IllegalArgumentException].
  */
 public class SarieConfig private constructor(builder: Builder) {
     /**
@@ -73,14 +70,6 @@ public class SarieConfig private constructor(builder: Builder) {
      */
     public val configure: (CronetEngine.Builder) -> Unit = builder.configure
 
-    /**
-     * Set of [Dns] instances whose callers are permitted to route to Cronet instead of falling
-     * back to stock OkHttp with [FallbackReason.dns].
-     *
-     * Matched by object identity. Applies to both built and borrowed installs. Empty by default.
-     */
-    public val bypassableDns: Set<Dns> = builder.bypassableDns.toIdentitySet()
-
     internal val isConfigureSet: Boolean get() = configure !== NOOP_CONFIGURE
 
     /**
@@ -98,7 +87,6 @@ public class SarieConfig private constructor(builder: Builder) {
         internal var listener: SarieListener? = null
         internal var debugLogger: SarieLogger? = null
         internal var configure: (CronetEngine.Builder) -> Unit = NOOP_CONFIGURE
-        internal val bypassableDns: MutableList<Dns> = ArrayList()
 
         /**
          * Creates an empty [Builder] with default values.
@@ -112,7 +100,6 @@ public class SarieConfig private constructor(builder: Builder) {
             this.listener = config.listener
             this.debugLogger = config.debugLogger
             this.configure = config.configure
-            this.bypassableDns.addAll(config.bypassableDns)
         }
 
         /**
@@ -192,21 +179,6 @@ public class SarieConfig private constructor(builder: Builder) {
         }
 
         /**
-         * Registers a custom [Dns] instance whose calls are allowed to route to Cronet.
-         *
-         * OkHttp clients using a custom [Dns] normally fall back to stock OkHttp ([FallbackReason.dns]).
-         * If the custom DNS can be safely bypassed because Cronet's independent resolution is acceptable,
-         * register it here. Repeatable; matched by object identity.
-         *
-         * Applies to both built and borrowed installs.
-         *
-         * @param dns The custom [Dns] instance to allow on Cronet.
-         */
-        public fun bypassableDns(dns: Dns): Builder = apply {
-            this.bypassableDns.add(dns)
-        }
-
-        /**
          * Builds a new immutable [SarieConfig].
          */
         public fun build(): SarieConfig = SarieConfig(this)
@@ -220,13 +192,6 @@ public class SarieConfig private constructor(builder: Builder) {
          */
         @JvmField
         public val DEFAULT: SarieConfig = Builder().build()
-
-        private fun <T : Any> Collection<T>.toIdentitySet(): Set<T> {
-            if (isEmpty()) return emptySet()
-            val set = Collections.newSetFromMap(IdentityHashMap<T, Boolean>(size))
-            set.addAll(this)
-            return Collections.unmodifiableSet(set)
-        }
     }
 }
 
