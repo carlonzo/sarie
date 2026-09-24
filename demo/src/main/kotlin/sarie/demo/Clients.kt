@@ -70,16 +70,13 @@ class StockEventListener : EventListener() {
 }
 
 class Clients(
-    val base: OkHttpClient,
     val stockClient: OkHttpClient,
     val sarieClient: OkHttpClient,
     val stockEventListener: StockEventListener,
 )
 
-fun createClients(
-    context: Context,
-    stockEventListener: StockEventListener = StockEventListener(),
-): Clients {
+fun createClients(context: Context): Clients {
+    val stockEventListener = StockEventListener()
     val chucker = ChuckerInterceptor.Builder(context).build()
     val dispatcher = Dispatcher().apply {
         maxRequests = 128
@@ -97,5 +94,5 @@ fun createClients(
         .eventListener(stockEventListener)
         .build()
 
-    return Clients(base, stockClient, sarieClient, stockEventListener)
+    return Clients(stockClient, sarieClient, stockEventListener)
 }

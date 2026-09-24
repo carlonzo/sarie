@@ -90,19 +90,6 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
         notifyChange()
     }
 
-    fun clearAll() {
-        synchronized(lock) {
-            sarieBuffer.clear()
-            networkBuffer.clear()
-            cronetBuffer.clear()
-            cronetCount.set(0)
-            stockCount.set(0)
-            lastLine = "cleared"
-        }
-        finishedCalls.clear()
-        notifyChange()
-    }
-
     // SarieLogger
     override fun log(priority: Int, message: String, throwable: Throwable?) {
         val letter = when (priority) {

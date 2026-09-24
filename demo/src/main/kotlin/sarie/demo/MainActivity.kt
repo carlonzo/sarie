@@ -167,7 +167,7 @@ fun DemoScreen(executor: ExecutorService? = null) {
     }
 
     // Connection Setup state
-    var setupResult by remember { mutableStateOf<ConnectionSetupResult?>(null) }
+    var setupResult by remember { mutableStateOf<List<HostSetupMetrics>?>(null) }
     var setupError by remember { mutableStateOf<String?>(null) }
 
     // Download Migration state
@@ -467,84 +467,49 @@ fun RoundTripCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            val stacks = listOf("stock" to result?.stock, "Sarie" to result?.sarie)
+
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text("", modifier = Modifier.weight(1f))
-                Text(
-                    text = if (result != null) "stock ${result.stockProtocol}" else "stock",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = if (result != null) "Sarie ${result.sarieProtocol}" else "Sarie",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
+                for ((name, run) in stacks) {
+                    val protocolSuffix = run?.protocol?.let { " $it" } ?: ""
+                    Text(
+                        text = "$name$protocolSuffix",
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
+            val rows = listOf(
+                "cold" to { name: String, run: RoundTripRun? ->
+                    if (name == "Sarie") {
+                        result?.sarieColdMs?.let { "${it} ms" } ?: if (run != null) "warm (restart app)" else "—"
+                    } else {
+                        run?.let { "${it.coldMs} ms" } ?: "—"
+                    }
+                },
+                "warm p50" to { _: String, run: RoundTripRun? -> run?.let { "${it.warmP50Ms} ms" } ?: "—" },
+                "warm p95" to { _: String, run: RoundTripRun? -> run?.let { "${it.warmP95Ms} ms" } ?: "—" },
+            )
 
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("cold", fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Text(
-                    text = result?.let { "${it.stockColdMs} ms" } ?: "—",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = result?.let { it.sarieColdMs?.let { ms -> "${ms} ms" } ?: "warm (restart app)" } ?: "—",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("warm p50", fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Text(
-                    text = result?.let { "${it.stockWarmP50Ms} ms" } ?: "—",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = result?.let { "${it.sarieWarmP50Ms} ms" } ?: "—",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("warm p95", fontSize = 12.sp, modifier = Modifier.weight(1f))
-                Text(
-                    text = result?.let { "${it.stockWarmP95Ms} ms" } ?: "—",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = result?.let { "${it.sarieWarmP95Ms} ms" } ?: "—",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
+            for ((label, format) in rows) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(label, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    for ((name, run) in stacks) {
+                        Text(
+                            text = format(name, run),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
 
             if (error != null) {
@@ -633,49 +598,15 @@ fun ParallelImagesCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
+            val stacks = listOf("stock" to result?.stock, "Sarie" to result?.sarie)
+
             Row(modifier = Modifier.fillMaxWidth()) {
                 Text("", modifier = Modifier.weight(1.2f))
-                Text(
-                    text = "stock",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = "Sarie",
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.End,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            val rows = listOf(
-                "total wall" to Pair(result?.let { "${it.stockWallTotalMs} ms" }, result?.let { "${it.sarieWallTotalMs} ms" }),
-                "first image" to Pair(result?.let { "${it.stockFirstImageMs} ms" }, result?.let { "${it.sarieFirstImageMs} ms" }),
-                "per-image p50" to Pair(result?.let { "${it.stockP50Ms} ms" }, result?.let { "${it.sarieP50Ms} ms" }),
-                "per-image p95" to Pair(result?.let { "${it.stockP95Ms} ms" }, result?.let { "${it.sarieP95Ms} ms" }),
-                "per-image p99" to Pair(result?.let { "${it.stockP99Ms} ms" }, result?.let { "${it.sarieP99Ms} ms" }),
-                "total bytes" to Pair(result?.let { "${it.stockTotalBytes / 1024} KB" }, result?.let { "${it.sarieTotalBytes / 1024} KB" }),
-            )
-
-            for ((label, pair) in rows) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Text(label, fontSize = 12.sp, modifier = Modifier.weight(1.2f))
+                for ((name, _) in stacks) {
                     Text(
-                        text = pair.first ?: "—",
+                        text = name,
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = pair.second ?: "—",
-                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
                         fontSize = 12.sp,
                         textAlign = TextAlign.End,
                         modifier = Modifier.weight(1f)
@@ -683,12 +614,37 @@ fun ParallelImagesCard(
                 }
             }
 
+            val rows: List<Pair<String, (ParallelRun) -> String>> = listOf(
+                "total wall" to { "${it.wallTotalMs} ms" },
+                "first image" to { "${it.firstImageMs} ms" },
+                "per-image p50" to { "${it.p50Ms} ms" },
+                "per-image p95" to { "${it.p95Ms} ms" },
+                "per-image p99" to { "${it.p99Ms} ms" },
+                "total bytes" to { "${it.totalBytes / 1024} KB" },
+            )
+
+            for ((label, format) in rows) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(label, fontSize = 12.sp, modifier = Modifier.weight(1.2f))
+                    for ((_, run) in stacks) {
+                        Text(
+                            text = run?.let(format) ?: "—",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             val protocolCountsText = if (result != null) {
-                val stockCountsStr = result.stockProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
-                val sarieCountsStr = result.sarieProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
-                "protocol counts: stock [$stockCountsStr] failed: ${result.stockFailedCount} · Sarie [$sarieCountsStr] failed: ${result.sarieFailedCount}"
+                val stockCountsStr = result.stock.protocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
+                val sarieCountsStr = result.sarie.protocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
+                "protocol counts: stock [$stockCountsStr] failed: ${result.stock.failedCount} · Sarie [$sarieCountsStr] failed: ${result.sarie.failedCount}"
             } else {
                 "protocol counts: —"
             }
@@ -712,7 +668,7 @@ fun ParallelImagesCard(
 
 @Composable
 fun ConnectionSetupCard(
-    result: ConnectionSetupResult?,
+    result: List<HostSetupMetrics>?,
     error: String?,
     isRunning: Boolean,
     isAnyRunning: Boolean,
@@ -753,7 +709,7 @@ fun ConnectionSetupCard(
             }
 
             if (result != null) {
-                for (row in result.rows) {
+                for (row in result) {
                     Spacer(modifier = Modifier.height(2.dp))
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Text(

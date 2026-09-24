@@ -13,35 +13,34 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 
+data class RoundTripRun(
+    val coldMs: Long,
+    val warmP50Ms: Long,
+    val warmP95Ms: Long,
+    val protocol: String,
+    val firstCall: Call? = null,
+)
+
 data class RoundTripResult(
-    val stockColdMs: Long,
-    val stockWarmP50Ms: Long,
-    val stockWarmP95Ms: Long,
-    val stockProtocol: String,
+    val stock: RoundTripRun,
+    val sarie: RoundTripRun,
     val sarieColdMs: Long?,
-    val sarieWarmP50Ms: Long,
-    val sarieWarmP95Ms: Long,
-    val sarieProtocol: String,
+)
+
+data class ParallelRun(
+    val wallTotalMs: Long,
+    val firstImageMs: Long,
+    val p50Ms: Long,
+    val p95Ms: Long,
+    val p99Ms: Long,
+    val totalBytes: Long,
+    val protocolCounts: Map<String, Int>,
+    val failedCount: Int,
 )
 
 data class ParallelImagesResult(
-    val stockWallTotalMs: Long,
-    val stockFirstImageMs: Long,
-    val stockP50Ms: Long,
-    val stockP95Ms: Long,
-    val stockP99Ms: Long,
-    val stockTotalBytes: Long,
-    val stockProtocolCounts: Map<String, Int>,
-    val stockFailedCount: Int,
-
-    val sarieWallTotalMs: Long,
-    val sarieFirstImageMs: Long,
-    val sarieP50Ms: Long,
-    val sarieP95Ms: Long,
-    val sarieP99Ms: Long,
-    val sarieTotalBytes: Long,
-    val sarieProtocolCounts: Map<String, Int>,
-    val sarieFailedCount: Int,
+    val stock: ParallelRun,
+    val sarie: ParallelRun,
 )
 
 data class HostSetupMetrics(
@@ -54,10 +53,6 @@ data class HostSetupMetrics(
     val socketReused: Boolean = false,
 )
 
-data class ConnectionSetupResult(
-    val rows: List<HostSetupMetrics>,
-)
-
 data class DownloadProgress(
     val bytesRead: Long,
     val totalBytes: Long,
@@ -68,14 +63,6 @@ data class DownloadProgress(
 object Scenarios {
 
     enum class Stack { STOCK, SARIE }
-
-    data class RoundTripRun(
-        val coldMs: Long,
-        val warmP50Ms: Long,
-        val warmP95Ms: Long,
-        val protocol: String,
-        val firstCall: Call? = null,
-    )
 
     private fun clearScenarioMetrics(clients: Clients) {
         DemoLog.finishedCalls.clear()
@@ -139,15 +126,23 @@ object Scenarios {
         val sarieP95s = sarieRuns.map { it.warmP95Ms }.toLongArray()
         val sarieProtocol = sarieRuns.lastOrNull()?.protocol ?: "h3"
 
+        val stockSummary = RoundTripRun(
+            coldMs = Stats.median(stockColds),
+            warmP50Ms = Stats.median(stockP50s),
+            warmP95Ms = Stats.median(stockP95s),
+            protocol = stockProtocol,
+        )
+        val sarieSummary = RoundTripRun(
+            coldMs = sarieRuns.firstOrNull()?.coldMs ?: 0L,
+            warmP50Ms = Stats.median(sarieP50s),
+            warmP95Ms = Stats.median(sarieP95s),
+            protocol = sarieProtocol,
+        )
+
         return RoundTripResult(
-            stockColdMs = Stats.median(stockColds),
-            stockWarmP50Ms = Stats.median(stockP50s),
-            stockWarmP95Ms = Stats.median(stockP95s),
-            stockProtocol = stockProtocol,
+            stock = stockSummary,
+            sarie = sarieSummary,
             sarieColdMs = sarieColdMs,
-            sarieWarmP50Ms = Stats.median(sarieP50s),
-            sarieWarmP95Ms = Stats.median(sarieP95s),
-            sarieProtocol = sarieProtocol,
         )
     }
 
@@ -187,17 +182,6 @@ object Scenarios {
             firstCall = firstCall,
         )
     }
-
-    data class ParallelRun(
-        val wallTotalMs: Long,
-        val firstImageMs: Long,
-        val p50Ms: Long,
-        val p95Ms: Long,
-        val p99Ms: Long,
-        val totalBytes: Long,
-        val protocolCounts: Map<String, Int>,
-        val failedCount: Int,
-    )
 
     fun runParallelImages(
         clients: Clients,
@@ -247,7 +231,7 @@ object Scenarios {
         val stockP99 = Stats.median(stockRuns.map { it.p99Ms }.toLongArray())
         val stockBytes = Stats.median(stockRuns.map { it.totalBytes }.toLongArray())
         val stockCounts = stockRuns.lastOrNull()?.protocolCounts ?: emptyMap()
-        val stockFailed = stockRuns.lastOrNull()?.failedCount ?: 0
+        val stockFailed = stockRuns.sumOf { it.failedCount }
 
         val sarieWallTotal = Stats.median(sarieRuns.map { it.wallTotalMs }.toLongArray())
         val sarieFirstImage = Stats.median(sarieRuns.map { it.firstImageMs }.toLongArray())
@@ -256,26 +240,32 @@ object Scenarios {
         val sarieP99 = Stats.median(sarieRuns.map { it.p99Ms }.toLongArray())
         val sarieBytes = Stats.median(sarieRuns.map { it.totalBytes }.toLongArray())
         val sarieCounts = sarieRuns.lastOrNull()?.protocolCounts ?: emptyMap()
-        val sarieFailed = sarieRuns.lastOrNull()?.failedCount ?: 0
+        val sarieFailed = sarieRuns.sumOf { it.failedCount }
+
+        val stockSummary = ParallelRun(
+            wallTotalMs = stockWallTotal,
+            firstImageMs = stockFirstImage,
+            p50Ms = stockP50,
+            p95Ms = stockP95,
+            p99Ms = stockP99,
+            totalBytes = stockBytes,
+            protocolCounts = stockCounts,
+            failedCount = stockFailed,
+        )
+        val sarieSummary = ParallelRun(
+            wallTotalMs = sarieWallTotal,
+            firstImageMs = sarieFirstImage,
+            p50Ms = sarieP50,
+            p95Ms = sarieP95,
+            p99Ms = sarieP99,
+            totalBytes = sarieBytes,
+            protocolCounts = sarieCounts,
+            failedCount = sarieFailed,
+        )
 
         return ParallelImagesResult(
-            stockWallTotalMs = stockWallTotal,
-            stockFirstImageMs = stockFirstImage,
-            stockP50Ms = stockP50,
-            stockP95Ms = stockP95,
-            stockP99Ms = stockP99,
-            stockTotalBytes = stockBytes,
-            stockProtocolCounts = stockCounts,
-            stockFailedCount = stockFailed,
-
-            sarieWallTotalMs = sarieWallTotal,
-            sarieFirstImageMs = sarieFirstImage,
-            sarieP50Ms = sarieP50,
-            sarieP95Ms = sarieP95,
-            sarieP99Ms = sarieP99,
-            sarieTotalBytes = sarieBytes,
-            sarieProtocolCounts = sarieCounts,
-            sarieFailedCount = sarieFailed,
+            stock = stockSummary,
+            sarie = sarieSummary,
         )
     }
 
@@ -369,7 +359,7 @@ object Scenarios {
         HostTarget("jsdelivr", "https://cdn.jsdelivr.net/npm/jquery@3.7.1/package.json"),
     )
 
-    fun runConnectionSetup(clients: Clients): ConnectionSetupResult {
+    fun runConnectionSetup(clients: Clients): List<HostSetupMetrics> {
         clearScenarioMetrics(clients)
 
         val rows = mutableListOf<HostSetupMetrics>()
@@ -469,7 +459,7 @@ object Scenarios {
             sarieMetrics?.let { rows.add(it) }
         }
 
-        return ConnectionSetupResult(rows)
+        return rows
     }
 
     fun runDownloadMigration(
