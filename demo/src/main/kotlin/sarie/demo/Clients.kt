@@ -1,5 +1,7 @@
 package sarie.demo
 
+import android.content.Context
+import com.chuckerteam.chucker.api.ChuckerInterceptor
 import java.util.concurrent.ConcurrentHashMap
 import okhttp3.Call
 import okhttp3.Dispatcher
@@ -70,23 +72,25 @@ class Clients(
 )
 
 fun createClients(
+    context: Context,
     stockEventListener: StockEventListener = StockEventListener(),
-    networkInterceptors: List<Interceptor> = emptyList(),
 ): Clients {
+    val chucker = ChuckerInterceptor.Builder(context).build()
     val dispatcher = Dispatcher().apply {
         maxRequests = 128
         maxRequestsPerHost = 128
     }
-    val baseBuilder = OkHttpClient.Builder()
+    val base = OkHttpClient.Builder()
         .dispatcher(dispatcher)
-    for (interceptor in networkInterceptors) {
-        baseBuilder.addNetworkInterceptor(interceptor)
-    }
-    val base = baseBuilder.build()
+        .addNetworkInterceptor(chucker)
+        .addNetworkInterceptor(DemoLog)
+        .build()
+
     val sarieClient = base
     val stockClient = base.newBuilder()
         .addInterceptor(optOutInterceptor)
         .eventListener(stockEventListener)
         .build()
+
     return Clients(base, stockClient, sarieClient, stockEventListener)
 }

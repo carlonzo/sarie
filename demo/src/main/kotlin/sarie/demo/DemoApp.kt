@@ -12,6 +12,8 @@ class DemoApp : Application() {
         instance = this
 
         SarieBridge.install(this) {
+            debugLogger(DemoLog)
+            listener(DemoLog)
             configure { builder ->
                 for (host in DEMO_HOSTS) {
                     builder.addQuicHint(host, 443, 443)
@@ -19,7 +21,7 @@ class DemoApp : Application() {
             }
         }
 
-        clients = createClients()
+        clients = createClients(this)
     }
 
     companion object {
