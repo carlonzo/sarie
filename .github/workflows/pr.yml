@@ -55,13 +55,13 @@ jobs:
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
           sed -i '/^org.gradle.java.home=/d' plugin/gradle.properties
-      - name: Bridge tests, compileOnly check, sample assemble, demo assemble
+      - name: Bridge tests, compileOnly check, instrumentation-tests assemble, demo assemble
         run: >
           ./gradlew --no-daemon
           :bridge:checkOkHttpCompileOnly
           :bridge:checkCronetCompileOnly
           :bridge:testDebugUnitTest
-          :sample:assembleDebug
+          :instrumentation-tests:assembleDebug
           :demo:assembleDebug
           -PokhttpVersion=${{ matrix.okhttp }}
 
@@ -105,13 +105,13 @@ jobs:
           emulator-boot-timeout: 600
           script: >
             ./gradlew --no-daemon
-            :sample:connectedDebugAndroidTest
-            :sample:connectedMinifiedReleaseAndroidTest
+            :instrumentation-tests:connectedDebugAndroidTest
+            :instrumentation-tests:connectedMinifiedReleaseAndroidTest
             -PokhttpVersion=${{ matrix.okhttp }}
       - name: Dump test failures on failure
         if: failure()
         run: |
-          for f in sample/build/outputs/androidTest-results/connected/*/*.xml; do
+          for f in instrumentation-tests/build/outputs/androidTest-results/connected/*/*.xml; do
             if [ -f "$f" ] && grep -q '<failure' "$f"; then
               echo "::group::Test failures in $f"
               grep -B 2 -A 30 '<failure' "$f"
@@ -124,6 +124,6 @@ jobs:
         with:
           name: test-results-device-okhttp-${{ matrix.okhttp }}
           path: |
-            sample/build/reports/androidTests/
-            sample/build/outputs/androidTest-results/
+            instrumentation-tests/build/reports/androidTests/
+            instrumentation-tests/build/outputs/androidTest-results/
 

@@ -1,9 +1,9 @@
-package sarie.sample.baseline
+package sarie.instrumentation.baseline
 
 import androidx.test.platform.app.InstrumentationRegistry
 import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
-import sarie.sample.SampleAppRuntime
+import sarie.instrumentation.TestAppRuntime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -29,41 +29,41 @@ import org.junit.Test
 class BaselineSuite {
 
     private lateinit var server: MockWebServer
-    private var installedMode: String = SampleAppRuntime.MODE_STOCK
+    private var installedMode: String = TestAppRuntime.MODE_STOCK
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
-        SampleAppRuntime.routes.clear()
+        TestAppRuntime.routes.clear()
         // BaselineSuite tests different install modes; honor the instrumentation runner arg.
         val runnerMode = InstrumentationRegistry.getArguments().getString("mode")
-            ?: SampleAppRuntime.MODE_CRONET
+            ?: TestAppRuntime.MODE_CRONET
         when (runnerMode) {
-            SampleAppRuntime.MODE_CRONET -> installCronet()
-            SampleAppRuntime.MODE_STOCK -> Unit
-            SampleAppRuntime.MODE_FALLBACK -> installDisabled()
+            TestAppRuntime.MODE_CRONET -> installCronet()
+            TestAppRuntime.MODE_STOCK -> Unit
+            TestAppRuntime.MODE_FALLBACK -> installDisabled()
         }
     }
 
     @After
     fun tearDown() {
         server.close()
-        SampleAppRuntime.reset()
-        SampleAppRuntime.routes.clear()
-        installedMode = SampleAppRuntime.MODE_STOCK
+        TestAppRuntime.reset()
+        TestAppRuntime.routes.clear()
+        installedMode = TestAppRuntime.MODE_STOCK
     }
 
     private fun installCronet() {
-        if (installedMode == SampleAppRuntime.MODE_CRONET) return
-        SampleAppRuntime.install(SampleAppRuntime.MODE_CRONET)
-        installedMode = SampleAppRuntime.MODE_CRONET
+        if (installedMode == TestAppRuntime.MODE_CRONET) return
+        TestAppRuntime.install(TestAppRuntime.MODE_CRONET)
+        installedMode = TestAppRuntime.MODE_CRONET
     }
 
     private fun installDisabled() {
-        if (installedMode == SampleAppRuntime.MODE_FALLBACK) return
-        SampleAppRuntime.install(SampleAppRuntime.MODE_FALLBACK)
-        installedMode = SampleAppRuntime.MODE_FALLBACK
+        if (installedMode == TestAppRuntime.MODE_FALLBACK) return
+        TestAppRuntime.install(TestAppRuntime.MODE_FALLBACK)
+        installedMode = TestAppRuntime.MODE_FALLBACK
     }
 
     private fun getRequest() = Request.Builder().url(server.url("/")).build()
@@ -73,7 +73,7 @@ class BaselineSuite {
     }
 
     private fun assertFallbackOnly(expectedReason: FallbackReason) {
-        val routes = SampleAppRuntime.routes
+        val routes = TestAppRuntime.routes
         assertEquals(0, routes.cronetCount())
         assertTrue(
             "expected at least one fallback, got ${routes.fallbackCount()}",
@@ -209,10 +209,10 @@ class BaselineSuite {
         // cancel() (not close()): the close handshake is async and would leave the server
         // socket open for MockWebServer.close() in tearDown.
         ws.cancel()
-        assertEquals(0, SampleAppRuntime.routes.cronetCount())
-        assertTrue(SampleAppRuntime.routes.fallbackCount() >= 1)
+        assertEquals(0, TestAppRuntime.routes.cronetCount())
+        assertTrue(TestAppRuntime.routes.fallbackCount() >= 1)
         // The handshake is cleartext, and the cleartext rule precedes the websocket rule.
-        assertEquals(FallbackReason.cleartext, SampleAppRuntime.routes.lastReason())
+        assertEquals(FallbackReason.cleartext, TestAppRuntime.routes.lastReason())
 
         // (b) HTTPS forWebSocket call: policy denies with reason=websocket before any I/O.
         val dead = CountDownLatch(1)
@@ -232,7 +232,7 @@ class BaselineSuite {
         )
         assertTrue("dead-port websocket did not settle", dead.await(15, TimeUnit.SECONDS))
         assertTrue("expected stock-path connection failure", failed.get())
-        assertEquals(0, SampleAppRuntime.routes.cronetCount())
-        assertEquals(FallbackReason.websocket, SampleAppRuntime.routes.lastReason())
+        assertEquals(0, TestAppRuntime.routes.cronetCount())
+        assertEquals(FallbackReason.websocket, TestAppRuntime.routes.lastReason())
     }
 }

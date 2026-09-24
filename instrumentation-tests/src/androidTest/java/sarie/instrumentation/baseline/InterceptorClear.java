@@ -1,4 +1,4 @@
-package sarie.sample.baseline;
+package sarie.instrumentation.baseline;
 
 import java.util.List;
 import okhttp3.Interceptor;

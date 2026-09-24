@@ -1,8 +1,8 @@
-package sarie.sample.minified
+package sarie.instrumentation.minified
 
 import sarie.bridge.FallbackReason
-import sarie.sample.NetworkParity
-import sarie.sample.SampleAppRuntime
+import sarie.instrumentation.NetworkParity
+import sarie.instrumentation.TestAppRuntime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -43,7 +43,7 @@ class MinifiedSuite {
 
     @Before
     fun setUp() {
-        SampleAppRuntime.routes.clear()
+        TestAppRuntime.routes.clear()
         server = MockWebServer()
         server.start()
     }
@@ -52,24 +52,24 @@ class MinifiedSuite {
     fun tearDown() {
         server.close()
         // Stops the engine and wipes the Sarie storage dir (persisted QUIC state).
-        SampleAppRuntime.reset()
+        TestAppRuntime.reset()
         installedEngine = null
-        SampleAppRuntime.routes.clear()
+        TestAppRuntime.routes.clear()
     }
 
     /** Installs the cronet-mode runtime with an isolated engine (fresh storage dir). */
     private fun installCronet(quicHintHost: String? = HOST, quicHintPort: Int = PORT) {
-        SampleAppRuntime.install(
-            mode = SampleAppRuntime.MODE_CRONET,
+        TestAppRuntime.install(
+            mode = TestAppRuntime.MODE_CRONET,
             quicHintHost = quicHintHost,
             quicHintPort = quicHintPort,
             freshStorage = true,
         )
-        installedEngine = SampleAppRuntime.lastEngine
+        installedEngine = TestAppRuntime.lastEngine
     }
 
     private fun assertCronetServed(minCount: Int = 1) {
-        val routes = SampleAppRuntime.routes
+        val routes = TestAppRuntime.routes
         assertTrue("expected the cronet path, cronet=${routes.cronetCount()}", routes.cronetCount() >= minCount)
         assertNull(
             "cronet-path request recorded a fallback reason: ${routes.lastReason()}",
@@ -78,7 +78,7 @@ class MinifiedSuite {
     }
 
     private fun assertFallbackOnly(expectedReason: FallbackReason) {
-        val routes = SampleAppRuntime.routes
+        val routes = TestAppRuntime.routes
         assertEquals(0, routes.cronetCount())
         assertTrue(
             "expected at least one fallback, got ${routes.fallbackCount()}",
@@ -227,8 +227,8 @@ class MinifiedSuite {
     fun killSwitchRestoresStock() {
         // Policy enabled=false (MODE_FALLBACK): kill switch off -> everything served stock,
         // including HTTPS to an allowlisted origin (the disabled rule precedes allowlist).
-        SampleAppRuntime.install(SampleAppRuntime.MODE_FALLBACK, freshStorage = true)
-        installedEngine = SampleAppRuntime.lastEngine
+        TestAppRuntime.install(TestAppRuntime.MODE_FALLBACK, freshStorage = true)
+        installedEngine = TestAppRuntime.lastEngine
 
         OkHttpClient().newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
             assertEquals(200, response.code)

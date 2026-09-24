@@ -1,4 +1,4 @@
-package sarie.sample
+package sarie.instrumentation
 
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -177,12 +177,12 @@ internal object NetworkParity {
 
     private fun assertCronetServed(minCount: Int = 1) {
         assertTrue(
-            "expected the cronet path, cronet=${SampleAppRuntime.routes.cronetCount()}",
-            SampleAppRuntime.routes.cronetCount() >= minCount,
+            "expected the cronet path, cronet=${TestAppRuntime.routes.cronetCount()}",
+            TestAppRuntime.routes.cronetCount() >= minCount,
         )
         assertNull(
-            "cronet-path request recorded a fallback reason: ${SampleAppRuntime.routes.lastReason()}",
-            SampleAppRuntime.routes.lastReason(),
+            "cronet-path request recorded a fallback reason: ${TestAppRuntime.routes.lastReason()}",
+            TestAppRuntime.routes.lastReason(),
         )
     }
 

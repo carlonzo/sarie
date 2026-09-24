@@ -11,11 +11,11 @@ okhttpCronet {
 }
 
 android {
-    namespace = "sarie.sample"
+    namespace = "sarie.instrumentation"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "sarie.sample"
+        applicationId = "sarie.instrumentation"
         minSdk = libs.versions.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -74,7 +74,7 @@ dependencies {
     // Compile-only: main sources only build the engine; cronet-embedded supplies the
     // implementation (API + natives) on the device at instrumentation time.
     compileOnly(libs.cronet.api)
-    // Referenced by SampleAppRuntime to fetch a Context; only ever invoked from androidTest.
+    // Referenced by TestAppRuntime to fetch a Context; only ever invoked from androidTest.
     compileOnly(libs.androidx.test.core)
 
     implementation(libs.cronet.embedded)

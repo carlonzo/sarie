@@ -1,11 +1,11 @@
-package sarie.sample;
+package sarie.instrumentation;
 
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
-/** Placeholder scaffold; becomes the com.android.application sample in a later todo. */
-public class SamplePlaceholdersTest {
+/** Placeholder scaffold. */
+public class PlaceholdersTest {
     @Test
     public void placeholderRuns() {
         assertTrue(true);

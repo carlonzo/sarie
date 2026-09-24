@@ -1,6 +1,6 @@
 # R8 rules for the minifiedRelease test variant (todo 10).
 #
-# The sample's manifest is an empty <manifest /> (no launcher activity): nothing in main
+# The test host's manifest is an empty <manifest /> (no launcher activity): nothing in main
 # sources is reachable from manifest entry points, so R8 strips anything not pulled in by
 # an explicit keep. The trampoline (INVOKESTATIC CronetBridge.intercept injected into
 # ConnectInterceptor by the okhttp.cronet plugin) is only a live root if okhttp itself
@@ -12,7 +12,7 @@
 # (ConnectInterceptor, RealInterceptorChain, RealCall, ...) stay shrinkable/renamable -
 # renaming is exactly what this suite must survive.
 
-# (1) Reachability root for the transport under test. The sample has NO call sites (the
+# (1) Reachability root for the transport under test. The test host has NO call sites (the
 # instrumented suites make every call), so R8's view of the app is "OkHttpClient exists,
 # nothing is ever invoked": keeping only OkHttpClient kept newCall's body but stripped the
 # never-invoked downstream - RealCall.execute/getResponseWithInterceptorChain, every
@@ -87,13 +87,13 @@
 # the kotlin.** keep below shifted R8's merging decisions). Full keeps pin the classes
 # the suites drive; the rest of the bridge (CronetBridge, PolicyEngine, converters, ...)
 # stays shrinkable/renamable.
-#   SampleAppRuntime - every suite's install/lastEngine entry point (also stripped
+#   TestAppRuntime - every suite's install/lastEngine entry point (also stripped
 #       outright without a keep: nothing in main references it)
 #   SarieBridge - install/uninstall/engine
 #   FallbackReason - the reason constants every path assertion compares
-#   SarieListener + SampleAppRuntime$RouteLog - onRouted / onFinished assertions
+#   SarieListener + TestAppRuntime$RouteLog - onRouted / onFinished assertions
 #   CronetPolicy - the policies the suites install
--keep class sarie.sample.SampleAppRuntime { *; }
+-keep class sarie.instrumentation.TestAppRuntime { *; }
 -keep class sarie.bridge.SarieBridge { *; }
 -keep class sarie.bridge.FallbackReason { *; }
 # RequestFinishedInfo: only the test APK reads it (CronetSuite wire-bytes assertion); with no
@@ -101,7 +101,7 @@
 -keep class org.chromium.net.RequestFinishedInfo { *; }
 -keep class org.chromium.net.RequestFinishedInfo$Metrics { *; }
 -keep class sarie.bridge.SarieListener { *; }
--keep class sarie.sample.SampleAppRuntime$RouteLog { *; }
+-keep class sarie.instrumentation.TestAppRuntime$RouteLog { *; }
 -keep class sarie.bridge.CronetPolicy { *; }
 -keepclassmembers class org.chromium.net.CronetEngine {
     public void shutdown();

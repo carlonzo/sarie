@@ -20,5 +20,5 @@ rootProject.name = "sarie"
 
 includeBuild("plugin")
 include(":bridge")
-include(":sample")
+include(":instrumentation-tests")
 include(":demo")

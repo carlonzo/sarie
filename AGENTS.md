@@ -57,8 +57,8 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
   `~/.gradle/gradle.properties` (`mavenCentralUsername`, `mavenCentralPassword`,
   `signAllPublications=true`, signing key). `./gradlew publishToMavenLocal` publishes both.
 - Suites: `./gradlew -p plugin test` (bytecode rewriting + guards),
-  `:bridge:testDebugUnitTest` (bridge logic), `:sample:connectedDebugAndroidTest` and
-  `:sample:connectedMinifiedReleaseAndroidTest` (device; the Gradle `startTestOrigin` task
+  `:bridge:testDebugUnitTest` (bridge logic), `:instrumentation-tests:connectedDebugAndroidTest` and
+  `:instrumentation-tests:connectedMinifiedReleaseAndroidTest` (device; the Gradle `startTestOrigin` task
   runs the Caddy HTTP/3 origin in `scripts/`). PR CI runs both connected suites on an
   API-30 emulator for every supported okhttp version. The connected suites are the living
   documentation of behavior.
@@ -69,8 +69,9 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
   `com.carlonzo.sarie:plugin`. See `plugin/AGENTS.md`.
 - `bridge/`: runtime Cronet transport and routing policy. Published as
   `com.carlonzo.sarie:bridge`. See `bridge/AGENTS.md`.
-- `sample/`: androidTest host; its suites (`BaselineSuite`, `CronetSuite`, `MinifiedSuite`)
-  are the behavior contract in executable form. No AGENTS.md; see `sample/build.gradle.kts`.
+- `instrumentation-tests/`: device-test host; its suites (`BaselineSuite`, `CronetSuite`, `MinifiedSuite`)
+  are the behavior contract in executable form. No AGENTS.md; see `instrumentation-tests/build.gradle.kts`.
+- `demo/`: showcase app comparing stock OkHttp vs Sarie.
 
 ## Where truth lives
 

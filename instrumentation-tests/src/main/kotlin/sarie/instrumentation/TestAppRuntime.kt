@@ -1,4 +1,4 @@
-package sarie.sample
+package sarie.instrumentation
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -31,7 +31,7 @@ import sarie.bridge.SarieListener
  * [lastEngine] is the engine from the snapshot so the owning suite can stop it in @After.
  * This object does not call [CronetEngine.shutdown].
  */
-object SampleAppRuntime {
+object TestAppRuntime {
 
     const val MODE_CRONET = "cronet"
     const val MODE_BORROWED = "borrowed"
@@ -55,7 +55,7 @@ object SampleAppRuntime {
     ) {
         if (mode == MODE_STOCK) return
         val context: Context = ApplicationProvider.getApplicationContext()
-        val policy = samplePolicy(mode)
+        val policy = testPolicy(mode)
         if (mode == MODE_BORROWED) {
             installBorrowed(context, policy, quicHintHost, quicHintPort, freshStorage, brotli, diskCache)
         } else {
@@ -142,7 +142,7 @@ object SampleAppRuntime {
         File(context.cacheDir, "cronet-cache").deleteRecursively()
     }
 
-    private fun samplePolicy(mode: String): DefaultPolicy = DefaultPolicy.Builder()
+    private fun testPolicy(mode: String): DefaultPolicy = DefaultPolicy.Builder()
         .allowedOrigins(
             setOf(
                 "10.0.2.2:8443",
