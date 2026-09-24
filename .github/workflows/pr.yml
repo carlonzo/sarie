@@ -55,13 +55,14 @@ jobs:
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
           sed -i '/^org.gradle.java.home=/d' plugin/gradle.properties
-      - name: Bridge tests, compileOnly check, sample assemble
+      - name: Bridge tests, compileOnly check, sample assemble, demo assemble
         run: >
           ./gradlew --no-daemon
           :bridge:checkOkHttpCompileOnly
           :bridge:checkCronetCompileOnly
           :bridge:testDebugUnitTest
           :sample:assembleDebug
+          :demo:assembleDebug
           -PokhttpVersion=${{ matrix.okhttp }}
 
   device:
