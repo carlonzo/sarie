@@ -11,15 +11,17 @@ class DemoApp : Application() {
         super.onCreate()
         instance = this
 
-        SarieBridge.install(this) {
-            debugLogger(DemoLog)
-            listener(DemoLog)
-            configure { builder ->
-                for (host in DEMO_HOSTS) {
-                    builder.addQuicHint(host, 443, 443)
+        Thread {
+            SarieBridge.install(this) {
+                debugLogger(DemoLog)
+                listener(DemoLog)
+                configure { builder ->
+                    for (host in DEMO_HOSTS) {
+                        builder.addQuicHint(host, 443, 443)
+                    }
                 }
             }
-        }
+        }.start()
 
         clients = createClients(this)
     }

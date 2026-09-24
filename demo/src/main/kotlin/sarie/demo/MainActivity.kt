@@ -13,7 +13,6 @@ import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.tabs.TabLayout
-import org.chromium.net.CronetProvider
 import sarie.bridge.SarieBridge
 
 class MainActivity : AppCompatActivity() {
@@ -194,6 +193,7 @@ class MainActivity : AppCompatActivity() {
 
         DemoLog.onChangeListener = {
             if (!isFinishing && !isDestroyed) {
+                updateToolbarSubtitle()
                 updatePeekText()
                 updateLogsList()
             }
@@ -209,14 +209,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateToolbarSubtitle() {
-        val providers = CronetProvider.getAllProviders(this)
-        val activeProvider = providers.firstOrNull { it.isEnabled }
-        val version = SarieBridge.engine?.versionString ?: ""
-        toolbar.subtitle = if (activeProvider != null) {
-            "engine: ${activeProvider.name} $version"
-        } else {
-            "engine: none"
-        }
+        toolbar.subtitle = SarieBridge.engine?.versionString ?: "engine: not installed"
     }
 
     private fun updatePeekText() {
