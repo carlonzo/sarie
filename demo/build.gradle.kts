@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     id("com.carlonzo.sarie")
+    alias(libs.plugins.compose.compiler)
 }
 
 okhttpCronet {
@@ -18,6 +19,9 @@ android {
         versionName = "1.0"
     }
 
+    buildFeatures {
+        compose = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -36,8 +40,15 @@ dependencies {
     implementation(libs.okhttp)
     compileOnly(libs.cronet.api)
     implementation(libs.cronet.embedded)
-    implementation(libs.material)
     implementation(libs.chucker)
+
+    val composeBom = platform(libs.compose.bom)
+    implementation(composeBom)
+    implementation(libs.activity.compose)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.ui.tooling.preview)
+    debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)
 }

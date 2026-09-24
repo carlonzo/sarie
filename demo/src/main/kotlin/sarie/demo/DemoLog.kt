@@ -10,6 +10,9 @@ import java.util.Locale
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import okhttp3.Call
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -37,7 +40,8 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
     var lastLine: String = "ready"
         private set
 
-    var onChangeListener: (() -> Unit)? = null
+    var version by mutableIntStateOf(0)
+        private set
 
     val finishedCalls = ConcurrentHashMap<Call, CompletableFuture<RequestFinishedInfo>>()
 
@@ -62,7 +66,7 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
 
     private fun notifyChange() {
         mainHandler.post {
-            onChangeListener?.invoke()
+            version++
         }
     }
 

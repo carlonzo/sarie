@@ -1,494 +1,936 @@
 package sarie.demo
 
+import android.graphics.Bitmap
 import android.os.Bundle
-import android.view.LayoutInflater
-import android.view.View
-import android.view.ViewGroup
-import android.widget.TextView
-import androidx.appcompat.app.AppCompatActivity
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import android.os.Handler
+import android.os.Looper
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.chuckerteam.chucker.api.Chucker
-import com.google.android.material.appbar.MaterialToolbar
-import com.google.android.material.bottomsheet.BottomSheetBehavior
-import com.google.android.material.button.MaterialButton
-import com.google.android.material.tabs.TabLayout
+import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import kotlinx.coroutines.launch
 import sarie.bridge.SarieBridge
 
-class MainActivity : AppCompatActivity() {
+enum class ScenarioType {
+    ROUND_TRIP,
+    PARALLEL,
+    SETUP,
+    DOWNLOAD,
+}
 
-    private lateinit var toolbar: MaterialToolbar
-    private lateinit var tvPeek: TextView
-    private lateinit var peekBar: View
-    private lateinit var tabLayout: TabLayout
-    private lateinit var btnClear: MaterialButton
-    private lateinit var btnChucker: MaterialButton
-    private lateinit var rvLogs: RecyclerView
-    private lateinit var bottomSheetBehavior: BottomSheetBehavior<View>
-    private val logAdapter = LogAdapter()
-    private val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+data class ThumbItem(
+    val bitmap: Bitmap? = null,
+    val borderColor: Color = Color.Transparent,
+)
 
-    // Round Trip card views
-    private lateinit var btnRunRoundTrip: MaterialButton
-    private lateinit var tvStockHeader: TextView
-    private lateinit var tvSarieHeader: TextView
-    private lateinit var tvStockCold: TextView
-    private lateinit var tvSarieCold: TextView
-    private lateinit var tvStockWarmP50: TextView
-    private lateinit var tvSarieWarmP50: TextView
-    private lateinit var tvStockWarmP95: TextView
-    private lateinit var tvSarieWarmP95: TextView
-    private lateinit var tvRoundTripStatus: TextView
+data class DownloadUiState(
+    val progress: Float = 0f,
+    val isIndeterminate: Boolean = false,
+    val mbText: String = "0.0 MB",
+    val statusText: String = "—",
+    val statusColor: Color = Color.Gray,
+)
 
-    // Parallel Images card views
-    private lateinit var btnRunParallel: MaterialButton
-    private lateinit var rvThumbs: RecyclerView
-    private lateinit var tvParallelStockHeader: TextView
-    private lateinit var tvParallelSarieHeader: TextView
-    private lateinit var tvStockWallTotal: TextView
-    private lateinit var tvSarieWallTotal: TextView
-    private lateinit var tvStockFirstImage: TextView
-    private lateinit var tvSarieFirstImage: TextView
-    private lateinit var tvStockP50: TextView
-    private lateinit var tvSarieP50: TextView
-    private lateinit var tvStockP95: TextView
-    private lateinit var tvSarieP95: TextView
-    private lateinit var tvStockP99: TextView
-    private lateinit var tvSarieP99: TextView
-    private lateinit var tvStockTotalBytes: TextView
-    private lateinit var tvSarieTotalBytes: TextView
-    private lateinit var tvProtocolCounts: TextView
-    private lateinit var tvParallelStatus: TextView
-    private val thumbAdapter = ThumbAdapter()
+fun DownloadProgress?.toUiState(): DownloadUiState {
+    if (this == null) return DownloadUiState()
+    val mb = bytesRead / (1024.0 * 1024.0)
+    val mbText = String.format(Locale.US, "%.1f MB", mb)
+    val isIndeterminate: Boolean
+    val progress: Float
+    if (totalBytes > 0) {
+        isIndeterminate = false
+        progress = (bytesRead.toDouble() / totalBytes.toDouble()).toFloat().coerceIn(0f, 1f)
+    } else {
+        isIndeterminate = !isComplete
+        progress = if (isComplete && error == null) 1f else 0f
+    }
+    val statusText: String
+    val statusColor: Color
+    if (isComplete) {
+        if (error == null) {
+            statusText = "ok"
+            statusColor = Color(0xFF4CAF50)
+        } else {
+            statusText = "err: $error"
+            statusColor = Color(0xFFF44336)
+        }
+    } else {
+        statusText = if (bytesRead == 0L) "starting..." else "downloading..."
+        statusColor = Color.Gray
+    }
+    return DownloadUiState(progress, isIndeterminate, mbText, statusText, statusColor)
+}
 
-    // Connection Setup card views
-    private lateinit var btnRunSetup: MaterialButton
-    private lateinit var tableSetup: android.widget.TableLayout
-    private lateinit var tvSetupStatus: TextView
+class MainActivity : ComponentActivity() {
 
-    // Download Migration card views
-    private lateinit var btnRunDownload: MaterialButton
-    private lateinit var pbStock: com.google.android.material.progressindicator.LinearProgressIndicator
-    private lateinit var tvStockProgress: TextView
-    private lateinit var tvStockStatus: TextView
-    private lateinit var pbSarie: com.google.android.material.progressindicator.LinearProgressIndicator
-    private lateinit var tvSarieProgress: TextView
-    private lateinit var tvSarieStatus: TextView
+    private val executor: ExecutorService = Executors.newSingleThreadExecutor()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        toolbar = findViewById(R.id.toolbar)
-        tvPeek = findViewById(R.id.tvPeek)
-        peekBar = findViewById(R.id.peekBar)
-        tabLayout = findViewById(R.id.tabLayout)
-        btnClear = findViewById(R.id.btnClear)
-        btnChucker = findViewById(R.id.btnChucker)
-        rvLogs = findViewById(R.id.rvLogs)
-
-        val bottomSheet: View = findViewById(R.id.bottomSheet)
-        bottomSheetBehavior = BottomSheetBehavior.from(bottomSheet)
-
-        // Round Trip views
-        btnRunRoundTrip = findViewById(R.id.btnRunRoundTrip)
-        tvStockHeader = findViewById(R.id.tvStockHeader)
-        tvSarieHeader = findViewById(R.id.tvSarieHeader)
-        tvStockCold = findViewById(R.id.tvStockCold)
-        tvSarieCold = findViewById(R.id.tvSarieCold)
-        tvStockWarmP50 = findViewById(R.id.tvStockWarmP50)
-        tvSarieWarmP50 = findViewById(R.id.tvSarieWarmP50)
-        tvStockWarmP95 = findViewById(R.id.tvStockWarmP95)
-        tvSarieWarmP95 = findViewById(R.id.tvSarieWarmP95)
-        tvRoundTripStatus = findViewById(R.id.tvRoundTripStatus)
-
-        btnRunRoundTrip.setOnClickListener {
-            runRoundTripScenario()
-        }
-
-        // Parallel Images views
-        btnRunParallel = findViewById(R.id.btnRunParallel)
-        rvThumbs = findViewById(R.id.rvThumbs)
-        tvParallelStockHeader = findViewById(R.id.tvParallelStockHeader)
-        tvParallelSarieHeader = findViewById(R.id.tvParallelSarieHeader)
-        tvStockWallTotal = findViewById(R.id.tvStockWallTotal)
-        tvSarieWallTotal = findViewById(R.id.tvSarieWallTotal)
-        tvStockFirstImage = findViewById(R.id.tvStockFirstImage)
-        tvSarieFirstImage = findViewById(R.id.tvSarieFirstImage)
-        tvStockP50 = findViewById(R.id.tvStockP50)
-        tvSarieP50 = findViewById(R.id.tvSarieP50)
-        tvStockP95 = findViewById(R.id.tvStockP95)
-        tvSarieP95 = findViewById(R.id.tvSarieP95)
-        tvStockP99 = findViewById(R.id.tvStockP99)
-        tvSarieP99 = findViewById(R.id.tvSarieP99)
-        tvStockTotalBytes = findViewById(R.id.tvStockTotalBytes)
-        tvSarieTotalBytes = findViewById(R.id.tvSarieTotalBytes)
-        tvProtocolCounts = findViewById(R.id.tvProtocolCounts)
-        tvParallelStatus = findViewById(R.id.tvParallelStatus)
-
-        rvThumbs.layoutManager = androidx.recyclerview.widget.GridLayoutManager(this, 10)
-        rvThumbs.adapter = thumbAdapter
-
-        btnRunParallel.setOnClickListener {
-            runParallelScenario()
-        }
-
-        // Connection Setup views
-        btnRunSetup = findViewById(R.id.btnRunSetup)
-        tableSetup = findViewById(R.id.tableSetup)
-        tvSetupStatus = findViewById(R.id.tvSetupStatus)
-
-        btnRunSetup.setOnClickListener {
-            runSetupScenario()
-        }
-
-        // Download Migration views
-        btnRunDownload = findViewById(R.id.btnRunDownload)
-        pbStock = findViewById(R.id.pbStock)
-        tvStockProgress = findViewById(R.id.tvStockProgress)
-        tvStockStatus = findViewById(R.id.tvStockStatus)
-        pbSarie = findViewById(R.id.pbSarie)
-        tvSarieProgress = findViewById(R.id.tvSarieProgress)
-        tvSarieStatus = findViewById(R.id.tvSarieStatus)
-
-        btnRunDownload.setOnClickListener {
-            runDownloadScenario()
-        }
-
-        updateToolbarSubtitle()
-
-        tabLayout.addTab(tabLayout.newTab().setText("Sarie"))
-        tabLayout.addTab(tabLayout.newTab().setText("Network"))
-        tabLayout.addTab(tabLayout.newTab().setText("Cronet"))
-
-        val layoutManager = LinearLayoutManager(this)
-        rvLogs.layoutManager = layoutManager
-        rvLogs.adapter = logAdapter
-
-        peekBar.setOnClickListener {
-            if (bottomSheetBehavior.state == BottomSheetBehavior.STATE_COLLAPSED) {
-                bottomSheetBehavior.state = BottomSheetBehavior.STATE_EXPANDED
-            } else if (bottomSheetBehavior.state == BottomSheetBehavior.STATE_EXPANDED) {
-                bottomSheetBehavior.state = BottomSheetBehavior.STATE_COLLAPSED
-            }
-        }
-
-        tabLayout.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(tab: TabLayout.Tab) {
-                updateLogsList()
-            }
-            override fun onTabUnselected(tab: TabLayout.Tab) {}
-            override fun onTabReselected(tab: TabLayout.Tab) {}
-        })
-
-        btnClear.setOnClickListener {
-            DemoLog.clear(tabLayout.selectedTabPosition)
-            updateLogsList()
-        }
-
-        btnChucker.setOnClickListener {
-            val intent = Chucker.getLaunchIntent(this)
-            startActivity(intent)
-        }
-
-        DemoLog.onChangeListener = {
-            if (!isFinishing && !isDestroyed) {
-                updateToolbarSubtitle()
-                updatePeekText()
-                updateLogsList()
-            }
-        }
-
-        updatePeekText()
-        updateLogsList()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        updateToolbarSubtitle()
-    }
-
-    private fun updateToolbarSubtitle() {
-        toolbar.subtitle = SarieBridge.engine?.versionString ?: "engine: not installed"
-    }
-
-    private fun updatePeekText() {
-        tvPeek.text = "Cronet ${DemoLog.cronetCount.get()} · stock ${DemoLog.stockCount.get()} · ${DemoLog.lastLine}"
-    }
-
-    private fun updateLogsList() {
-        val lines = DemoLog.getLines(tabLayout.selectedTabPosition)
-        logAdapter.submitList(lines)
-        if (lines.isNotEmpty()) {
-            rvLogs.scrollToPosition(lines.size - 1)
-        }
-    }
-
-    private fun setRunButtonsEnabled(enabled: Boolean) {
-        btnRunRoundTrip.isEnabled = enabled
-        btnRunParallel.isEnabled = enabled
-        btnRunSetup.isEnabled = enabled
-        btnRunDownload.isEnabled = enabled
-    }
-
-    private fun runRoundTripScenario() {
-        setRunButtonsEnabled(false)
-        btnRunRoundTrip.text = "Running..."
-        tvRoundTripStatus.visibility = View.GONE
-
-        executor.execute {
-            try {
-                val result = Scenarios.runRoundTrip(DemoApp.instance.clients)
-                runOnUiThread {
-                    tvStockHeader.text = "stock ${result.stockProtocol}"
-                    tvSarieHeader.text = "Sarie ${result.sarieProtocol}"
-                    tvStockCold.text = "${result.stockColdMs} ms"
-                    tvSarieCold.text = result.sarieColdMs?.let { "${it} ms" } ?: "warm (restart app)"
-                    tvStockWarmP50.text = "${result.stockWarmP50Ms} ms"
-                    tvSarieWarmP50.text = "${result.sarieWarmP50Ms} ms"
-                    tvStockWarmP95.text = "${result.stockWarmP95Ms} ms"
-                    tvSarieWarmP95.text = "${result.sarieWarmP95Ms} ms"
-                    btnRunRoundTrip.text = "Run"
-                    setRunButtonsEnabled(true)
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    tvRoundTripStatus.visibility = View.VISIBLE
-                    tvRoundTripStatus.text = "Error: ${e.message}"
-                    btnRunRoundTrip.text = "Run"
-                    setRunButtonsEnabled(true)
-                }
+        setContent {
+            MaterialTheme {
+                DemoScreen(executor = executor)
             }
         }
     }
 
-    private fun runParallelScenario() {
-        setRunButtonsEnabled(false)
-        btnRunParallel.text = "Running..."
-        tvParallelStatus.visibility = View.GONE
+    override fun onDestroy() {
+        super.onDestroy()
+        executor.shutdown()
+    }
+}
 
-        val stockColor = android.graphics.Color.parseColor("#FF9800")
-        val sarieColor = android.graphics.Color.parseColor("#4CAF50")
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DemoScreen(executor: ExecutorService? = null) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val scaffoldState = rememberBottomSheetScaffoldState()
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-        executor.execute {
-            try {
-                val result = Scenarios.runParallelImages(DemoApp.instance.clients) { index, bitmap, stack ->
-                    runOnUiThread {
-                        val color = if (stack == Scenarios.Stack.STOCK) stockColor else sarieColor
-                        thumbAdapter.updateImage(index, bitmap, color)
-                    }
-                }
-                runOnUiThread {
-                    tvStockWallTotal.text = "${result.stockWallTotalMs} ms"
-                    tvSarieWallTotal.text = "${result.sarieWallTotalMs} ms"
-                    tvStockFirstImage.text = "${result.stockFirstImageMs} ms"
-                    tvSarieFirstImage.text = "${result.sarieFirstImageMs} ms"
-                    tvStockP50.text = "${result.stockP50Ms} ms"
-                    tvSarieP50.text = "${result.sarieP50Ms} ms"
-                    tvStockP95.text = "${result.stockP95Ms} ms"
-                    tvSarieP95.text = "${result.sarieP95Ms} ms"
-                    tvStockP99.text = "${result.stockP99Ms} ms"
-                    tvSarieP99.text = "${result.sarieP99Ms} ms"
-                    tvStockTotalBytes.text = "${result.stockTotalBytes / 1024} KB"
-                    tvSarieTotalBytes.text = "${result.sarieTotalBytes / 1024} KB"
+    val logVersion = DemoLog.version
 
-                    val stockCountsStr = result.stockProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
-                    val sarieCountsStr = result.sarieProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
-                    tvProtocolCounts.text = "protocol counts: stock [$stockCountsStr] failed: ${result.stockFailedCount} · Sarie [$sarieCountsStr] failed: ${result.sarieFailedCount}"
+    var runningScenario by remember { mutableStateOf<ScenarioType?>(null) }
 
-                    btnRunParallel.text = "Run"
-                    setRunButtonsEnabled(true)
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    tvParallelStatus.visibility = View.VISIBLE
-                    tvParallelStatus.text = "Error: ${e.message}"
-                    btnRunParallel.text = "Run"
-                    setRunButtonsEnabled(true)
-                }
-            }
+    // Round Trip state
+    var roundTripResult by remember { mutableStateOf<RoundTripResult?>(null) }
+    var roundTripError by remember { mutableStateOf<String?>(null) }
+
+    // Parallel Images state
+    var parallelResult by remember { mutableStateOf<ParallelImagesResult?>(null) }
+    var parallelError by remember { mutableStateOf<String?>(null) }
+    val thumbs = remember {
+        mutableStateListOf<ThumbItem>().apply {
+            repeat(100) { add(ThumbItem()) }
         }
     }
 
-    private fun runSetupScenario() {
-        setRunButtonsEnabled(false)
-        btnRunSetup.text = "Running..."
-        tvSetupStatus.visibility = View.GONE
+    // Connection Setup state
+    var setupResult by remember { mutableStateOf<ConnectionSetupResult?>(null) }
+    var setupError by remember { mutableStateOf<String?>(null) }
 
-        executor.execute {
-            try {
-                val result = Scenarios.runConnectionSetup(DemoApp.instance.clients)
-                runOnUiThread {
-                    if (tableSetup.childCount > 1) {
-                        tableSetup.removeViews(1, tableSetup.childCount - 1)
-                    }
-                    val mono = android.graphics.Typeface.MONOSPACE
-                    for (row in result.rows) {
-                        val tr = android.widget.TableRow(this)
-                        tr.addView(android.widget.TextView(this).apply {
-                            text = "${row.host} (${row.stack})"
-                            textSize = 11f
-                            typeface = mono
-                        })
-                        fun addCell(value: Long?, isReused: Boolean = false) {
-                            tr.addView(android.widget.TextView(this).apply {
-                                text = when {
-                                    isReused -> "reused"
-                                    value != null -> "${value}ms"
-                                    else -> "—"
-                                }
-                                gravity = android.view.Gravity.END
-                                textSize = 11f
-                                typeface = mono
-                            })
+    // Download Migration state
+    var stockDownloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
+    var sarieDownloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
+
+    // Bottom Sheet state
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 72.dp,
+        sheetDragHandle = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        coroutineScope.launch {
+                            if (scaffoldState.bottomSheetState.currentValue == SheetValue.Expanded) {
+                                scaffoldState.bottomSheetState.partialExpand()
+                            } else {
+                                scaffoldState.bottomSheetState.expand()
+                            }
                         }
-                        addCell(row.dnsMs, row.socketReused)
-                        addCell(row.connMs, row.socketReused)
-                        addCell(row.tlsMs, row.socketReused)
-                        addCell(row.ttfbMs, false)
-                        tableSetup.addView(tr)
                     }
-                    btnRunSetup.text = "Run"
-                    setRunButtonsEnabled(true)
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    tvSetupStatus.visibility = View.VISIBLE
-                    tvSetupStatus.text = "Error: ${e.message}"
-                    btnRunSetup.text = "Run"
-                    setRunButtonsEnabled(true)
-                }
-            }
-        }
-    }
-
-    private fun runDownloadScenario() {
-        setRunButtonsEnabled(false)
-        btnRunDownload.text = "Running..."
-        pbStock.isIndeterminate = false
-        pbStock.progress = 0
-        pbSarie.isIndeterminate = false
-        pbSarie.progress = 0
-        tvStockProgress.text = "0.0 MB"
-        tvSarieProgress.text = "0.0 MB"
-        tvStockStatus.text = "starting..."
-        tvSarieStatus.text = "starting..."
-        tvStockStatus.setTextColor(android.graphics.Color.GRAY)
-        tvSarieStatus.setTextColor(android.graphics.Color.GRAY)
-
-        executor.execute {
-            try {
-                Scenarios.runDownloadMigration(
-                    clients = DemoApp.instance.clients,
-                    onStockProgress = { progress ->
-                        runOnUiThread {
-                            updateDownloadProgress(progress, pbStock, tvStockProgress, tvStockStatus)
-                        }
-                    },
-                    onSarieProgress = { progress ->
-                        runOnUiThread {
-                            updateDownloadProgress(progress, pbSarie, tvSarieProgress, tvSarieStatus)
-                        }
-                    },
+                    .padding(top = 8.dp, bottom = 4.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(36.dp)
+                        .height(4.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.outline,
+                            shape = RoundedCornerShape(2.dp)
+                        )
                 )
-            } finally {
-                runOnUiThread {
-                    btnRunDownload.text = "Run"
-                    setRunButtonsEnabled(true)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Cronet ${DemoLog.cronetCount.get()} · stock ${DemoLog.stockCount.get()} · ${DemoLog.lastLine}",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                )
+            }
+        },
+        sheetContent = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TabRow(
+                        selectedTabIndex = selectedTab,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Tab(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            text = { Text("Sarie", fontSize = 12.sp) }
+                        )
+                        Tab(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            text = { Text("Network", fontSize = 12.sp) }
+                        )
+                        Tab(
+                            selected = selectedTab == 2,
+                            onClick = { selectedTab = 2 },
+                            text = { Text("Cronet", fontSize = 12.sp) }
+                        )
+                    }
+                    TextButton(onClick = { DemoLog.clear(selectedTab) }) {
+                        Text("Clear", fontSize = 12.sp)
+                    }
+                    FilledTonalButton(onClick = {
+                        val intent = Chucker.getLaunchIntent(context)
+                        context.startActivity(intent)
+                    }) {
+                        Text("Chucker", fontSize = 12.sp)
+                    }
+                }
+
+                val lines = remember(logVersion, selectedTab) {
+                    DemoLog.getLines(selectedTab)
+                }
+                val listState = rememberLazyListState()
+                LaunchedEffect(lines.size) {
+                    if (lines.isNotEmpty()) {
+                        listState.scrollToItem(lines.size - 1)
+                    }
+                }
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 8.dp)
+                ) {
+                    items(lines) { line ->
+                        Text(
+                            text = line,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
                 }
             }
+        },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text("Sarie demo", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = SarieBridge.engine?.versionString ?: "engine: not installed",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+                .padding(8.dp)
+        ) {
+            RoundTripCard(
+                result = roundTripResult,
+                error = roundTripError,
+                isRunning = runningScenario == ScenarioType.ROUND_TRIP,
+                isAnyRunning = runningScenario != null,
+                onRun = {
+                    runningScenario = ScenarioType.ROUND_TRIP
+                    roundTripError = null
+                    executor?.execute {
+                        try {
+                            val res = Scenarios.runRoundTrip(DemoApp.instance.clients)
+                            mainHandler.post {
+                                roundTripResult = res
+                                runningScenario = null
+                            }
+                        } catch (e: Exception) {
+                            mainHandler.post {
+                                roundTripError = e.message
+                                runningScenario = null
+                            }
+                        }
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            ParallelImagesCard(
+                result = parallelResult,
+                error = parallelError,
+                thumbs = thumbs,
+                isRunning = runningScenario == ScenarioType.PARALLEL,
+                isAnyRunning = runningScenario != null,
+                onRun = {
+                    runningScenario = ScenarioType.PARALLEL
+                    parallelError = null
+                    val stockColor = Color(0xFFFF9800)
+                    val sarieColor = Color(0xFF4CAF50)
+                    for (i in 0 until 100) {
+                        thumbs[i] = ThumbItem()
+                    }
+                    executor?.execute {
+                        try {
+                            val res = Scenarios.runParallelImages(DemoApp.instance.clients) { index, bitmap, stack ->
+                                val color = if (stack == Scenarios.Stack.STOCK) stockColor else sarieColor
+                                mainHandler.post {
+                                    thumbs[index] = ThumbItem(bitmap, color)
+                                }
+                            }
+                            mainHandler.post {
+                                parallelResult = res
+                                runningScenario = null
+                            }
+                        } catch (e: Exception) {
+                            mainHandler.post {
+                                parallelError = e.message
+                                runningScenario = null
+                            }
+                        }
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            ConnectionSetupCard(
+                result = setupResult,
+                error = setupError,
+                isRunning = runningScenario == ScenarioType.SETUP,
+                isAnyRunning = runningScenario != null,
+                onRun = {
+                    runningScenario = ScenarioType.SETUP
+                    setupError = null
+                    executor?.execute {
+                        try {
+                            val res = Scenarios.runConnectionSetup(DemoApp.instance.clients)
+                            mainHandler.post {
+                                setupResult = res
+                                runningScenario = null
+                            }
+                        } catch (e: Exception) {
+                            mainHandler.post {
+                                setupError = e.message
+                                runningScenario = null
+                            }
+                        }
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            DownloadMigrationCard(
+                stockUiState = stockDownloadProgress.toUiState(),
+                sarieUiState = sarieDownloadProgress.toUiState(),
+                isRunning = runningScenario == ScenarioType.DOWNLOAD,
+                isAnyRunning = runningScenario != null,
+                onRun = {
+                    runningScenario = ScenarioType.DOWNLOAD
+                    stockDownloadProgress = DownloadProgress(0, -1, false, null)
+                    sarieDownloadProgress = DownloadProgress(0, -1, false, null)
+                    executor?.execute {
+                        try {
+                            Scenarios.runDownloadMigration(
+                                clients = DemoApp.instance.clients,
+                                onStockProgress = { progress ->
+                                    mainHandler.post { stockDownloadProgress = progress }
+                                },
+                                onSarieProgress = { progress ->
+                                    mainHandler.post { sarieDownloadProgress = progress }
+                                }
+                            )
+                        } finally {
+                            mainHandler.post { runningScenario = null }
+                        }
+                    }
+                }
+            )
+
+            Spacer(modifier = Modifier.height(72.dp))
         }
     }
+}
 
-    private fun updateDownloadProgress(
-        progress: DownloadProgress,
-        indicator: com.google.android.material.progressindicator.LinearProgressIndicator,
-        tvProgress: TextView,
-        tvStatus: TextView,
+@Composable
+fun RoundTripCard(
+    result: RoundTripResult?,
+    error: String?,
+    isRunning: Boolean,
+    isAnyRunning: Boolean,
+    onRun: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        val mb = progress.bytesRead / (1024.0 * 1024.0)
-        tvProgress.text = String.format(java.util.Locale.US, "%.1f MB", mb)
-
-        if (progress.totalBytes > 0) {
-            indicator.isIndeterminate = false
-            val pct = ((progress.bytesRead.toDouble() / progress.totalBytes.toDouble()) * 100).toInt().coerceIn(0, 100)
-            indicator.progress = pct
-        } else {
-            indicator.isIndeterminate = !progress.isComplete
-        }
-
-        if (progress.isComplete) {
-            indicator.isIndeterminate = false
-            if (progress.error == null) {
-                if (progress.totalBytes <= 0) {
-                    indicator.progress = 100
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Round trip",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = onRun,
+                    enabled = !isAnyRunning
+                ) {
+                    Text(if (isRunning) "Running..." else "Run")
                 }
-                tvStatus.text = "ok"
-                tvStatus.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
-            } else {
-                tvStatus.text = "err: ${progress.error}"
-                tvStatus.setTextColor(android.graphics.Color.parseColor("#F44336"))
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("", modifier = Modifier.weight(1f))
+                Text(
+                    text = if (result != null) "stock ${result.stockProtocol}" else "stock",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = if (result != null) "Sarie ${result.sarieProtocol}" else "Sarie",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("cold", fontSize = 12.sp, modifier = Modifier.weight(1f))
+                Text(
+                    text = result?.let { "${it.stockColdMs} ms" } ?: "—",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = result?.let { it.sarieColdMs?.let { ms -> "${ms} ms" } ?: "warm (restart app)" } ?: "—",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("warm p50", fontSize = 12.sp, modifier = Modifier.weight(1f))
+                Text(
+                    text = result?.let { "${it.stockWarmP50Ms} ms" } ?: "—",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = result?.let { "${it.sarieWarmP50Ms} ms" } ?: "—",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("warm p95", fontSize = 12.sp, modifier = Modifier.weight(1f))
+                Text(
+                    text = result?.let { "${it.stockWarmP95Ms} ms" } ?: "—",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = result?.let { "${it.sarieWarmP95Ms} ms" } ?: "—",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            if (error != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Error: $error",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ParallelImagesCard(
+    result: ParallelImagesResult?,
+    error: String?,
+    thumbs: List<ThumbItem>,
+    isRunning: Boolean,
+    isAnyRunning: Boolean,
+    onRun: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Parallel images (100)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = onRun,
+                    enabled = !isAnyRunning
+                ) {
+                    Text(if (isRunning) "Running..." else "Run")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(10),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp),
+                userScrollEnabled = false,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                items(100) { index ->
+                    val item = thumbs[index]
+                    Box(
+                        modifier = Modifier
+                            .height(28.dp)
+                            .background(if (item.borderColor != Color.Transparent) item.borderColor else Color(0x33888888))
+                            .padding(if (item.borderColor != Color.Transparent) 2.dp else 0.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val bmp = item.bitmap
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0x33888888))
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("", modifier = Modifier.weight(1.2f))
+                Text(
+                    text = "stock",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "Sarie",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            val rows = listOf(
+                "total wall" to Pair(result?.let { "${it.stockWallTotalMs} ms" }, result?.let { "${it.sarieWallTotalMs} ms" }),
+                "first image" to Pair(result?.let { "${it.stockFirstImageMs} ms" }, result?.let { "${it.sarieFirstImageMs} ms" }),
+                "per-image p50" to Pair(result?.let { "${it.stockP50Ms} ms" }, result?.let { "${it.sarieP50Ms} ms" }),
+                "per-image p95" to Pair(result?.let { "${it.stockP95Ms} ms" }, result?.let { "${it.sarieP95Ms} ms" }),
+                "per-image p99" to Pair(result?.let { "${it.stockP99Ms} ms" }, result?.let { "${it.sarieP99Ms} ms" }),
+                "total bytes" to Pair(result?.let { "${it.stockTotalBytes / 1024} KB" }, result?.let { "${it.sarieTotalBytes / 1024} KB" }),
+            )
+
+            for ((label, pair) in rows) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text(label, fontSize = 12.sp, modifier = Modifier.weight(1.2f))
+                    Text(
+                        text = pair.first ?: "—",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = pair.second ?: "—",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.End,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val protocolCountsText = if (result != null) {
+                val stockCountsStr = result.stockProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
+                val sarieCountsStr = result.sarieProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
+                "protocol counts: stock [$stockCountsStr] failed: ${result.stockFailedCount} · Sarie [$sarieCountsStr] failed: ${result.sarieFailedCount}"
+            } else {
+                "protocol counts: —"
+            }
+            Text(
+                text = protocolCountsText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 11.sp
+            )
+
+            if (error != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Error: $error",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ConnectionSetupCard(
+    result: ConnectionSetupResult?,
+    error: String?,
+    isRunning: Boolean,
+    isAnyRunning: Boolean,
+    onRun: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Connection setup",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = onRun,
+                    enabled = !isAnyRunning
+                ) {
+                    Text(if (isRunning) "Running..." else "Run")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text("host", fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.5f))
+                Text("dns", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+                Text("conn", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+                Text("tls", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+                Text("ttfb", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+            }
+
+            if (result != null) {
+                for (row in result.rows) {
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            text = "${row.host} (${row.stack})",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            modifier = Modifier.weight(1.5f)
+                        )
+                        fun formatCell(value: Long?, reused: Boolean): String = when {
+                            reused -> "reused"
+                            value != null -> "${value}ms"
+                            else -> "—"
+                        }
+                        Text(
+                            text = formatCell(row.dnsMs, row.socketReused),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = formatCell(row.connMs, row.socketReused),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = formatCell(row.tlsMs, row.socketReused),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = if (row.ttfbMs != null) "${row.ttfbMs}ms" else "—",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "QUIC folds connect+TLS into one handshake; Cronet's ssl range sits inside connect for QUIC.",
+                fontSize = 11.sp
+            )
+
+            if (error != null) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Error: $error",
+                    color = MaterialTheme.colorScheme.error,
+                    fontSize = 11.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DownloadMigrationCard(
+    stockUiState: DownloadUiState,
+    sarieUiState: DownloadUiState,
+    isRunning: Boolean,
+    isAnyRunning: Boolean,
+    onRun: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Big download / migration",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = onRun,
+                    enabled = !isAnyRunning
+                ) {
+                    Text(if (isRunning) "Running..." else "Run")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            DownloadRow(label = "stock", color = Color(0xFFFF9800), uiState = stockUiState)
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            DownloadRow(label = "Sarie", color = Color(0xFF4CAF50), uiState = sarieUiState)
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = "Real device: switch Wi-Fi ↔ mobile during the download. QUIC connection migration keeps H3 going; the TCP connection breaks.",
+                fontSize = 11.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun DownloadRow(
+    label: String,
+    color: Color,
+    uiState: DownloadUiState,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 12.sp,
+            modifier = Modifier.width(48.dp)
+        )
+
+        if (uiState.isIndeterminate) {
+            LinearProgressIndicator(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp),
+                color = color,
+                trackColor = Color(0x33888888)
+            )
         } else {
-            tvStatus.text = "downloading..."
+            LinearProgressIndicator(
+                progress = { uiState.progress },
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp),
+                color = color,
+                trackColor = Color(0x33888888)
+            )
         }
+
+        Text(
+            text = uiState.mbText,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(56.dp)
+        )
+
+        Text(
+            text = uiState.statusText,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            color = uiState.statusColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .width(72.dp)
+                .padding(start = 8.dp)
+        )
     }
+}
 
-    class ThumbItem(
-        var bitmap: android.graphics.Bitmap? = null,
-        var borderColor: Int = android.graphics.Color.TRANSPARENT,
-    )
-
-    class ThumbAdapter : RecyclerView.Adapter<ThumbAdapter.ViewHolder>() {
-        val items = Array(100) { ThumbItem() }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_thumb, parent, false)
-            return ViewHolder(view as android.widget.ImageView)
-        }
-
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val item = items[position]
-            holder.imageView.setImageBitmap(item.bitmap)
-            if (item.borderColor != android.graphics.Color.TRANSPARENT) {
-                holder.imageView.setPadding(2, 2, 2, 2)
-                holder.imageView.setBackgroundColor(item.borderColor)
-            } else {
-                holder.imageView.setPadding(0, 0, 0, 0)
-                holder.imageView.setBackgroundColor(android.graphics.Color.parseColor("#33888888"))
-            }
-        }
-
-        override fun getItemCount(): Int = 100
-
-        fun updateImage(index: Int, bitmap: android.graphics.Bitmap?, color: Int) {
-            items[index].bitmap = bitmap
-            items[index].borderColor = color
-            notifyItemChanged(index)
-        }
-
-        class ViewHolder(val imageView: android.widget.ImageView) : RecyclerView.ViewHolder(imageView)
-    }
-
-    class LogAdapter : RecyclerView.Adapter<LogAdapter.ViewHolder>() {
-        private var items: List<String> = emptyList()
-
-        fun submitList(newItems: List<String>) {
-            items = newItems
-            notifyDataSetChanged()
-        }
-
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_log_row, parent, false)
-            return ViewHolder(view as TextView)
-        }
-
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            holder.textView.text = items[position]
-        }
-
-        override fun getItemCount(): Int = items.size
-
-        class ViewHolder(val textView: TextView) : RecyclerView.ViewHolder(textView)
+@Preview(showBackground = true)
+@Composable
+fun DemoScreenPreview() {
+    MaterialTheme {
+        DemoScreen()
     }
 }
