@@ -67,6 +67,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tableSetup: android.widget.TableLayout
     private lateinit var tvSetupStatus: TextView
 
+    // Download Migration card views
+    private lateinit var btnRunDownload: MaterialButton
+    private lateinit var pbStock: com.google.android.material.progressindicator.LinearProgressIndicator
+    private lateinit var tvStockProgress: TextView
+    private lateinit var tvStockStatus: TextView
+    private lateinit var pbSarie: com.google.android.material.progressindicator.LinearProgressIndicator
+    private lateinit var tvSarieProgress: TextView
+    private lateinit var tvSarieStatus: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -132,6 +141,19 @@ class MainActivity : AppCompatActivity() {
 
         btnRunSetup.setOnClickListener {
             runSetupScenario()
+        }
+
+        // Download Migration views
+        btnRunDownload = findViewById(R.id.btnRunDownload)
+        pbStock = findViewById(R.id.pbStock)
+        tvStockProgress = findViewById(R.id.tvStockProgress)
+        tvStockStatus = findViewById(R.id.tvStockStatus)
+        pbSarie = findViewById(R.id.pbSarie)
+        tvSarieProgress = findViewById(R.id.tvSarieProgress)
+        tvSarieStatus = findViewById(R.id.tvSarieStatus)
+
+        btnRunDownload.setOnClickListener {
+            runDownloadScenario()
         }
 
         updateToolbarSubtitle()
@@ -213,6 +235,7 @@ class MainActivity : AppCompatActivity() {
         btnRunRoundTrip.isEnabled = enabled
         btnRunParallel.isEnabled = enabled
         btnRunSetup.isEnabled = enabled
+        btnRunDownload.isEnabled = enabled
     }
 
     private fun runRoundTripScenario() {
@@ -336,6 +359,72 @@ class MainActivity : AppCompatActivity() {
                     tvSetupStatus.visibility = View.VISIBLE
                     tvSetupStatus.text = "Error: ${e.message}"
                     btnRunSetup.text = "Run"
+                    setRunButtonsEnabled(true)
+                }
+            }
+        }
+    }
+
+    private fun runDownloadScenario() {
+        setRunButtonsEnabled(false)
+        btnRunDownload.text = "Running..."
+        pbStock.progress = 0
+        pbSarie.progress = 0
+        tvStockProgress.text = "0.0 MB"
+        tvSarieProgress.text = "0.0 MB"
+        tvStockStatus.text = "starting..."
+        tvSarieStatus.text = "starting..."
+        tvStockStatus.setTextColor(android.graphics.Color.GRAY)
+        tvSarieStatus.setTextColor(android.graphics.Color.GRAY)
+
+        executor.execute {
+            try {
+                Scenarios.runDownloadMigration(
+                    clients = DemoApp.instance.clients,
+                    onStockProgress = { progress ->
+                        runOnUiThread {
+                            val total = if (progress.totalBytes > 0) progress.totalBytes else 8_927_529L
+                            val pct = ((progress.bytesRead.toDouble() / total.toDouble()) * 100).toInt().coerceIn(0, 100)
+                            pbStock.progress = pct
+                            val mb = progress.bytesRead / (1024.0 * 1024.0)
+                            tvStockProgress.text = String.format(java.util.Locale.US, "%.1f MB", mb)
+                            if (progress.isComplete) {
+                                if (progress.error == null) {
+                                    tvStockStatus.text = "ok"
+                                    tvStockStatus.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                                } else {
+                                    tvStockStatus.text = "err: ${progress.error}"
+                                    tvStockStatus.setTextColor(android.graphics.Color.parseColor("#F44336"))
+                                }
+                            } else {
+                                tvStockStatus.text = "downloading..."
+                            }
+                        }
+                    },
+                    onSarieProgress = { progress ->
+                        runOnUiThread {
+                            val total = if (progress.totalBytes > 0) progress.totalBytes else 8_927_529L
+                            val pct = ((progress.bytesRead.toDouble() / total.toDouble()) * 100).toInt().coerceIn(0, 100)
+                            pbSarie.progress = pct
+                            val mb = progress.bytesRead / (1024.0 * 1024.0)
+                            tvSarieProgress.text = String.format(java.util.Locale.US, "%.1f MB", mb)
+                            if (progress.isComplete) {
+                                if (progress.error == null) {
+                                    tvSarieStatus.text = "ok"
+                                    tvSarieStatus.setTextColor(android.graphics.Color.parseColor("#4CAF50"))
+                                } else {
+                                    tvSarieStatus.text = "err: ${progress.error}"
+                                    tvSarieStatus.setTextColor(android.graphics.Color.parseColor("#F44336"))
+                                }
+                            } else {
+                                tvSarieStatus.text = "downloading..."
+                            }
+                        }
+                    },
+                )
+            } finally {
+                runOnUiThread {
+                    btnRunDownload.text = "Run"
                     setRunButtonsEnabled(true)
                 }
             }

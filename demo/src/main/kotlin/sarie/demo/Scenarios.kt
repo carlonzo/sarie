@@ -55,6 +55,13 @@ data class ConnectionSetupResult(
     val rows: List<HostSetupMetrics>,
 )
 
+data class DownloadProgress(
+    val bytesRead: Long,
+    val totalBytes: Long,
+    val isComplete: Boolean,
+    val error: String?,
+)
+
 object Scenarios {
 
     private var sarieColdCaptured = false
@@ -431,5 +438,86 @@ object Scenarios {
         }
 
         return ConnectionSetupResult(rows)
+    }
+
+    fun runDownloadMigration(
+        clients: Clients,
+        onStockProgress: (DownloadProgress) -> Unit,
+        onSarieProgress: (DownloadProgress) -> Unit,
+    ) {
+        val url = "https://cdn.jsdelivr.net/npm/typescript@5.6.3/lib/typescript.js"
+        val request = Request.Builder().url(url).build()
+        val latch = CountDownLatch(2)
+        val threadPool = java.util.concurrent.Executors.newFixedThreadPool(2)
+
+        // Stock download
+        threadPool.execute {
+            var bytesRead = 0L
+            var totalBytes = -1L
+            try {
+                clients.stockClient.connectionPool.evictAll()
+                val call = clients.stockClient.newCall(request)
+                val response = call.execute()
+                response.use { resp ->
+                    if (!resp.isSuccessful) {
+                        onStockProgress(DownloadProgress(0, -1, true, "HTTP ${resp.code}"))
+                        return@execute
+                    }
+                    val body = resp.body ?: run {
+                        onStockProgress(DownloadProgress(0, -1, true, "Empty body"))
+                        return@execute
+                    }
+                    totalBytes = body.contentLength()
+                    val source = body.source()
+                    val buffer = ByteArray(32 * 1024)
+                    var read: Int
+                    while (source.read(buffer).also { read = it } != -1) {
+                        bytesRead += read
+                        onStockProgress(DownloadProgress(bytesRead, totalBytes, false, null))
+                    }
+                    onStockProgress(DownloadProgress(bytesRead, totalBytes, true, null))
+                }
+            } catch (e: Exception) {
+                onStockProgress(DownloadProgress(bytesRead, totalBytes, true, e.message ?: e.javaClass.simpleName))
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        // Sarie download
+        threadPool.execute {
+            var bytesRead = 0L
+            var totalBytes = -1L
+            try {
+                val call = clients.sarieClient.newCall(request)
+                val response = call.execute()
+                response.use { resp ->
+                    if (!resp.isSuccessful) {
+                        onSarieProgress(DownloadProgress(0, -1, true, "HTTP ${resp.code}"))
+                        return@execute
+                    }
+                    val body = resp.body ?: run {
+                        onSarieProgress(DownloadProgress(0, -1, true, "Empty body"))
+                        return@execute
+                    }
+                    totalBytes = body.contentLength()
+                    val source = body.source()
+                    val buffer = ByteArray(32 * 1024)
+                    var read: Int
+                    while (source.read(buffer).also { read = it } != -1) {
+                        bytesRead += read
+                        onSarieProgress(DownloadProgress(bytesRead, totalBytes, false, null))
+                    }
+                    onSarieProgress(DownloadProgress(bytesRead, totalBytes, true, null))
+                }
+            } catch (e: Exception) {
+                onSarieProgress(DownloadProgress(bytesRead, totalBytes, true, e.message ?: e.javaClass.simpleName))
+            } finally {
+                latch.countDown()
+            }
+        }
+
+        latch.await()
+        threadPool.shutdown()
     }
 }

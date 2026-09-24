@@ -38,6 +38,7 @@
             <include layout="@layout/card_round_trip" />
             <include layout="@layout/card_parallel_images" />
             <include layout="@layout/card_connection_setup" />
+            <include layout="@layout/card_download_migration" />
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
