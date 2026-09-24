@@ -176,8 +176,7 @@ public object SarieBridge {
         }
         val translation = translatePins(config.certificatePinner?.pins ?: emptySet())
         val cronetBuilder = chosen.source.createBuilder()
-        val seam = CronetEngineBuilderAdapter(cronetBuilder)
-        applyEngineConfiguration(seam, storageDir.absolutePath, translation.groups) {
+        applyEngineConfiguration(cronetBuilder, storageDir.absolutePath, translation.groups) {
             config.configure(cronetBuilder)
         }
         val engine = try {
