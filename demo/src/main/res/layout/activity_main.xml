@@ -36,6 +36,7 @@
             android:padding="8dp">
 
             <include layout="@layout/card_round_trip" />
+            <include layout="@layout/card_parallel_images" />
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

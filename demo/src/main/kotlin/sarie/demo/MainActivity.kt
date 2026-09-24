@@ -41,6 +41,27 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvSarieWarmP95: TextView
     private lateinit var tvRoundTripStatus: TextView
 
+    // Parallel Images card views
+    private lateinit var btnRunParallel: MaterialButton
+    private lateinit var rvThumbs: RecyclerView
+    private lateinit var tvParallelStockHeader: TextView
+    private lateinit var tvParallelSarieHeader: TextView
+    private lateinit var tvStockWallTotal: TextView
+    private lateinit var tvSarieWallTotal: TextView
+    private lateinit var tvStockFirstImage: TextView
+    private lateinit var tvSarieFirstImage: TextView
+    private lateinit var tvStockP50: TextView
+    private lateinit var tvSarieP50: TextView
+    private lateinit var tvStockP95: TextView
+    private lateinit var tvSarieP95: TextView
+    private lateinit var tvStockP99: TextView
+    private lateinit var tvSarieP99: TextView
+    private lateinit var tvStockTotalBytes: TextView
+    private lateinit var tvSarieTotalBytes: TextView
+    private lateinit var tvProtocolCounts: TextView
+    private lateinit var tvParallelStatus: TextView
+    private val thumbAdapter = ThumbAdapter()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -70,6 +91,33 @@ class MainActivity : AppCompatActivity() {
 
         btnRunRoundTrip.setOnClickListener {
             runRoundTripScenario()
+        }
+
+        // Parallel Images views
+        btnRunParallel = findViewById(R.id.btnRunParallel)
+        rvThumbs = findViewById(R.id.rvThumbs)
+        tvParallelStockHeader = findViewById(R.id.tvParallelStockHeader)
+        tvParallelSarieHeader = findViewById(R.id.tvParallelSarieHeader)
+        tvStockWallTotal = findViewById(R.id.tvStockWallTotal)
+        tvSarieWallTotal = findViewById(R.id.tvSarieWallTotal)
+        tvStockFirstImage = findViewById(R.id.tvStockFirstImage)
+        tvSarieFirstImage = findViewById(R.id.tvSarieFirstImage)
+        tvStockP50 = findViewById(R.id.tvStockP50)
+        tvSarieP50 = findViewById(R.id.tvSarieP50)
+        tvStockP95 = findViewById(R.id.tvStockP95)
+        tvSarieP95 = findViewById(R.id.tvSarieP95)
+        tvStockP99 = findViewById(R.id.tvStockP99)
+        tvSarieP99 = findViewById(R.id.tvSarieP99)
+        tvStockTotalBytes = findViewById(R.id.tvStockTotalBytes)
+        tvSarieTotalBytes = findViewById(R.id.tvSarieTotalBytes)
+        tvProtocolCounts = findViewById(R.id.tvProtocolCounts)
+        tvParallelStatus = findViewById(R.id.tvParallelStatus)
+
+        rvThumbs.layoutManager = androidx.recyclerview.widget.GridLayoutManager(this, 10)
+        rvThumbs.adapter = thumbAdapter
+
+        btnRunParallel.setOnClickListener {
+            runParallelScenario()
         }
 
         updateToolbarSubtitle()
@@ -149,6 +197,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setRunButtonsEnabled(enabled: Boolean) {
         btnRunRoundTrip.isEnabled = enabled
+        btnRunParallel.isEnabled = enabled
     }
 
     private fun runRoundTripScenario() {
@@ -180,6 +229,90 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun runParallelScenario() {
+        setRunButtonsEnabled(false)
+        btnRunParallel.text = "Running..."
+        tvParallelStatus.visibility = View.GONE
+
+        val stockColor = android.graphics.Color.parseColor("#FF9800")
+        val sarieColor = android.graphics.Color.parseColor("#4CAF50")
+
+        executor.execute {
+            try {
+                val result = Scenarios.runParallelImages(DemoApp.instance.clients) { index, bitmap, stack ->
+                    runOnUiThread {
+                        val color = if (stack == Scenarios.Stack.STOCK) stockColor else sarieColor
+                        thumbAdapter.updateImage(index, bitmap, color)
+                    }
+                }
+                runOnUiThread {
+                    tvStockWallTotal.text = "${result.stockWallTotalMs} ms"
+                    tvSarieWallTotal.text = "${result.sarieWallTotalMs} ms"
+                    tvStockFirstImage.text = "${result.stockFirstImageMs} ms"
+                    tvSarieFirstImage.text = "${result.sarieFirstImageMs} ms"
+                    tvStockP50.text = "${result.stockP50Ms} ms"
+                    tvSarieP50.text = "${result.sarieP50Ms} ms"
+                    tvStockP95.text = "${result.stockP95Ms} ms"
+                    tvSarieP95.text = "${result.sarieP95Ms} ms"
+                    tvStockP99.text = "${result.stockP99Ms} ms"
+                    tvSarieP99.text = "${result.sarieP99Ms} ms"
+                    tvStockTotalBytes.text = "${result.stockTotalBytes / 1024} KB"
+                    tvSarieTotalBytes.text = "${result.sarieTotalBytes / 1024} KB"
+
+                    val stockCountsStr = result.stockProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }
+                    val sarieCountsStr = result.sarieProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }
+                    tvProtocolCounts.text = "protocol counts: stock [$stockCountsStr] · Sarie [$sarieCountsStr]"
+
+                    btnRunParallel.text = "Run"
+                    setRunButtonsEnabled(true)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    tvParallelStatus.visibility = View.VISIBLE
+                    tvParallelStatus.text = "Error: ${e.message}"
+                    btnRunParallel.text = "Run"
+                    setRunButtonsEnabled(true)
+                }
+            }
+        }
+    }
+
+    class ThumbItem(
+        var bitmap: android.graphics.Bitmap? = null,
+        var borderColor: Int = android.graphics.Color.TRANSPARENT,
+    )
+
+    class ThumbAdapter : RecyclerView.Adapter<ThumbAdapter.ViewHolder>() {
+        val items = Array(100) { ThumbItem() }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_thumb, parent, false)
+            return ViewHolder(view as android.widget.ImageView)
+        }
+
+        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+            val item = items[position]
+            holder.imageView.setImageBitmap(item.bitmap)
+            if (item.borderColor != android.graphics.Color.TRANSPARENT) {
+                holder.imageView.setPadding(2, 2, 2, 2)
+                holder.imageView.setBackgroundColor(item.borderColor)
+            } else {
+                holder.imageView.setPadding(0, 0, 0, 0)
+                holder.imageView.setBackgroundColor(android.graphics.Color.parseColor("#33888888"))
+            }
+        }
+
+        override fun getItemCount(): Int = 100
+
+        fun updateImage(index: Int, bitmap: android.graphics.Bitmap?, color: Int) {
+            items[index].bitmap = bitmap
+            items[index].borderColor = color
+            notifyItemChanged(index)
+        }
+
+        class ViewHolder(val imageView: android.widget.ImageView) : RecyclerView.ViewHolder(imageView)
     }
 
     class LogAdapter : RecyclerView.Adapter<LogAdapter.ViewHolder>() {
