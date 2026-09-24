@@ -61,10 +61,8 @@ internal object TrustBaseline {
             .map { it.encoded }
             .sortedWith { a, b -> ByteBuffer.wrap(a).compareTo(ByteBuffer.wrap(b)) }
             .forEach { digest.update(it) }
-        return digest.digest().toHex()
+        return digest.digest().toHexString()
     }
-
-    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 }
 
 internal class TrustVerdictMemo(private val max: Int = 1024) {
