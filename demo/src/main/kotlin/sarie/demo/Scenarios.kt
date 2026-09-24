@@ -42,6 +42,19 @@ data class ParallelImagesResult(
     val sarieProtocolCounts: Map<String, Int>,
 )
 
+data class HostSetupMetrics(
+    val host: String,
+    val stack: String,
+    val dnsMs: Long?,
+    val connMs: Long?,
+    val tlsMs: Long?,
+    val ttfbMs: Long?,
+)
+
+data class ConnectionSetupResult(
+    val rows: List<HostSetupMetrics>,
+)
+
 object Scenarios {
 
     private var sarieColdCaptured = false
@@ -290,5 +303,133 @@ object Scenarios {
             totalBytes = totalBytes.get(),
             protocolCounts = countsMap,
         )
+    }
+
+    data class HostTarget(
+        val shortName: String,
+        val url: String,
+    )
+
+    private val SETUP_TARGETS = listOf(
+        HostTarget("unsplash", "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=100&q=60"),
+        HostTarget("cloudflare", "https://cloudflare-quic.com/"),
+        HostTarget("google", "https://www.google.com/"),
+        HostTarget("jsdelivr", "https://cdn.jsdelivr.net/npm/typescript@5.6.3/lib/typescript.js"),
+    )
+
+    data class SetupPhaseRun(
+        val dnsMs: Long?,
+        val connMs: Long?,
+        val tlsMs: Long?,
+        val ttfbMs: Long?,
+    )
+
+    fun runConnectionSetup(clients: Clients): ConnectionSetupResult {
+        val rows = mutableListOf<HostSetupMetrics>()
+
+        for ((targetIndex, target) in SETUP_TARGETS.withIndex()) {
+            val runSequence = if (targetIndex % 2 == 0) {
+                listOf(Stack.STOCK, Stack.SARIE, Stack.SARIE, Stack.STOCK, Stack.STOCK, Stack.SARIE)
+            } else {
+                listOf(Stack.SARIE, Stack.STOCK, Stack.STOCK, Stack.SARIE, Stack.SARIE, Stack.STOCK)
+            }
+
+            val stockPhaseRuns = mutableListOf<SetupPhaseRun>()
+            val sariePhaseRuns = mutableListOf<SetupPhaseRun>()
+
+            for (stack in runSequence) {
+                when (stack) {
+                    Stack.STOCK -> {
+                        clients.stockClient.connectionPool.evictAll()
+                        val req = Request.Builder().url(target.url).build()
+                        val call = clients.stockClient.newCall(req)
+                        try {
+                            val resp = call.execute()
+                            resp.close()
+                        } catch (_: Exception) {}
+                        val m = clients.stockEventListener.callMetrics[call]
+                        val dns = if (m?.dnsStartMs != null && m.dnsEndMs != null) m.dnsEndMs!! - m.dnsStartMs!! else null
+                        val conn = if (m?.connectStartMs != null && m.connectEndMs != null) m.connectEndMs!! - m.connectStartMs!! else null
+                        val tls = if (m?.secureConnectStartMs != null && m.secureConnectEndMs != null) m.secureConnectEndMs!! - m.secureConnectStartMs!! else null
+                        val ttfb = if (m?.responseHeadersStartMs != null) {
+                            val startPoint = m.connectEndMs ?: m.dnsEndMs ?: m.dnsStartMs
+                            if (startPoint != null) m.responseHeadersStartMs!! - startPoint else null
+                        } else null
+                        stockPhaseRuns.add(SetupPhaseRun(dns, conn, tls, ttfb))
+                    }
+                    Stack.SARIE -> {
+                        val req = Request.Builder().url(target.url).build()
+                        val call = clients.sarieClient.newCall(req)
+                        try {
+                            val resp = call.execute()
+                            resp.close()
+                        } catch (_: Exception) {}
+                        val future = DemoLog.finishedCalls.computeIfAbsent(call) { java.util.concurrent.CompletableFuture() }
+                        val info = try {
+                            future.get(2, java.util.concurrent.TimeUnit.SECONDS)
+                        } catch (_: Exception) {
+                            null
+                        }
+                        val metrics = info?.metrics
+                        val reused = metrics?.socketReused ?: false
+                        val dnsStart = metrics?.dnsStart
+                        val dnsEnd = metrics?.dnsEnd
+                        val dns = if (!reused && dnsStart != null && dnsEnd != null) {
+                            dnsEnd.time - dnsStart.time
+                        } else null
+
+                        val connectStart = metrics?.connectStart
+                        val connectEnd = metrics?.connectEnd
+                        val conn = if (!reused && connectStart != null && connectEnd != null) {
+                            connectEnd.time - connectStart.time
+                        } else null
+
+                        val sslStart = metrics?.sslStart
+                        val sslEnd = metrics?.sslEnd
+                        val tls = if (!reused && sslStart != null && sslEnd != null) {
+                            sslEnd.time - sslStart.time
+                        } else null
+
+                        val ttfbMsVal = metrics?.ttfbMs
+                        val ttfb = if (ttfbMsVal != null && ttfbMsVal > 0) {
+                            ttfbMsVal
+                        } else {
+                            val respStart = metrics?.responseStart
+                            val startPoint = connectEnd ?: metrics?.sendingStart ?: metrics?.requestStart
+                            if (respStart != null && startPoint != null) respStart.time - startPoint.time else null
+                        }
+                        sariePhaseRuns.add(SetupPhaseRun(dns, conn, tls, ttfb))
+                    }
+                }
+            }
+
+            fun medianOrNull(list: List<Long?>): Long? {
+                val nonNull = list.filterNotNull().toLongArray()
+                return if (nonNull.isNotEmpty()) Stats.median(nonNull) else null
+            }
+
+            rows.add(
+                HostSetupMetrics(
+                    host = target.shortName,
+                    stack = "stock",
+                    dnsMs = medianOrNull(stockPhaseRuns.map { it.dnsMs }),
+                    connMs = medianOrNull(stockPhaseRuns.map { it.connMs }),
+                    tlsMs = medianOrNull(stockPhaseRuns.map { it.tlsMs }),
+                    ttfbMs = medianOrNull(stockPhaseRuns.map { it.ttfbMs }),
+                ),
+            )
+            rows.add(
+                HostSetupMetrics(
+                    host = target.shortName,
+                    stack = "Sarie",
+                    dnsMs = medianOrNull(sariePhaseRuns.map { it.dnsMs }),
+                    connMs = medianOrNull(sariePhaseRuns.map { it.connMs }),
+                    tlsMs = medianOrNull(sariePhaseRuns.map { it.tlsMs }),
+                    ttfbMs = medianOrNull(sariePhaseRuns.map { it.ttfbMs }),
+                ),
+            )
+        }
+
+        return ConnectionSetupResult(rows)
     }
 }

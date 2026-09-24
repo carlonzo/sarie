@@ -62,6 +62,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvParallelStatus: TextView
     private val thumbAdapter = ThumbAdapter()
 
+    // Connection Setup card views
+    private lateinit var btnRunSetup: MaterialButton
+    private lateinit var tableSetup: android.widget.TableLayout
+    private lateinit var tvSetupStatus: TextView
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -118,6 +123,15 @@ class MainActivity : AppCompatActivity() {
 
         btnRunParallel.setOnClickListener {
             runParallelScenario()
+        }
+
+        // Connection Setup views
+        btnRunSetup = findViewById(R.id.btnRunSetup)
+        tableSetup = findViewById(R.id.tableSetup)
+        tvSetupStatus = findViewById(R.id.tvSetupStatus)
+
+        btnRunSetup.setOnClickListener {
+            runSetupScenario()
         }
 
         updateToolbarSubtitle()
@@ -198,6 +212,7 @@ class MainActivity : AppCompatActivity() {
     private fun setRunButtonsEnabled(enabled: Boolean) {
         btnRunRoundTrip.isEnabled = enabled
         btnRunParallel.isEnabled = enabled
+        btnRunSetup.isEnabled = enabled
     }
 
     private fun runRoundTripScenario() {
@@ -273,6 +288,54 @@ class MainActivity : AppCompatActivity() {
                     tvParallelStatus.visibility = View.VISIBLE
                     tvParallelStatus.text = "Error: ${e.message}"
                     btnRunParallel.text = "Run"
+                    setRunButtonsEnabled(true)
+                }
+            }
+        }
+    }
+
+    private fun runSetupScenario() {
+        setRunButtonsEnabled(false)
+        btnRunSetup.text = "Running..."
+        tvSetupStatus.visibility = View.GONE
+
+        executor.execute {
+            try {
+                val result = Scenarios.runConnectionSetup(DemoApp.instance.clients)
+                runOnUiThread {
+                    if (tableSetup.childCount > 1) {
+                        tableSetup.removeViews(1, tableSetup.childCount - 1)
+                    }
+                    val mono = android.graphics.Typeface.MONOSPACE
+                    for (row in result.rows) {
+                        val tr = android.widget.TableRow(this)
+                        tr.addView(android.widget.TextView(this).apply {
+                            text = "${row.host} (${row.stack})"
+                            textSize = 11f
+                            typeface = mono
+                        })
+                        fun addCell(value: Long?) {
+                            tr.addView(android.widget.TextView(this).apply {
+                                text = value?.let { "${it}ms" } ?: "—"
+                                gravity = android.view.Gravity.END
+                                textSize = 11f
+                                typeface = mono
+                            })
+                        }
+                        addCell(row.dnsMs)
+                        addCell(row.connMs)
+                        addCell(row.tlsMs)
+                        addCell(row.ttfbMs)
+                        tableSetup.addView(tr)
+                    }
+                    btnRunSetup.text = "Run"
+                    setRunButtonsEnabled(true)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    tvSetupStatus.visibility = View.VISIBLE
+                    tvSetupStatus.text = "Error: ${e.message}"
+                    btnRunSetup.text = "Run"
                     setRunButtonsEnabled(true)
                 }
             }
