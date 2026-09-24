@@ -1,5 +1,7 @@
 package sarie.demo
 
+import kotlin.math.ceil
+
 object Stats {
 
     fun median(values: LongArray): Long {
@@ -18,7 +20,7 @@ object Stats {
         if (values.isEmpty()) return 0L
         val sorted = values.clone().apply { sort() }
         if (sorted.size == 1) return sorted[0]
-        val index = Math.ceil(p / 100.0 * sorted.size).toInt() - 1
+        val index = ceil(p / 100.0 * sorted.size).toInt() - 1
         return sorted[index.coerceIn(0, sorted.lastIndex)]
     }
 }

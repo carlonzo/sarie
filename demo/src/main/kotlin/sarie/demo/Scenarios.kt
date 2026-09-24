@@ -311,7 +311,7 @@ object Scenarios {
                             if (!resp.isSuccessful) {
                                 return
                             }
-                            val bytes = resp.body?.bytes() ?: return
+                            val bytes = resp.body.bytes()
                             val tookMs = (System.nanoTime() - reqStartNs) / 1_000_000
                             synchronized(lock) {
                                 durations.add(tookMs)
@@ -518,10 +518,7 @@ object Scenarios {
                     onProgress(DownloadProgress(0, -1, true, "HTTP ${resp.code}"))
                     return
                 }
-                val body = resp.body ?: run {
-                    onProgress(DownloadProgress(0, -1, true, "Empty body"))
-                    return
-                }
+                val body = resp.body
                 totalBytes = body.contentLength()
                 val source = body.source()
                 val buffer = ByteArray(32 * 1024)

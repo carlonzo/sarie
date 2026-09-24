@@ -10,8 +10,8 @@ import org.objectweb.asm.Opcodes
  * try/catch blocks are not instructions and are not recorded.
  */
 internal class InstructionRecorder {
-    val insns: List<String> get() = recorded
-    private val recorded = mutableListOf<String>()
+    val insns: List<String>
+        field = mutableListOf<String>()
     private val labelIds = IdentityHashMap<Label, Int>()
     private var labelSeq = 0
 
@@ -21,55 +21,55 @@ internal class InstructionRecorder {
     }
 
     fun insn(opcode: Int) {
-        recorded += opcodeName(opcode)
+        insns += opcodeName(opcode)
     }
 
     fun intInsn(opcode: Int, operand: Int) {
-        recorded += "${opcodeName(opcode)} $operand"
+        insns += "${opcodeName(opcode)} $operand"
     }
 
     fun varInsn(opcode: Int, value: Int) {
-        recorded += "${opcodeName(opcode)} $value"
+        insns += "${opcodeName(opcode)} $value"
     }
 
     fun typeInsn(opcode: Int, type: String) {
-        recorded += "${opcodeName(opcode)} $type"
+        insns += "${opcodeName(opcode)} $type"
     }
 
     fun fieldInsn(opcode: Int, owner: String, name: String, descriptor: String) {
-        recorded += "${opcodeName(opcode)} $owner.$name $descriptor"
+        insns += "${opcodeName(opcode)} $owner.$name $descriptor"
     }
 
     fun methodInsn(opcode: Int, owner: String, name: String, descriptor: String) {
-        recorded += "${opcodeName(opcode)} $owner.$name $descriptor"
+        insns += "${opcodeName(opcode)} $owner.$name $descriptor"
     }
 
     fun jumpInsn(opcode: Int, label: Label) {
-        recorded += "${opcodeName(opcode)} ${label(label)}"
+        insns += "${opcodeName(opcode)} ${label(label)}"
     }
 
     fun ldc(value: Any) {
-        recorded += "LDC $value"
+        insns += "LDC $value"
     }
 
     fun iinc(value: Int, increment: Int) {
-        recorded += "IINC $value $increment"
+        insns += "IINC $value $increment"
     }
 
     fun invokeDynamic(name: String, descriptor: String) {
-        recorded += "INVOKEDYNAMIC $name $descriptor"
+        insns += "INVOKEDYNAMIC $name $descriptor"
     }
 
     fun multiANewArray(descriptor: String, numDimensions: Int) {
-        recorded += "MULTIANEWARRAY $descriptor $numDimensions"
+        insns += "MULTIANEWARRAY $descriptor $numDimensions"
     }
 
     fun tableSwitch(min: Int, max: Int) {
-        recorded += "TABLESWITCH $min $max"
+        insns += "TABLESWITCH $min $max"
     }
 
     fun lookupSwitch(keys: IntArray) {
-        recorded += "LOOKUPSWITCH ${keys.joinToString(",")}"
+        insns += "LOOKUPSWITCH ${keys.joinToString(",")}"
     }
 
     companion object {
