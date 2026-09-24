@@ -66,9 +66,6 @@ data class DownloadProgress(
 
 object Scenarios {
 
-    private var sarieColdCaptured = false
-    private var sarieInitialColdMs: Long? = null
-
     enum class Stack { STOCK, SARIE }
 
     data class RoundTripRun(
@@ -76,7 +73,7 @@ object Scenarios {
         val warmP50Ms: Long,
         val warmP95Ms: Long,
         val protocol: String,
-        val isColdReal: Boolean,
+        val firstCall: Call? = null,
     )
 
     fun runRoundTrip(clients: Clients): RoundTripResult {
@@ -96,11 +93,11 @@ object Scenarios {
             when (stack) {
                 Stack.STOCK -> {
                     clients.stockClient.connectionPool.evictAll()
-                    val run = executeRoundTripRun(clients.stockClient, isSarie = false)
+                    val run = executeRoundTripRun(clients.stockClient)
                     stockRuns.add(run)
                 }
                 Stack.SARIE -> {
-                    val run = executeRoundTripRun(clients.sarieClient, isSarie = true)
+                    val run = executeRoundTripRun(clients.sarieClient)
                     sarieRuns.add(run)
                 }
             }
@@ -111,6 +108,23 @@ object Scenarios {
         val stockP95s = stockRuns.map { it.warmP95Ms }.toLongArray()
         val stockProtocol = stockRuns.lastOrNull()?.protocol ?: "h2"
 
+        val firstSarieCall = sarieRuns.firstOrNull()?.firstCall
+        val sarieColdMs: Long? = if (firstSarieCall != null) {
+            val future = DemoLog.finishedCalls.computeIfAbsent(firstSarieCall) { java.util.concurrent.CompletableFuture() }
+            val info = try {
+                future.get(2, java.util.concurrent.TimeUnit.SECONDS)
+            } catch (_: Exception) {
+                null
+            }
+            if (info?.metrics?.socketReused == false) {
+                sarieRuns.first().coldMs
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+
         val sarieP50s = sarieRuns.map { it.warmP50Ms }.toLongArray()
         val sarieP95s = sarieRuns.map { it.warmP95Ms }.toLongArray()
         val sarieProtocol = sarieRuns.lastOrNull()?.protocol ?: "h3"
@@ -120,14 +134,14 @@ object Scenarios {
             stockWarmP50Ms = Stats.median(stockP50s),
             stockWarmP95Ms = Stats.median(stockP95s),
             stockProtocol = stockProtocol,
-            sarieColdMs = sarieInitialColdMs,
+            sarieColdMs = sarieColdMs,
             sarieWarmP50Ms = Stats.median(sarieP50s),
             sarieWarmP95Ms = Stats.median(sarieP95s),
             sarieProtocol = sarieProtocol,
         )
     }
 
-    private fun executeRoundTripRun(client: OkHttpClient, isSarie: Boolean): RoundTripRun {
+    private fun executeRoundTripRun(client: OkHttpClient): RoundTripRun {
         val request = Request.Builder()
             .url("https://cloudflare-quic.com/")
             .head()
@@ -135,10 +149,15 @@ object Scenarios {
 
         val durations = LongArray(20)
         var lastProtocol = ""
+        var firstCall: Call? = null
 
         for (i in 0 until 20) {
             val startNs = System.nanoTime()
-            val response = client.newCall(request).execute()
+            val call = client.newCall(request)
+            if (i == 0) {
+                firstCall = call
+            }
+            val response = call.execute()
             response.use {
                 lastProtocol = it.protocol.toString()
             }
@@ -150,25 +169,12 @@ object Scenarios {
         val warmP50 = Stats.percentile(warmDurations, 50.0)
         val warmP95 = Stats.percentile(warmDurations, 95.0)
 
-        var isColdReal = true
-        if (isSarie) {
-            synchronized(this) {
-                if (!sarieColdCaptured) {
-                    sarieColdCaptured = true
-                    sarieInitialColdMs = coldMs
-                    isColdReal = true
-                } else {
-                    isColdReal = false
-                }
-            }
-        }
-
         return RoundTripRun(
             coldMs = coldMs,
             warmP50Ms = warmP50,
             warmP95Ms = warmP95,
             protocol = lastProtocol,
-            isColdReal = isColdReal,
+            firstCall = firstCall,
         )
     }
 

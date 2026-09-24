@@ -250,7 +250,7 @@ class MainActivity : AppCompatActivity() {
                     tvStockHeader.text = "stock ${result.stockProtocol}"
                     tvSarieHeader.text = "Sarie ${result.sarieProtocol}"
                     tvStockCold.text = "${result.stockColdMs} ms"
-                    tvSarieCold.text = result.sarieColdMs?.let { "${it} ms" } ?: "restart app"
+                    tvSarieCold.text = result.sarieColdMs?.let { "${it} ms" } ?: "warm (restart app)"
                     tvStockWarmP50.text = "${result.stockWarmP50Ms} ms"
                     tvSarieWarmP50.text = "${result.sarieWarmP50Ms} ms"
                     tvStockWarmP95.text = "${result.stockWarmP95Ms} ms"
