@@ -162,7 +162,6 @@ class PolicyEngineTest {
         engine,
         policy,
         mapper,
-        System.currentTimeMillis(),
         sarieBuilt = installedPins != null,
         installedPins = installedPins.orEmpty(),
     )

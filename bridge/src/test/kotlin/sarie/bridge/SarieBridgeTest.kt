@@ -101,7 +101,6 @@ class SarieBridgeTest {
         assertSame(engine, snap!!.engine)
         assertSame(policy, snap.policy)
         assertSame(mapper, snap.mapper)
-        assertTrue(snap.installedAtMillis > 0)
         assertTrue(SarieBridge.isEnabled())
     }
 

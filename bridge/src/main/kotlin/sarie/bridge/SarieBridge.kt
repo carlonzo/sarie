@@ -196,7 +196,6 @@ public object SarieBridge {
                 engine = previous.engine,
                 policy = config.policy,
                 mapper = config.mapper,
-                installedAtMillis = System.currentTimeMillis(),
                 sarieBuilt = true,
                 installedPins = previous.installedPins,
                 providerName = previous.providerName,
@@ -214,7 +213,6 @@ public object SarieBridge {
             engine = engine,
             policy = config.policy,
             mapper = config.mapper,
-            installedAtMillis = System.currentTimeMillis(),
             sarieBuilt = true,
             installedPins = translation.installedPins,
             providerName = chosen.name,
@@ -283,7 +281,6 @@ public object SarieBridge {
                 engine = engine,
                 policy = config.policy,
                 mapper = config.mapper,
-                installedAtMillis = System.currentTimeMillis(),
             ),
         )
         logger?.log(
