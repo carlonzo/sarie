@@ -299,9 +299,9 @@ class MainActivity : AppCompatActivity() {
                     tvStockTotalBytes.text = "${result.stockTotalBytes / 1024} KB"
                     tvSarieTotalBytes.text = "${result.sarieTotalBytes / 1024} KB"
 
-                    val stockCountsStr = result.stockProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }
-                    val sarieCountsStr = result.sarieProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }
-                    tvProtocolCounts.text = "protocol counts: stock [$stockCountsStr] · Sarie [$sarieCountsStr]"
+                    val stockCountsStr = result.stockProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
+                    val sarieCountsStr = result.sarieProtocolCounts.entries.joinToString { "${it.key}: ${it.value}" }.ifEmpty { "none" }
+                    tvProtocolCounts.text = "protocol counts: stock [$stockCountsStr] failed: ${result.stockFailedCount} · Sarie [$sarieCountsStr] failed: ${result.sarieFailedCount}"
 
                     btnRunParallel.text = "Run"
                     setRunButtonsEnabled(true)

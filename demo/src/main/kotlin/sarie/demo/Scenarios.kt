@@ -32,6 +32,7 @@ data class ParallelImagesResult(
     val stockP99Ms: Long,
     val stockTotalBytes: Long,
     val stockProtocolCounts: Map<String, Int>,
+    val stockFailedCount: Int,
 
     val sarieWallTotalMs: Long,
     val sarieFirstImageMs: Long,
@@ -40,6 +41,7 @@ data class ParallelImagesResult(
     val sarieP99Ms: Long,
     val sarieTotalBytes: Long,
     val sarieProtocolCounts: Map<String, Int>,
+    val sarieFailedCount: Int,
 )
 
 data class HostSetupMetrics(
@@ -178,6 +180,7 @@ object Scenarios {
         val p99Ms: Long,
         val totalBytes: Long,
         val protocolCounts: Map<String, Int>,
+        val failedCount: Int,
     )
 
     fun runParallelImages(
@@ -226,6 +229,7 @@ object Scenarios {
         val stockP99 = Stats.median(stockRuns.map { it.p99Ms }.toLongArray())
         val stockBytes = Stats.median(stockRuns.map { it.totalBytes }.toLongArray())
         val stockCounts = stockRuns.lastOrNull()?.protocolCounts ?: emptyMap()
+        val stockFailed = stockRuns.lastOrNull()?.failedCount ?: 0
 
         val sarieWallTotal = Stats.median(sarieRuns.map { it.wallTotalMs }.toLongArray())
         val sarieFirstImage = Stats.median(sarieRuns.map { it.firstImageMs }.toLongArray())
@@ -234,6 +238,7 @@ object Scenarios {
         val sarieP99 = Stats.median(sarieRuns.map { it.p99Ms }.toLongArray())
         val sarieBytes = Stats.median(sarieRuns.map { it.totalBytes }.toLongArray())
         val sarieCounts = sarieRuns.lastOrNull()?.protocolCounts ?: emptyMap()
+        val sarieFailed = sarieRuns.lastOrNull()?.failedCount ?: 0
 
         return ParallelImagesResult(
             stockWallTotalMs = stockWallTotal,
@@ -243,6 +248,7 @@ object Scenarios {
             stockP99Ms = stockP99,
             stockTotalBytes = stockBytes,
             stockProtocolCounts = stockCounts,
+            stockFailedCount = stockFailed,
 
             sarieWallTotalMs = sarieWallTotal,
             sarieFirstImageMs = sarieFirstImage,
@@ -251,6 +257,7 @@ object Scenarios {
             sarieP99Ms = sarieP99,
             sarieTotalBytes = sarieBytes,
             sarieProtocolCounts = sarieCounts,
+            sarieFailedCount = sarieFailed,
         )
     }
 
@@ -263,9 +270,10 @@ object Scenarios {
         val wallStartNs = System.nanoTime()
         val lock = Any()
         var firstImageNs: Long? = null
-        val durations = LongArray(100)
+        val durations = mutableListOf<Long>()
         val totalBytes = AtomicLong(0)
         val protocolCounts = ConcurrentHashMap<String, AtomicInteger>()
+        val failedCount = AtomicInteger(0)
 
         for (i in 0 until 100) {
             val width = 100 + i
@@ -274,30 +282,38 @@ object Scenarios {
             val reqStartNs = System.nanoTime()
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
+                    failedCount.incrementAndGet()
                     latch.countDown()
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    val tookMs = (System.nanoTime() - reqStartNs) / 1_000_000
-                    durations[i] = tookMs
-                    synchronized(lock) {
-                        if (firstImageNs == null) {
-                            firstImageNs = System.nanoTime() - wallStartNs
+                    var success = false
+                    try {
+                        response.use { resp ->
+                            if (!resp.isSuccessful) {
+                                return
+                            }
+                            val bytes = resp.body?.bytes() ?: return
+                            val tookMs = (System.nanoTime() - reqStartNs) / 1_000_000
+                            synchronized(lock) {
+                                durations.add(tookMs)
+                                if (firstImageNs == null) {
+                                    firstImageNs = System.nanoTime() - wallStartNs
+                                }
+                            }
+                            totalBytes.addAndGet(bytes.size.toLong())
+                            protocolCounts.computeIfAbsent(resp.protocol.toString()) { AtomicInteger() }.incrementAndGet()
+                            val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                            onImageReceived?.invoke(i, bitmap, stack)
+                            success = true
                         }
-                    }
-                    protocolCounts.computeIfAbsent(response.protocol.toString()) { AtomicInteger() }.incrementAndGet()
-                    val bytes = try {
-                        response.body?.bytes()
                     } catch (_: Exception) {
-                        null
+                    } finally {
+                        if (!success) {
+                            failedCount.incrementAndGet()
+                        }
+                        latch.countDown()
                     }
-                    if (bytes != null) {
-                        totalBytes.addAndGet(bytes.size.toLong())
-                        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        onImageReceived?.invoke(i, bitmap, stack)
-                    }
-                    response.close()
-                    latch.countDown()
                 }
             })
         }
@@ -305,9 +321,10 @@ object Scenarios {
         latch.await()
         val wallTotalMs = (System.nanoTime() - wallStartNs) / 1_000_000
         val firstMs = (firstImageNs ?: 0L) / 1_000_000
-        val p50 = Stats.percentile(durations, 50.0)
-        val p95 = Stats.percentile(durations, 95.0)
-        val p99 = Stats.percentile(durations, 99.0)
+        val durationArray = synchronized(lock) { durations.toLongArray() }
+        val p50 = Stats.percentile(durationArray, 50.0)
+        val p95 = Stats.percentile(durationArray, 95.0)
+        val p99 = Stats.percentile(durationArray, 99.0)
         val countsMap = protocolCounts.mapValues { it.value.get() }
 
         return ParallelRun(
@@ -318,6 +335,7 @@ object Scenarios {
             p99Ms = p99,
             totalBytes = totalBytes.get(),
             protocolCounts = countsMap,
+            failedCount = failedCount.get(),
         )
     }
 
