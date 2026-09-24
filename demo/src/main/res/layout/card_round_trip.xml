@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/cardRoundTrip"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    app:cardElevation="2dp"
+    app:cardCornerRadius="8dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Round trip"
+                android:textAppearance="?attr/textAppearanceTitleMedium"
+                android:textStyle="bold" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnRunRoundTrip"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Run" />
+
+        </LinearLayout>
+
+        <TableLayout
+            android:id="@+id/tableRoundTrip"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:stretchColumns="1,2">
+
+            <TableRow>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="" />
+                <TextView
+                    android:id="@+id/tvStockHeader"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="stock"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvSarieHeader"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="Sarie"
+                    android:textStyle="bold"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+            </TableRow>
+
+            <TableRow android:layout_marginTop="4dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="cold"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvStockCold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="—"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvSarieCold"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="—"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+            </TableRow>
+
+            <TableRow android:layout_marginTop="4dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="warm p50"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvStockWarmP50"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="—"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvSarieWarmP50"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="—"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+            </TableRow>
+
+            <TableRow android:layout_marginTop="4dp">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="warm p95"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvStockWarmP95"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="—"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+                <TextView
+                    android:id="@+id/tvSarieWarmP95"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="—"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp" />
+            </TableRow>
+
+        </TableLayout>
+
+        <TextView
+            android:id="@+id/tvRoundTripStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="11sp"
+            android:textColor="?attr/colorError"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</com.google.android.material.card.MaterialCardView>

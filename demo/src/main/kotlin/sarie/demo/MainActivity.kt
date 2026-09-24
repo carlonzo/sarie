@@ -27,6 +27,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rvLogs: RecyclerView
     private lateinit var bottomSheetBehavior: BottomSheetBehavior<View>
     private val logAdapter = LogAdapter()
+    private val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+    // Round Trip card views
+    private lateinit var btnRunRoundTrip: MaterialButton
+    private lateinit var tvStockHeader: TextView
+    private lateinit var tvSarieHeader: TextView
+    private lateinit var tvStockCold: TextView
+    private lateinit var tvSarieCold: TextView
+    private lateinit var tvStockWarmP50: TextView
+    private lateinit var tvSarieWarmP50: TextView
+    private lateinit var tvStockWarmP95: TextView
+    private lateinit var tvSarieWarmP95: TextView
+    private lateinit var tvRoundTripStatus: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +55,22 @@ class MainActivity : AppCompatActivity() {
 
         val bottomSheet: View = findViewById(R.id.bottomSheet)
         bottomSheetBehavior = BottomSheetBehavior.from(bottomSheet)
+
+        // Round Trip views
+        btnRunRoundTrip = findViewById(R.id.btnRunRoundTrip)
+        tvStockHeader = findViewById(R.id.tvStockHeader)
+        tvSarieHeader = findViewById(R.id.tvSarieHeader)
+        tvStockCold = findViewById(R.id.tvStockCold)
+        tvSarieCold = findViewById(R.id.tvSarieCold)
+        tvStockWarmP50 = findViewById(R.id.tvStockWarmP50)
+        tvSarieWarmP50 = findViewById(R.id.tvSarieWarmP50)
+        tvStockWarmP95 = findViewById(R.id.tvStockWarmP95)
+        tvSarieWarmP95 = findViewById(R.id.tvSarieWarmP95)
+        tvRoundTripStatus = findViewById(R.id.tvRoundTripStatus)
+
+        btnRunRoundTrip.setOnClickListener {
+            runRoundTripScenario()
+        }
 
         updateToolbarSubtitle()
 
@@ -115,6 +144,41 @@ class MainActivity : AppCompatActivity() {
         logAdapter.submitList(lines)
         if (lines.isNotEmpty()) {
             rvLogs.scrollToPosition(lines.size - 1)
+        }
+    }
+
+    private fun setRunButtonsEnabled(enabled: Boolean) {
+        btnRunRoundTrip.isEnabled = enabled
+    }
+
+    private fun runRoundTripScenario() {
+        setRunButtonsEnabled(false)
+        btnRunRoundTrip.text = "Running..."
+        tvRoundTripStatus.visibility = View.GONE
+
+        executor.execute {
+            try {
+                val result = Scenarios.runRoundTrip(DemoApp.instance.clients)
+                runOnUiThread {
+                    tvStockHeader.text = "stock ${result.stockProtocol}"
+                    tvSarieHeader.text = "Sarie ${result.sarieProtocol}"
+                    tvStockCold.text = "${result.stockColdMs} ms"
+                    tvSarieCold.text = result.sarieColdMs?.let { "${it} ms" } ?: "restart app"
+                    tvStockWarmP50.text = "${result.stockWarmP50Ms} ms"
+                    tvSarieWarmP50.text = "${result.sarieWarmP50Ms} ms"
+                    tvStockWarmP95.text = "${result.stockWarmP95Ms} ms"
+                    tvSarieWarmP95.text = "${result.sarieWarmP95Ms} ms"
+                    btnRunRoundTrip.text = "Run"
+                    setRunButtonsEnabled(true)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    tvRoundTripStatus.visibility = View.VISIBLE
+                    tvRoundTripStatus.text = "Error: ${e.message}"
+                    btnRunRoundTrip.text = "Run"
+                    setRunButtonsEnabled(true)
+                }
+            }
         }
     }
 

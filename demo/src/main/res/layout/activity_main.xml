@@ -35,7 +35,7 @@
             android:orientation="vertical"
             android:padding="8dp">
 
-            <!-- Scenario cards will go here -->
+            <include layout="@layout/card_round_trip" />
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
