@@ -7,3 +7,5 @@ local.properties
 scripts/bin/
 scripts/certs/
 scripts/big/
+/gradle/gradle-daemon-jvm.properties
+.claude/
