@@ -95,6 +95,7 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
             stockCount.set(0)
             lastLine = "cleared"
         }
+        finishedCalls.clear()
         notifyChange()
     }
 

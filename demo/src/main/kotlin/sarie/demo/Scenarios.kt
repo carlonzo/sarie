@@ -77,7 +77,14 @@ object Scenarios {
         val firstCall: Call? = null,
     )
 
+    private fun clearScenarioMetrics(clients: Clients) {
+        DemoLog.finishedCalls.clear()
+        clients.stockEventListener.callMetrics.clear()
+    }
+
     fun runRoundTrip(clients: Clients): RoundTripResult {
+        clearScenarioMetrics(clients)
+
         val runSequence = listOf(
             Stack.STOCK,
             Stack.SARIE,
@@ -116,6 +123,8 @@ object Scenarios {
                 future.get(2, java.util.concurrent.TimeUnit.SECONDS)
             } catch (_: Exception) {
                 null
+            } finally {
+                DemoLog.finishedCalls.remove(firstSarieCall)
             }
             if (info?.metrics?.socketReused == false) {
                 sarieRuns.first().coldMs
@@ -194,6 +203,8 @@ object Scenarios {
         clients: Clients,
         onImageReceived: ((index: Int, bitmap: Bitmap?, stack: Stack) -> Unit)? = null,
     ): ParallelImagesResult {
+        clearScenarioMetrics(clients)
+
         val warmupRequest = Request.Builder()
             .url("https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=100&q=60")
             .build()
@@ -359,6 +370,8 @@ object Scenarios {
     )
 
     fun runConnectionSetup(clients: Clients): ConnectionSetupResult {
+        clearScenarioMetrics(clients)
+
         val rows = mutableListOf<HostSetupMetrics>()
 
         for ((targetIndex, target) in SETUP_TARGETS.withIndex()) {
@@ -381,7 +394,7 @@ object Scenarios {
                             val resp = call.execute()
                             resp.close()
                         } catch (_: Exception) {}
-                        val m = clients.stockEventListener.callMetrics[call]
+                        val m = clients.stockEventListener.callMetrics.remove(call)
                         val dns = if (m?.dnsStartMs != null && m.dnsEndMs != null) m.dnsEndMs!! - m.dnsStartMs!! else null
                         val conn = if (m?.connectStartMs != null && m.connectEndMs != null) m.connectEndMs!! - m.connectStartMs!! else null
                         val tls = if (m?.secureConnectStartMs != null && m.secureConnectEndMs != null) m.secureConnectEndMs!! - m.secureConnectStartMs!! else null
@@ -410,6 +423,8 @@ object Scenarios {
                             future.get(2, java.util.concurrent.TimeUnit.SECONDS)
                         } catch (_: Exception) {
                             null
+                        } finally {
+                            DemoLog.finishedCalls.remove(call)
                         }
                         val metrics = info?.metrics
                         val reused = metrics?.socketReused ?: false
@@ -462,6 +477,7 @@ object Scenarios {
         onStockProgress: (DownloadProgress) -> Unit,
         onSarieProgress: (DownloadProgress) -> Unit,
     ) {
+        clearScenarioMetrics(clients)
         val url = "https://cdn.jsdelivr.net/npm/typescript@5.6.3/lib/typescript.js"
         val request = Request.Builder().url(url).build()
         val latch = CountDownLatch(2)
