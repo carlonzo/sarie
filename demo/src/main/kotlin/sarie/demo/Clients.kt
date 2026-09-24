@@ -20,6 +20,7 @@ val optOutInterceptor: Interceptor = Interceptor { chain ->
 }
 
 class StockCallMetrics {
+    var callStartMs: Long? = null
     var dnsStartMs: Long? = null
     var dnsEndMs: Long? = null
     var connectStartMs: Long? = null
@@ -34,6 +35,10 @@ class StockEventListener : EventListener() {
 
     private fun getOrCreate(call: Call): StockCallMetrics =
         callMetrics.getOrPut(call) { StockCallMetrics() }
+
+    override fun callStart(call: Call) {
+        getOrCreate(call).callStartMs = System.currentTimeMillis()
+    }
 
     override fun dnsStart(call: Call, domainName: String) {
         getOrCreate(call).dnsStartMs = System.currentTimeMillis()

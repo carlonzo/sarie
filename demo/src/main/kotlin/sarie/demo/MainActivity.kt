@@ -337,18 +337,22 @@ class MainActivity : AppCompatActivity() {
                             textSize = 11f
                             typeface = mono
                         })
-                        fun addCell(value: Long?) {
+                        fun addCell(value: Long?, isReused: Boolean = false) {
                             tr.addView(android.widget.TextView(this).apply {
-                                text = value?.let { "${it}ms" } ?: "—"
+                                text = when {
+                                    isReused -> "reused"
+                                    value != null -> "${value}ms"
+                                    else -> "—"
+                                }
                                 gravity = android.view.Gravity.END
                                 textSize = 11f
                                 typeface = mono
                             })
                         }
-                        addCell(row.dnsMs)
-                        addCell(row.connMs)
-                        addCell(row.tlsMs)
-                        addCell(row.ttfbMs)
+                        addCell(row.dnsMs, row.socketReused)
+                        addCell(row.connMs, row.socketReused)
+                        addCell(row.tlsMs, row.socketReused)
+                        addCell(row.ttfbMs, false)
                         tableSetup.addView(tr)
                     }
                     btnRunSetup.text = "Run"

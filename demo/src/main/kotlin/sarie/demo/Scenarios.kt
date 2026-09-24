@@ -51,6 +51,7 @@ data class HostSetupMetrics(
     val connMs: Long?,
     val tlsMs: Long?,
     val ttfbMs: Long?,
+    val socketReused: Boolean = false,
 )
 
 data class ConnectionSetupResult(
@@ -354,14 +355,7 @@ object Scenarios {
         HostTarget("unsplash", "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=100&q=60"),
         HostTarget("cloudflare", "https://cloudflare-quic.com/"),
         HostTarget("google", "https://www.google.com/"),
-        HostTarget("jsdelivr", "https://cdn.jsdelivr.net/npm/typescript@5.6.3/lib/typescript.js"),
-    )
-
-    data class SetupPhaseRun(
-        val dnsMs: Long?,
-        val connMs: Long?,
-        val tlsMs: Long?,
-        val ttfbMs: Long?,
+        HostTarget("jsdelivr", "https://cdn.jsdelivr.net/npm/jquery@3.7.1/package.json"),
     )
 
     fun runConnectionSetup(clients: Clients): ConnectionSetupResult {
@@ -369,13 +363,13 @@ object Scenarios {
 
         for ((targetIndex, target) in SETUP_TARGETS.withIndex()) {
             val runSequence = if (targetIndex % 2 == 0) {
-                listOf(Stack.STOCK, Stack.SARIE, Stack.SARIE, Stack.STOCK, Stack.STOCK, Stack.SARIE)
+                listOf(Stack.STOCK, Stack.SARIE)
             } else {
-                listOf(Stack.SARIE, Stack.STOCK, Stack.STOCK, Stack.SARIE, Stack.SARIE, Stack.STOCK)
+                listOf(Stack.SARIE, Stack.STOCK)
             }
 
-            val stockPhaseRuns = mutableListOf<SetupPhaseRun>()
-            val sariePhaseRuns = mutableListOf<SetupPhaseRun>()
+            var stockMetrics: HostSetupMetrics? = null
+            var sarieMetrics: HostSetupMetrics? = null
 
             for (stack in runSequence) {
                 when (stack) {
@@ -391,11 +385,18 @@ object Scenarios {
                         val dns = if (m?.dnsStartMs != null && m.dnsEndMs != null) m.dnsEndMs!! - m.dnsStartMs!! else null
                         val conn = if (m?.connectStartMs != null && m.connectEndMs != null) m.connectEndMs!! - m.connectStartMs!! else null
                         val tls = if (m?.secureConnectStartMs != null && m.secureConnectEndMs != null) m.secureConnectEndMs!! - m.secureConnectStartMs!! else null
-                        val ttfb = if (m?.responseHeadersStartMs != null) {
-                            val startPoint = m.connectEndMs ?: m.dnsEndMs ?: m.dnsStartMs
-                            if (startPoint != null) m.responseHeadersStartMs!! - startPoint else null
+                        val ttfb = if (m?.responseHeadersStartMs != null && m.callStartMs != null) {
+                            m.responseHeadersStartMs!! - m.callStartMs!!
                         } else null
-                        stockPhaseRuns.add(SetupPhaseRun(dns, conn, tls, ttfb))
+                        stockMetrics = HostSetupMetrics(
+                            host = target.shortName,
+                            stack = "stock",
+                            dnsMs = dns,
+                            connMs = conn,
+                            tlsMs = tls,
+                            ttfbMs = ttfb,
+                            socketReused = false,
+                        )
                     }
                     Stack.SARIE -> {
                         val req = Request.Builder().url(target.url).build()
@@ -430,44 +431,27 @@ object Scenarios {
                             sslEnd.time - sslStart.time
                         } else null
 
-                        val ttfbMsVal = metrics?.ttfbMs
-                        val ttfb = if (ttfbMsVal != null && ttfbMsVal > 0) {
-                            ttfbMsVal
-                        } else {
-                            val respStart = metrics?.responseStart
-                            val startPoint = connectEnd ?: metrics?.sendingStart ?: metrics?.requestStart
-                            if (respStart != null && startPoint != null) respStart.time - startPoint.time else null
-                        }
-                        sariePhaseRuns.add(SetupPhaseRun(dns, conn, tls, ttfb))
+                        val respStart = metrics?.responseStart
+                        val reqStart = metrics?.requestStart
+                        val ttfb = if (respStart != null && reqStart != null) {
+                            respStart.time - reqStart.time
+                        } else null
+
+                        sarieMetrics = HostSetupMetrics(
+                            host = target.shortName,
+                            stack = "Sarie",
+                            dnsMs = dns,
+                            connMs = conn,
+                            tlsMs = tls,
+                            ttfbMs = ttfb,
+                            socketReused = reused,
+                        )
                     }
                 }
             }
 
-            fun medianOrNull(list: List<Long?>): Long? {
-                val nonNull = list.filterNotNull().toLongArray()
-                return if (nonNull.isNotEmpty()) Stats.median(nonNull) else null
-            }
-
-            rows.add(
-                HostSetupMetrics(
-                    host = target.shortName,
-                    stack = "stock",
-                    dnsMs = medianOrNull(stockPhaseRuns.map { it.dnsMs }),
-                    connMs = medianOrNull(stockPhaseRuns.map { it.connMs }),
-                    tlsMs = medianOrNull(stockPhaseRuns.map { it.tlsMs }),
-                    ttfbMs = medianOrNull(stockPhaseRuns.map { it.ttfbMs }),
-                ),
-            )
-            rows.add(
-                HostSetupMetrics(
-                    host = target.shortName,
-                    stack = "Sarie",
-                    dnsMs = medianOrNull(sariePhaseRuns.map { it.dnsMs }),
-                    connMs = medianOrNull(sariePhaseRuns.map { it.connMs }),
-                    tlsMs = medianOrNull(sariePhaseRuns.map { it.tlsMs }),
-                    ttfbMs = medianOrNull(sariePhaseRuns.map { it.ttfbMs }),
-                ),
-            )
+            stockMetrics?.let { rows.add(it) }
+            sarieMetrics?.let { rows.add(it) }
         }
 
         return ConnectionSetupResult(rows)
