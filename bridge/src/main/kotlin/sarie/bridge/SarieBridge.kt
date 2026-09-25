@@ -176,15 +176,17 @@ public object SarieBridge {
         }
         val translation = translatePins(config.certificatePinner?.pins ?: emptySet())
         val cronetBuilder = chosen.source.createBuilder()
-        applyEngineConfiguration(cronetBuilder, storageDir.absolutePath, translation.groups) {
-            config.configure(cronetBuilder)
-        }
         val engine = try {
+            applyEngineConfiguration(cronetBuilder, storageDir.absolutePath, translation.groups) {
+                config.configure(cronetBuilder)
+            }
             cronetBuilder.build()
-        } catch (e: IllegalStateException) {
-            // Cronet refuses a storage path a live engine holds ("Disk cache storage path already
-            // in use"). Sarie never shuts its engine down, so a second install in this process
-            // lands here: keep the engine that owns the path, with the pins it actually enforces.
+        } catch (e: RuntimeException) {
+            if (e !is IllegalStateException && e !is IllegalArgumentException) throw e
+            // Cronet refuses a storage path a live engine holds (IllegalStateException), or async
+            // storage init briefly removes the directory so setStoragePath fails (IllegalArgumentException).
+            // Sarie never shuts its engine down, so a second install in this process lands here:
+            // keep the engine that owns the path, with the pins it actually enforces.
             val previous = lastBuilt ?: throw e
             logger?.log(
                 Log.WARN,
