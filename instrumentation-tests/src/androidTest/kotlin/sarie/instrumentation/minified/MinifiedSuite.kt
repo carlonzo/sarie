@@ -1,6 +1,8 @@
 package sarie.instrumentation.minified
 
 import sarie.bridge.FallbackReason
+import sarie.bridge.SarieProtocol
+import sarie.bridge.SarieTimings
 import sarie.instrumentation.NetworkParity
 import sarie.instrumentation.TestAppRuntime
 import java.util.concurrent.CountDownLatch
@@ -18,6 +20,8 @@ import okhttp3.WebSocketListener
 import org.chromium.net.CronetEngine
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -235,5 +239,35 @@ class MinifiedSuite {
             assertEquals("ok", response.body.string())
         }
         assertFallbackOnly(FallbackReason.disabled)
+    }
+
+    @Test
+    fun listenerV2SurvivesR8AndOrdersDelivery() {
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+
+        var finishedBeforeBodyRead = false
+        val client = OkHttpClient()
+        val request = Request.Builder().url("https://cloudflare-quic.com/").build()
+
+        client.newCall(request).execute().use { response ->
+            assertEquals(Protocol.HTTP_3, response.protocol)
+            assertEquals(200, response.code)
+
+            val started = TestAppRuntime.routes.responseStartedInfos().singleOrNull()
+            assertNotNull("onResponseStarted must have fired", started)
+            assertEquals(SarieProtocol.HTTP_3, started!!.protocol)
+
+            val body = response.body.string()
+            assertTrue(body.isNotEmpty())
+            finishedBeforeBodyRead = TestAppRuntime.routes.finishedTimings().isNotEmpty()
+        }
+
+        assertTrue("onFinished must be delivered before body read returns", finishedBeforeBodyRead)
+        val timings = TestAppRuntime.routes.finishedTimings().single()
+        assertEquals(SarieTimings.Result.SUCCEEDED, timings.result)
+        assertEquals(SarieProtocol.HTTP_3, timings.protocol)
+        assertFalse(timings.deliveredLate)
+        assertNotNull(timings.ttfbMs)
+        assertNotNull(timings.totalMs)
     }
 }

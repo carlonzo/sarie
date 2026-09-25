@@ -16,11 +16,12 @@ import androidx.compose.runtime.setValue
 import okhttp3.Call
 import okhttp3.Interceptor
 import okhttp3.Response
-import org.chromium.net.RequestFinishedInfo
 import sarie.bridge.CronetOptOut
 import sarie.bridge.FallbackReason
 import sarie.bridge.SarieListener
 import sarie.bridge.SarieLogger
+import sarie.bridge.SarieResponseInfo
+import sarie.bridge.SarieTimings
 
 object DemoLog : SarieLogger, SarieListener, Interceptor {
 
@@ -43,7 +44,7 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
     var version by mutableIntStateOf(0)
         private set
 
-    val finishedCalls = ConcurrentHashMap<Call, CompletableFuture<RequestFinishedInfo>>()
+    val finishedCalls = ConcurrentHashMap<Call, CompletableFuture<SarieTimings>>()
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
@@ -125,54 +126,26 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
         addLine(sarieBuffer, line, updateLastLine = true)
     }
 
+    // SarieListener.onResponseStarted
+    override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+        val path = call.request().url.encodedPath
+        val line = "${now()} [headers] ${info.protocol} ${info.httpStatusCode} $path (attempt=${info.attempt})"
+        addLine(cronetBuffer, line, updateLastLine = false)
+    }
+
     // SarieListener.onFinished
-    override fun onFinished(call: Call, info: RequestFinishedInfo) {
-        finishedCalls.computeIfAbsent(call) { CompletableFuture() }.complete(info)
+    override fun onFinished(call: Call, timings: SarieTimings) {
+        finishedCalls.computeIfAbsent(call) { CompletableFuture() }.complete(timings)
 
-        val metrics = info.metrics
-        val path = try {
-            val url = java.net.URI(info.url)
-            url.path ?: info.url
-        } catch (_: Exception) {
-            info.url
-        }
-
-        val totalMs = metrics?.totalTimeMs ?: -1
-        val dnsStart = metrics?.dnsStart
-        val dnsEnd = metrics?.dnsEnd
-        val dnsMs = if (dnsStart != null && dnsEnd != null) {
-            dnsEnd.time - dnsStart.time
-        } else {
-            null
-        }
-        val connStart = metrics?.connectStart
-        val connEnd = metrics?.connectEnd
-        val connMs = if (connStart != null && connEnd != null) {
-            connEnd.time - connStart.time
-        } else {
-            null
-        }
-        val sslStart = metrics?.sslStart
-        val sslEnd = metrics?.sslEnd
-        val sslMs = if (sslStart != null && sslEnd != null) {
-            sslEnd.time - sslStart.time
-        } else {
-            null
-        }
-        val ttfbMs = metrics?.ttfbMs ?: -1
-        val reused = metrics?.socketReused ?: false
-        val bytes = metrics?.receivedByteCount ?: -1
-
-        val reasonStr = when (info.finishedReason) {
-            RequestFinishedInfo.SUCCEEDED -> "SUCCEEDED"
-            RequestFinishedInfo.FAILED -> "FAILED"
-            RequestFinishedInfo.CANCELED -> "CANCELED"
-            else -> "UNKNOWN"
-        }
-
-        val dnsStr = dnsMs?.let { "${it}ms" } ?: "—"
-        val connStr = connMs?.let { "${it}ms" } ?: "—"
-        val sslStr = sslMs?.let { "${it}ms" } ?: "—"
+        val path = call.request().url.encodedPath
+        val totalMs = timings.totalMs ?: -1
+        val dnsStr = timings.dnsMs?.let { "${it}ms" } ?: "—"
+        val connStr = timings.connectMs?.let { "${it}ms" } ?: "—"
+        val sslStr = timings.tlsMs?.let { "${it}ms" } ?: "—"
+        val ttfbMs = timings.ttfbMs ?: -1
+        val reused = timings.socketReused
+        val bytes = timings.receivedBytes ?: -1
+        val reasonStr = timings.result.name
 
         val line = "${now()} $path total=${totalMs}ms dns=$dnsStr conn=$connStr ssl=$sslStr ttfb=${ttfbMs}ms reused=$reused bytes=$bytes $reasonStr"
         addLine(cronetBuffer, line, updateLastLine = true)

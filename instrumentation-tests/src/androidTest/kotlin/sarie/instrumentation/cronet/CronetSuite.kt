@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
+import sarie.bridge.SarieProtocol
+import sarie.bridge.SarieTimings
 import sarie.instrumentation.NetworkParity
 import sarie.instrumentation.TestAppRuntime
 import java.io.File
@@ -334,7 +336,7 @@ class CronetSuite {
             val body = response.body.string()
             assertEquals("gzip-payload-ok\n".repeat(256), body)
             assertTrue(TestAppRuntime.routes.awaitFinished(1))
-            val wire = TestAppRuntime.routes.finishedInfos().first().metrics.receivedByteCount
+            val wire = TestAppRuntime.routes.finishedTimings().first().receivedBytes
             assertNotNull(wire)
             assertTrue(
                 "wire bytes $wire should be smaller than the decoded body (${body.length})",
@@ -815,7 +817,7 @@ class CronetSuite {
         // Exact message: stock's failure includes the peer chain after this prefix.
         assertEquals("Certificate pinning failure!", thrown.message)
         assertTrue(TestAppRuntime.routes.awaitFinished(1))
-        assertEquals(1, TestAppRuntime.routes.finishedInfos().size)
+        assertEquals(1, TestAppRuntime.routes.finishedTimings().size)
         assertTrue(
             "pin failure must stay on Cronet, cronet=${TestAppRuntime.routes.cronetCount()}",
             TestAppRuntime.routes.cronetCount() >= 1,
@@ -963,5 +965,85 @@ class CronetSuite {
             if (removed.isNotEmpty()) append("stock-only: $removed\n")
             for (name in changed) append("$name stock=${stock[name]} cronet=${cronet[name]}\n")
         }
+    }
+
+    @Test
+    fun listenerV2PublicOriginHttp3AndTimingOrdering() {
+        // Cold connection to public h3 origin
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+
+        var finishedBeforeBodyRead = false
+        val client = OkHttpClient()
+        val request = Request.Builder().url("https://cloudflare-quic.com/").build()
+
+        client.newCall(request).execute().use { response ->
+            assertEquals(200, response.code)
+            assertEquals(Protocol.HTTP_3, response.protocol)
+
+            // At header return (before body read), onResponseStarted has fired
+            val started = TestAppRuntime.routes.responseStartedInfos().singleOrNull()
+            assertNotNull("onResponseStarted must have fired", started)
+            assertEquals(SarieProtocol.HTTP_3, started!!.protocol)
+            assertEquals(200, started.httpStatusCode)
+            assertFalse(started.wasCached)
+            assertEquals(1, started.attempt)
+            assertFalse(started.isRedirect)
+
+            // Read the body to EOF. On return, onFinished must already be delivered (deliveredLate = false)
+            val body = response.body.string()
+            assertTrue(body.isNotEmpty())
+            finishedBeforeBodyRead = TestAppRuntime.routes.finishedTimings().isNotEmpty()
+        }
+
+        assertTrue("onFinished must be delivered before body read returns", finishedBeforeBodyRead)
+        val timings = TestAppRuntime.routes.finishedTimings().single()
+        assertEquals(SarieTimings.Result.SUCCEEDED, timings.result)
+        assertEquals(SarieProtocol.HTTP_3, timings.protocol)
+        assertFalse("onFinished must not be deliveredLate", timings.deliveredLate)
+        assertNotNull("ttfbMs must be non-null", timings.ttfbMs)
+        assertNotNull("totalMs must be non-null", timings.totalMs)
+        assertNotNull("connectMs must be non-null on cold connection", timings.connectMs)
+        assertTrue(timings.ttfbMs!! > 0)
+        assertTrue(timings.totalMs!! > 0)
+        assertTrue(timings.connectMs!! > 0)
+    }
+
+    @Test
+    fun listenerV2LocalOriginHttp2AndTimingOrdering() {
+        // Local origin serves HTTP/2
+        installCronet(quicHintHost = HOST, quicHintPort = PORT)
+
+        var finishedBeforeBodyRead = false
+        val client = OkHttpClient()
+        val request = Request.Builder().url("$ORIGIN/ok").build()
+
+        client.newCall(request).execute().use { response ->
+            assertEquals(200, response.code)
+            assertEquals(Protocol.HTTP_2, response.protocol)
+
+            val started = TestAppRuntime.routes.responseStartedInfos().singleOrNull()
+            assertNotNull("onResponseStarted must have fired", started)
+            assertEquals(SarieProtocol.HTTP_2, started!!.protocol)
+            assertEquals(200, started.httpStatusCode)
+            assertFalse(started.wasCached)
+            assertEquals(1, started.attempt)
+            assertFalse(started.isRedirect)
+
+            val body = response.body.string()
+            assertEquals("ok", body)
+            finishedBeforeBodyRead = TestAppRuntime.routes.finishedTimings().isNotEmpty()
+        }
+
+        assertTrue("onFinished must be delivered before body read returns", finishedBeforeBodyRead)
+        val timings = TestAppRuntime.routes.finishedTimings().single()
+        assertEquals(SarieTimings.Result.SUCCEEDED, timings.result)
+        assertEquals(SarieProtocol.HTTP_2, timings.protocol)
+        assertFalse("onFinished must not be deliveredLate", timings.deliveredLate)
+        assertNotNull("ttfbMs must be non-null", timings.ttfbMs)
+        assertNotNull("totalMs must be non-null", timings.totalMs)
+        assertNotNull("connectMs must be non-null on cold connection", timings.connectMs)
+        assertTrue(timings.ttfbMs!! > 0)
+        assertTrue(timings.totalMs!! > 0)
+        assertTrue(timings.connectMs!! > 0)
     }
 }

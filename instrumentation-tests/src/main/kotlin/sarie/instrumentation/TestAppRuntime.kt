@@ -6,12 +6,13 @@ import java.io.File
 import okhttp3.Call
 import okhttp3.OkHttpClient
 import org.chromium.net.CronetEngine
-import org.chromium.net.RequestFinishedInfo
 import sarie.bridge.DefaultPolicy
 import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
 import sarie.bridge.SarieConfig
 import sarie.bridge.SarieListener
+import sarie.bridge.SarieResponseInfo
+import sarie.bridge.SarieTimings
 
 /**
  * Test-host installer. Only ever invoked from androidTest code: [ApplicationProvider] lives on
@@ -171,21 +172,27 @@ object TestAppRuntime {
     class RouteLog : SarieListener {
         private val lock = Any()
         private val reasons = mutableListOf<FallbackReason?>()
-        private val finished = mutableListOf<RequestFinishedInfo>()
+        private val started = mutableListOf<SarieResponseInfo>()
+        private val finished = mutableListOf<SarieTimings>()
 
         override fun onRouted(call: Call, reason: FallbackReason?) {
             synchronized(lock) { reasons += reason }
         }
 
-        override fun onFinished(call: Call, info: RequestFinishedInfo) {
+        override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+            synchronized(lock) { started += info }
+        }
+
+        override fun onFinished(call: Call, timings: SarieTimings) {
             synchronized(lock) {
-                finished += info
+                finished += timings
                 (lock as Object).notifyAll()
             }
         }
 
         fun clear() = synchronized(lock) {
             reasons.clear()
+            started.clear()
             finished.clear()
         }
 
@@ -195,7 +202,9 @@ object TestAppRuntime {
 
         fun lastReason(): FallbackReason? = synchronized(lock) { reasons.lastOrNull() }
 
-        fun finishedInfos(): List<RequestFinishedInfo> = synchronized(lock) { finished.toList() }
+        fun responseStartedInfos(): List<SarieResponseInfo> = synchronized(lock) { started.toList() }
+
+        fun finishedTimings(): List<SarieTimings> = synchronized(lock) { finished.toList() }
 
         fun awaitFinished(minCount: Int, timeoutMs: Long = 5_000): Boolean {
             val deadline = System.nanoTime() + timeoutMs * 1_000_000
