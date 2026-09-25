@@ -16,7 +16,6 @@
 // Ported from google/cronet-transport-for-okhttp@eda650fbc9b5279b6219160c2a0b210b28303fd7
 package sarie.bridge.mapping
 
-import sarie.bridge.RequestFinishedExecutor
 import sarie.bridge.RuntimeSnapshot
 import sarie.bridge.SarieBridge
 import java.io.IOException
@@ -57,8 +56,9 @@ internal class RequestConverter(
         requestBodyEvents: RequestBodyEvents? = null,
         onResponseHeadersStart: (() -> Unit)? = null,
         call: Call? = null,
+        attempt: Int = 1,
     ): ConvertedRequest {
-        val callback = OkHttpBridgeCallback(readTimeoutMillis, onResponseHeadersStart)
+        val callback = OkHttpBridgeCallback(readTimeoutMillis, onResponseHeadersStart, call, attempt)
 
         // The callback methods are lightweight (queue inserts); run them directly on Cronet's
         // internal thread to avoid extra thread hops.
@@ -151,7 +151,7 @@ internal class RequestConverter(
 
         val snapshot = SarieBridge.snapshot()
         snapshot?.mapper?.map(okHttpRequest, builder)
-        attachFinishedListener(builder, snapshot, call)
+        attachFinishedListener(builder, snapshot, call, callback)
         builder.disableCache()
 
         return ConvertedRequest(builder.build(), callback, okHttpRequest, responseConverter)
@@ -161,29 +161,22 @@ internal class RequestConverter(
         builder: UrlRequest.Builder,
         snapshot: RuntimeSnapshot?,
         call: Call?,
+        callback: OkHttpBridgeCallback,
     ) {
         val listener = SarieBridge.listener ?: return
         if (snapshot == null || call == null || snapshot.finishedListenerUnsupported.get()) return
         val attached = runCatching {
             builder.setRequestFinishedListener(
-                object : RequestFinishedInfo.Listener(RequestFinishedExecutor.executor) {
+                object : RequestFinishedInfo.Listener(DIRECT_EXECUTOR) {
                     override fun onRequestFinished(info: RequestFinishedInfo) {
-                        // Host code on Sarie's executor thread: an escaped throw would reach the
-                        // uncaught-exception handler and kill the process.
-                        try {
-                            listener.onFinished(call, info)
-                        } catch (t: Throwable) {
-                            if (finishedThrewLogged.compareAndSet(false, true)) {
-                                SarieBridge.logger?.log(Log.WARN, "SarieListener.onFinished threw", t)
-                            }
-                        }
+                        callback.onFinishedInfoReceived(info)
                     }
                 },
             )
         }
-        if (attached.isFailure &&
-            snapshot.finishedListenerUnsupported.compareAndSet(false, true)
-        ) {
+        if (attached.isSuccess) {
+            callback.finishedListenerActive.set(true)
+        } else if (snapshot.finishedListenerUnsupported.compareAndSet(false, true)) {
             SarieBridge.logger?.log(
                 Log.WARN,
                 "Cronet provider rejected setRequestFinishedListener; onFinished will be skipped " +
@@ -212,7 +205,6 @@ internal class RequestConverter(
         private const val CONTENT_LENGTH_HEADER_NAME = "Content-Length"
         private const val CONTENT_TYPE_HEADER_NAME = "Content-Type"
         private const val CONTENT_TYPE_HEADER_DEFAULT_VALUE = "application/octet-stream"
-        private val finishedThrewLogged = AtomicBoolean(false)
         private val DIRECT_EXECUTOR = Executor { it.run() }
     }
 }

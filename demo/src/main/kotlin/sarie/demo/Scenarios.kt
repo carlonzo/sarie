@@ -113,7 +113,7 @@ object Scenarios {
             } finally {
                 DemoLog.finishedCalls.remove(firstSarieCall)
             }
-            if (info?.metrics?.socketReused == false) {
+            if (info?.socketReused == false) {
                 sarieRuns.first().coldMs
             } else {
                 null
@@ -416,31 +416,13 @@ object Scenarios {
                         } finally {
                             DemoLog.finishedCalls.remove(call)
                         }
-                        val metrics = info?.metrics
-                        val reused = metrics?.socketReused ?: false
-                        val dnsStart = metrics?.dnsStart
-                        val dnsEnd = metrics?.dnsEnd
-                        val dns = if (!reused && dnsStart != null && dnsEnd != null) {
-                            dnsEnd.time - dnsStart.time
-                        } else null
-
-                        val connectStart = metrics?.connectStart
-                        val connectEnd = metrics?.connectEnd
-                        val conn = if (!reused && connectStart != null && connectEnd != null) {
-                            connectEnd.time - connectStart.time
-                        } else null
-
-                        val sslStart = metrics?.sslStart
-                        val sslEnd = metrics?.sslEnd
-                        val tls = if (!reused && sslStart != null && sslEnd != null) {
-                            sslEnd.time - sslStart.time
-                        } else null
-
-                        val respStart = metrics?.responseStart
-                        val reqStart = metrics?.requestStart
-                        val ttfb = if (respStart != null && reqStart != null) {
-                            respStart.time - reqStart.time
-                        } else null
+                        val reused = info?.socketReused ?: false
+                        val dns = if (!reused) info?.dnsMs else null
+                        val conn = if (!reused) info?.connectMs else null
+                        val tls = if (!reused) info?.tlsMs else null
+                        val ttfb = if (info?.responseStartAtMillis != null && info.requestStartAtMillis != null) {
+                            info.responseStartAtMillis!! - info.requestStartAtMillis!!
+                        } else info?.ttfbMs
 
                         sarieMetrics = HostSetupMetrics(
                             host = target.shortName,

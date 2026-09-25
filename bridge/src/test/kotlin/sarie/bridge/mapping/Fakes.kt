@@ -6,14 +6,17 @@ import java.net.URLConnection
 import java.net.URLStreamHandlerFactory
 import java.nio.ByteBuffer
 import java.util.AbstractMap
+import java.util.Date
 import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.chromium.net.CronetEngine
-import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.CronetException
+import org.chromium.net.NetworkException
+import org.chromium.net.QuicException
+import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UploadDataProvider
 import org.chromium.net.UploadDataSink
 import org.chromium.net.UrlRequest
@@ -103,6 +106,9 @@ class FakeUrlRequest(private val builder: FakeUrlRequestBuilder) : UrlRequest() 
     /** Scripted reaction to read(); invoked synchronously on the caller's thread. */
     var readHandler: ((ByteBuffer) -> Unit)? = null
 
+    /** Scripted reaction to cancel(); invoked synchronously on the caller's thread. */
+    var cancelHandler: (() -> Unit)? = null
+
     val callback: UrlRequest.Callback get() = builder.callback
 
     override fun start() {
@@ -111,6 +117,7 @@ class FakeUrlRequest(private val builder: FakeUrlRequestBuilder) : UrlRequest() 
 
     override fun cancel() {
         cancelCalls++
+        cancelHandler?.invoke()
     }
 
     override fun followRedirect() {
@@ -245,3 +252,82 @@ class FakeUploadDataSink : UploadDataSink() {
 }
 
 class FakePolicy(override val allowedOrigins: Set<String> = emptySet()) : CronetPolicy
+
+class FakeMetrics(
+    private val requestStart: Date? = null,
+    private val dnsStart: Date? = null,
+    private val dnsEnd: Date? = null,
+    private val connectStart: Date? = null,
+    private val connectEnd: Date? = null,
+    private val sslStart: Date? = null,
+    private val sslEnd: Date? = null,
+    private val sendingStart: Date? = null,
+    private val sendingEnd: Date? = null,
+    private val pushStart: Date? = null,
+    private val pushEnd: Date? = null,
+    private val responseStart: Date? = null,
+    private val requestEnd: Date? = null,
+    private val socketReused: Boolean = false,
+    private val ttfbMs: Long? = null,
+    private val totalTimeMs: Long? = null,
+    private val sentByteCount: Long? = null,
+    private val receivedByteCount: Long? = null,
+) : RequestFinishedInfo.Metrics() {
+    override fun getRequestStart(): Date? = requestStart
+    override fun getDnsStart(): Date? = dnsStart
+    override fun getDnsEnd(): Date? = dnsEnd
+    override fun getConnectStart(): Date? = connectStart
+    override fun getConnectEnd(): Date? = connectEnd
+    override fun getSslStart(): Date? = sslStart
+    override fun getSslEnd(): Date? = sslEnd
+    override fun getSendingStart(): Date? = sendingStart
+    override fun getSendingEnd(): Date? = sendingEnd
+    override fun getPushStart(): Date? = pushStart
+    override fun getPushEnd(): Date? = pushEnd
+    override fun getResponseStart(): Date? = responseStart
+    override fun getRequestEnd(): Date? = requestEnd
+    override fun getSocketReused(): Boolean = socketReused
+    override fun getTtfbMs(): Long? = ttfbMs
+    override fun getTotalTimeMs(): Long? = totalTimeMs
+    override fun getSentByteCount(): Long? = sentByteCount
+    override fun getReceivedByteCount(): Long? = receivedByteCount
+}
+
+class FakeRequestFinishedInfo(
+    private val url: String = "https://example.com/",
+    private val annotations: Collection<Any> = emptyList(),
+    private val metrics: RequestFinishedInfo.Metrics? = null,
+    private val finishedReason: Int = RequestFinishedInfo.SUCCEEDED,
+    private val responseInfo: UrlResponseInfo? = null,
+    private val exception: CronetException? = null,
+) : RequestFinishedInfo() {
+    override fun getUrl(): String = url
+    override fun getAnnotations(): Collection<Any> = annotations
+    override fun getMetrics(): Metrics? = metrics
+    override fun getFinishedReason(): Int = finishedReason
+    override fun getResponseInfo(): UrlResponseInfo? = responseInfo
+    override fun getException(): CronetException? = exception
+}
+
+class FakeNetworkException(
+    private val errorCode: Int = 1,
+    private val cronetInternalErrorCode: Int = -105,
+    message: String = "network exception",
+) : NetworkException(message, null) {
+    override fun getErrorCode(): Int = errorCode
+    override fun getCronetInternalErrorCode(): Int = cronetInternalErrorCode
+    override fun immediatelyRetryable(): Boolean = false
+}
+
+class FakeQuicException(
+    private val errorCode: Int = 11,
+    private val cronetInternalErrorCode: Int = -300,
+    private val quicDetailedErrorCode: Int = 42,
+    message: String = "quic exception",
+) : QuicException(message, null) {
+    override fun getErrorCode(): Int = errorCode
+    override fun getCronetInternalErrorCode(): Int = cronetInternalErrorCode
+    override fun immediatelyRetryable(): Boolean = false
+    override fun getQuicDetailedErrorCode(): Int = quicDetailedErrorCode
+}
+

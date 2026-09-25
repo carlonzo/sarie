@@ -96,10 +96,10 @@
 -keep class sarie.instrumentation.TestAppRuntime { *; }
 -keep class sarie.bridge.SarieBridge { *; }
 -keep class sarie.bridge.FallbackReason { *; }
-# RequestFinishedInfo: only the test APK reads it (CronetSuite wire-bytes assertion); with no
-# app-side caller R8 strips getMetrics(). A real host reads it in its own listener.
--keep class org.chromium.net.RequestFinishedInfo { *; }
--keep class org.chromium.net.RequestFinishedInfo$Metrics { *; }
+-keep class sarie.bridge.SarieResponseInfo { *; }
+-keep class sarie.bridge.SarieTimings { *; }
+-keep class sarie.bridge.SarieTimings$* { *; }
+-keep class sarie.bridge.SarieProtocol { *; }
 -keep class sarie.bridge.SarieListener { *; }
 -keep class sarie.instrumentation.TestAppRuntime$RouteLog { *; }
 -keep class sarie.bridge.CronetPolicy { *; }

@@ -22,13 +22,18 @@ import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import sarie.bridge.RequestFinishedExecutor
 import sarie.bridge.SarieBridge
+import okhttp3.Call
 import okio.Buffer
 import okio.Source
 import okio.Timeout
 import org.chromium.net.CronetException
+import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
 
@@ -48,12 +53,22 @@ import org.chromium.net.UrlResponseInfo
 internal class OkHttpBridgeCallback(
     readTimeoutMillis: Long,
     private val onResponseHeadersStart: (() -> Unit)? = null,
+    private val call: Call? = null,
+    private val attempt: Int = 1,
 ) : UrlRequest.Callback() {
 
-    /** The byte buffer capacity for reading Cronet response bodies. */
-    private companion object {
-        const val CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024
-        const val CANCELED_MESSAGE = "Canceled"
+    internal companion object {
+        /** The byte buffer capacity for reading Cronet response bodies. */
+        private const val CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024
+        private const val CANCELED_MESSAGE = "Canceled"
+
+        /**
+         * How long a reader waits for Cronet's finished info after the terminal callback, and how
+         * long the late path waits before delivering. Cronet reports right after the terminal
+         * callback on the same network thread, so the real gap is far below this.
+         */
+        const val FINISHED_INFO_WAIT_MS = 100L
+        private val finishedThrewLogged = AtomicBoolean(false)
     }
 
     /**
@@ -82,6 +97,23 @@ internal class OkHttpBridgeCallback(
     /** Set once Cronet has delivered response headers (a normal response or a redirect). */
     @Volatile
     var responseHeadersDelivered: Boolean = false
+        private set
+
+    /** Completed by the RequestFinishedInfo listener; see [onFinishedInfoReceived]. */
+    private val finishedInfoFuture: CompletableFuture<RequestFinishedInfo> = CompletableFuture()
+
+    /**
+     * Set by RequestConverter when the provider accepted the finished listener. When false no
+     * info will ever arrive, so nothing waits for it.
+     */
+    val finishedListenerActive: AtomicBoolean = AtomicBoolean(false)
+
+    /** Single-delivery gate for [sarie.bridge.SarieListener.onFinished], per attempt. */
+    private val delivered = AtomicBoolean(false)
+
+    /** Whether this attempt ended in a redirect (never followed inside Cronet). */
+    @Volatile
+    var isRedirect: Boolean = false
         private set
 
     private fun deliverResponseHeaders(urlResponseInfo: UrlResponseInfo) {
@@ -128,6 +160,7 @@ internal class OkHttpBridgeCallback(
         // We never follow redirects inside Cronet: pass the 3xx upstream to OkHttp's follow-up
         // logic. There is no way to retrieve a redirect response's body with Cronet's APIs, so
         // provide an empty one.
+        isRedirect = true
         receivedHeadersAtMillis = System.currentTimeMillis()
         deliverResponseHeaders(urlResponseInfo)
         check(headersFuture.complete(urlResponseInfo))
@@ -187,6 +220,56 @@ internal class OkHttpBridgeCallback(
     }
 
     private fun canceledError(): IOException = IOException(CANCELED_MESSAGE)
+
+    /**
+     * Runs on the Cronet network thread (direct executor): CPU-only. Completes the future a
+     * waiting reader blocks on, and schedules the late delivery for when no reader claims it:
+     * immediately for a redirect (nobody reads its body), otherwise after the reader's window.
+     */
+    fun onFinishedInfoReceived(info: RequestFinishedInfo) {
+        finishedInfoFuture.complete(info)
+        val delayMs = if (isRedirect) 0L else FINISHED_INFO_WAIT_MS
+        RequestFinishedExecutor.executor.schedule(
+            { deliver(info, deliveredLate = true) },
+            delayMs,
+            TimeUnit.MILLISECONDS,
+        )
+    }
+
+    /**
+     * Reader/caller thread: waits at most [FINISHED_INFO_WAIT_MS] for the finished info and
+     * delivers it on this thread. No wait when the provider rejected the finished listener.
+     */
+    fun awaitAndDeliver() {
+        if (!finishedListenerActive.get() || delivered.get()) return
+        val info = try {
+            finishedInfoFuture.get(FINISHED_INFO_WAIT_MS, TimeUnit.MILLISECONDS)
+        } catch (_: TimeoutException) {
+            return
+        } catch (_: ExecutionException) {
+            return
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return
+        }
+        deliver(info, deliveredLate = false)
+    }
+
+    private fun deliver(info: RequestFinishedInfo, deliveredLate: Boolean) {
+        if (!delivered.compareAndSet(false, true)) return
+        val call = call ?: return
+        val listener = SarieBridge.listener ?: return
+        val timings = SarieTimingsMapper.map(info, attempt, isRedirect, deliveredLate)
+        // Host code: an escaped throw would reach the reader, or the executor thread's
+        // uncaught-exception handler and kill the process.
+        try {
+            listener.onFinished(call, timings)
+        } catch (t: Throwable) {
+            if (finishedThrewLogged.compareAndSet(false, true)) {
+                SarieBridge.logger?.log(Log.WARN, "SarieListener.onFinished threw", t)
+            }
+        }
+    }
 
     /** A bridge between Cronet's asynchronous callbacks and OkHttp's blocking stream-like reads. */
     private inner class CronetBodySource : Source {
@@ -267,13 +350,19 @@ internal class OkHttpBridgeCallback(
             return when (result.callbackStep) {
                 CallbackStep.ON_FAILED -> {
                     finished.set(true)
+                    awaitAndDeliver()
                     throw IOException(result.exception)
                 }
                 CallbackStep.ON_SUCCESS -> {
                     finished.set(true)
+                    awaitAndDeliver()
                     false
                 }
-                CallbackStep.ON_CANCELED -> throw canceledError()
+                CallbackStep.ON_CANCELED -> {
+                    finished.set(true)
+                    awaitAndDeliver()
+                    throw canceledError()
+                }
                 CallbackStep.ON_READ_COMPLETED -> true
             }
         }
@@ -303,6 +392,7 @@ internal class OkHttpBridgeCallback(
             closed = true
             if (!finished.get()) {
                 request?.cancel()
+                awaitAndDeliver()
             }
         }
     }
