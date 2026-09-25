@@ -5,6 +5,9 @@ pluginManagement {
         gradlePluginPortal()
     }
 }
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
 
 dependencyResolutionManagement {
     repositories {
@@ -17,4 +20,5 @@ rootProject.name = "sarie"
 
 includeBuild("plugin")
 include(":bridge")
-include(":sample")
+include(":instrumentation-tests")
+include(":demo")

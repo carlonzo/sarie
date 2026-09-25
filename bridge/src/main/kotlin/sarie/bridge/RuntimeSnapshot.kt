@@ -21,7 +21,6 @@ internal class RuntimeSnapshot(
     val engine: CronetEngine,
     val policy: CronetPolicy,
     val mapper: RequestToUrlRequestMapper,
-    val installedAtMillis: Long,
     val sarieBuilt: Boolean = false,
     val installedPins: Set<CertificatePinner.Pin> = emptySet(),
     val providerName: String? = null,

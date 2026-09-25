@@ -442,6 +442,31 @@ On the Cronet path:
 
 ---
 
+## Demo app
+
+The `:demo` module contains an interactive showcase comparing `OkHttp (stock)` against `OkHttp + Sarie` side by side with live metrics, negotiated protocol indicators, a bottom sheet log inspector, and Chucker integration.
+
+### Running the demo
+```bash
+./gradlew :demo:installDebug
+# Launch "Sarie Demo" on your device or emulator
+```
+
+### Scenarios
+1. **Round trip**: 20 sequential GETs against `cloudflare-quic.com`. Compares cold connection setup time and warm p50 / p95 latencies.
+2. **Parallel images**: Enqueues 100 unique image URLs concurrently from `images.unsplash.com`. Shows total wall time, time to first image, per-image latency percentiles (p50/p95/p99), and fills a thumbnail grid live.
+3. **Connection setup**: One cold GET per host across 4 public origins (`images.unsplash.com`, `cloudflare-quic.com`, `www.google.com`, `cdn.jsdelivr.net`). Breaks down DNS, connect, TLS, and TTFB phases.
+4. **Big download / migration**: Downloads a ~9 MB file (`cdn.jsdelivr.net`) on both stacks concurrently with progress bars. On a real device, switch Wi-Fi ↔ mobile data mid-download: QUIC connection migration keeps Sarie going, while stock TCP breaks.
+
+### Simulating bad network (`netem.sh`)
+To demonstrate HTTP/3 head-of-line blocking resistance under packet loss and latency:
+```bash
+./scripts/netem.sh on 2% 100ms   # add 2% loss and 100ms delay to host egress
+./scripts/netem.sh off          # restore normal network
+```
+
+---
+
 ## Documentation & Reference
 
 - [`COMPATIBILITY.md`](COMPATIBILITY.md): Complete behavior contract with test citations for every supported scenario.

@@ -55,7 +55,7 @@ dependencies {
     testImplementation(libs.cronet.api)
     testImplementation("com.squareup.okhttp3:okhttp:$okhttpVersionForTests")
     testImplementation(libs.junit)
-    testImplementation("com.squareup.okhttp3:mockwebserver3:$okhttpVersionForTests")
+    testImplementation(libs.mockwebserver3)
 }
 
 // compileOnly must not leak okhttp or cronet onto the published/runtime classpath.

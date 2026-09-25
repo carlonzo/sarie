@@ -89,7 +89,7 @@ jobs:
             :bridge:checkOkHttpCompileOnly \
             :bridge:checkCronetCompileOnly \
             :bridge:testDebugUnitTest \
-            :sample:assembleDebug \
+            :instrumentation-tests:assembleDebug \
             -PokhttpVersion=${{ steps.detect.outputs.new }}
           ./gradlew --no-daemon -p plugin test
 

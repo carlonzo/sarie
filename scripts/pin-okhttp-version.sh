@@ -62,7 +62,7 @@ csv = ", ".join(versions)
 compat_text = Path(compat).read_text()
 compat_text, n = re.subn(
     r"\| unpublished \(this repo\) \| [^|]+ \| [^|]+\|",
-    f"| unpublished (this repo) | {csv} | {oldest} is the compile floor; {newest} is the sample/default |",
+    f"| unpublished (this repo) | {csv} | {oldest} is the compile floor; {newest} is the instrumentation-tests/default |",
     compat_text,
     count=1,
 )

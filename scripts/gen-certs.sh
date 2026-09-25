@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Generates the local test CA + leaf cert for the Caddy HTTP/3 origin, the deterministic
-# /big test payloads, and refreshes the NSC copy of the CA in the sample app.
+# /big test payloads, and refreshes the NSC copy of the CA in the instrumentation-tests app.
 # Outputs (re-runnable, deterministic names):
 #   scripts/certs/{ca.pem,ca.key,cert.pem,key.pem}
 #   scripts/big/{1mib.bin,5mib.bin}
-#   sample/src/main/res/raw/caddy_root_ca  (public cert only - safe to keep in git)
+#   instrumentation-tests/src/main/res/raw/caddy_root_ca  (public cert only - safe to keep in git)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -45,6 +45,6 @@ head -c 1048576 /dev/urandom > "$BIG/1mib.bin"
 head -c 5242880 /dev/urandom > "$BIG/5mib.bin"
 
 # 4) Refresh the bundled NSC trust anchor (public cert; no secret in git).
-cp "$CERTS/ca.pem" "$ROOT/sample/src/main/res/raw/caddy_root_ca"
+cp "$CERTS/ca.pem" "$ROOT/instrumentation-tests/src/main/res/raw/caddy_root_ca"
 
 openssl x509 -in "$CERTS/cert.pem" -noout -subject -ext subjectAltName

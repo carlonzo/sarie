@@ -1,17 +1,21 @@
 package sarie.bridge
 
+import androidx.annotation.OptIn
 import java.util.Date
 import okhttp3.CertificatePinner
 import okio.ByteString.Companion.toByteString
 import org.chromium.net.ConnectionMigrationOptions
 import org.chromium.net.CronetEngine
 import org.chromium.net.DnsOptions
+import org.chromium.net.ExperimentalCronetEngine
+import org.chromium.net.ICronetEngineBuilder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@OptIn(markerClass = [ConnectionMigrationOptions.Experimental::class, DnsOptions.Experimental::class])
 class EngineSetupTest {
 
     private class PinCall(
@@ -24,7 +28,7 @@ class EngineSetupTest {
     private class RecordingBuilder(
         private val rejectMigration: Boolean = false,
         private val rejectDns: Boolean = false,
-    ) : SarieEngineBuilder {
+    ) : ICronetEngineBuilder() {
         val events = mutableListOf<String>()
         var quic: Boolean? = null
         var http2: Boolean? = null
@@ -37,35 +41,44 @@ class EngineSetupTest {
         var dns: DnsOptions? = null
         val pins = mutableListOf<PinCall>()
 
-        override fun enableQuic(enable: Boolean) {
+        override fun getSupportedConfigOptions(): Set<Int> =
+            setOf(CONNECTION_MIGRATION_OPTIONS, DNS_OPTIONS)
+
+        override fun enableQuic(enable: Boolean): ICronetEngineBuilder {
             events += "quic=$enable"
             quic = enable
+            return this
         }
 
-        override fun enableHttp2(enable: Boolean) {
+        override fun enableHttp2(enable: Boolean): ICronetEngineBuilder {
             events += "http2=$enable"
             http2 = enable
+            return this
         }
 
-        override fun enableBrotli(enable: Boolean) {
+        override fun enableBrotli(enable: Boolean): ICronetEngineBuilder {
             events += "brotli=$enable"
             brotli = enable
+            return this
         }
 
-        override fun setStoragePath(path: String) {
+        override fun setStoragePath(path: String): ICronetEngineBuilder {
             events += "storage=$path"
             recordedStorage = path
+            return this
         }
 
-        override fun enableHttpCache(cacheMode: Int, maxSize: Long) {
+        override fun enableHttpCache(cacheMode: Int, maxSize: Long): ICronetEngineBuilder {
             events += "cache=$cacheMode:$maxSize"
             this.cacheMode = cacheMode
             cacheMaxSize = maxSize
+            return this
         }
 
-        override fun enablePublicKeyPinningBypassForLocalTrustAnchors(enable: Boolean) {
+        override fun enablePublicKeyPinningBypassForLocalTrustAnchors(enable: Boolean): ICronetEngineBuilder {
             events += "bypass=$enable"
             pinBypass = enable
+            return this
         }
 
         override fun addPublicKeyPins(
@@ -73,22 +86,33 @@ class EngineSetupTest {
             pins: Set<ByteArray>,
             includeSubdomains: Boolean,
             expirationDate: Date,
-        ) {
+        ): ICronetEngineBuilder {
             events += "pins=$host:$includeSubdomains"
             this.pins += PinCall(host, pins, includeSubdomains, expirationDate)
+            return this
         }
 
-        override fun setConnectionMigrationOptions(options: ConnectionMigrationOptions) {
+        override fun setConnectionMigrationOptions(options: ConnectionMigrationOptions): ICronetEngineBuilder {
             if (rejectMigration) throw UnsupportedOperationException("provider rejected migration")
             events += "migration"
             migration = options
+            return this
         }
 
-        override fun setDnsOptions(options: DnsOptions) {
+        override fun setDnsOptions(options: DnsOptions): ICronetEngineBuilder {
             if (rejectDns) throw UnsupportedOperationException("provider rejected dns")
             events += "dns"
             dns = options
+            return this
         }
+
+        override fun getDefaultUserAgent(): String = "recording"
+        override fun build(): ExperimentalCronetEngine = throw UnsupportedOperationException()
+        override fun addQuicHint(host: String?, port: Int, alternatePort: Int): ICronetEngineBuilder = this
+        override fun enableSdch(enable: Boolean): ICronetEngineBuilder = this
+        override fun setExperimentalOptions(options: String?): ICronetEngineBuilder = this
+        override fun setLibraryLoader(loader: CronetEngine.Builder.LibraryLoader?): ICronetEngineBuilder = this
+        override fun setUserAgent(userAgent: String?): ICronetEngineBuilder = this
     }
 
     private val sha = "sha256/" + ByteArray(32) { 7 }.toByteString().base64()
@@ -98,16 +122,17 @@ class EngineSetupTest {
         val pins = CertificatePinner.Builder().add("example.com", sha).build().pins
         val translation = translatePins(pins)
         val recording = RecordingBuilder()
+        val builder = CronetEngine.Builder(recording)
         val storage = "/data/cache/cronet-cache"
 
-        applyEngineConfiguration(recording, storage, translation.groups) {
-            recording.enableQuic(false)
-            recording.enableHttp2(false)
-            recording.enableBrotli(true)
-            recording.setStoragePath("/evil")
-            recording.enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, 99L)
-            recording.enablePublicKeyPinningBypassForLocalTrustAnchors(true)
-            recording.addPublicKeyPins("evil.example", setOf(byteArrayOf(1)), true, Date(0))
+        applyEngineConfiguration(builder, storage, translation.groups) {
+            builder.enableQuic(false)
+            builder.enableHttp2(false)
+            builder.enableBrotli(true)
+            builder.setStoragePath("/evil")
+            builder.enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, 99L)
+            builder.enablePublicKeyPinningBypassForLocalTrustAnchors(true)
+            builder.addPublicKeyPins("evil.example", setOf(byteArrayOf(1)), true, Date(0))
         }
 
         val configureBrotli = recording.events.indexOf("brotli=true")
@@ -151,8 +176,9 @@ class EngineSetupTest {
     @Test
     fun `rejected migration options do not fail setup`() {
         val recording = RecordingBuilder(rejectMigration = true)
-        applyEngineConfiguration(recording, "/storage", emptyList()) {
-            recording.enableBrotli(true)
+        val builder = CronetEngine.Builder(recording)
+        applyEngineConfiguration(builder, "/storage", emptyList()) {
+            builder.enableBrotli(true)
         }
         assertNull(recording.migration)
         assertEquals(true, recording.dns?.enableStaleDns)
@@ -164,8 +190,9 @@ class EngineSetupTest {
     @Test
     fun `configure can turn stale dns off`() {
         val recording = RecordingBuilder()
-        applyEngineConfiguration(recording, "/storage", emptyList()) {
-            recording.setDnsOptions(DnsOptions.builder().enableStaleDns(false).build())
+        val builder = CronetEngine.Builder(recording)
+        applyEngineConfiguration(builder, "/storage", emptyList()) {
+            builder.setDnsOptions(DnsOptions.builder().enableStaleDns(false).build())
         }
         val defaults = recording.events.indexOf("dns")
         val override = recording.events.lastIndexOf("dns")
@@ -177,7 +204,8 @@ class EngineSetupTest {
     @Test
     fun `rejected dns options do not fail setup`() {
         val recording = RecordingBuilder(rejectDns = true)
-        applyEngineConfiguration(recording, "/storage", emptyList())
+        val builder = CronetEngine.Builder(recording)
+        applyEngineConfiguration(builder, "/storage", emptyList())
         assertNull(recording.dns)
         assertEquals(true, recording.migration?.enableDefaultNetworkMigration)
         assertEquals(false, recording.brotli)
