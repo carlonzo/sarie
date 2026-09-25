@@ -4,6 +4,7 @@ package sarie.bridge
 
 import sarie.bridge.mapping.OkHttpBridgeCallback
 import sarie.bridge.mapping.RequestBodyEvents
+import sarie.bridge.mapping.SarieTimingsMapper
 import java.io.IOException
 import java.net.ProtocolException
 import java.net.SocketTimeoutException
@@ -83,6 +84,7 @@ public object CronetBridge {
 
     private val loggedOnce = AtomicBoolean(false)
     private val listenerLoggedOnce = AtomicBoolean(false)
+    private val responseStartedLoggedOnce = AtomicBoolean(false)
 
     private const val CANCELED_MESSAGE = "Canceled"
     private const val PROXY_AUTH_MESSAGE =
@@ -209,6 +211,7 @@ public object CronetBridge {
 
         val events = BridgeEvents(call)
         var retried = false
+        var attempt = 1
         while (true) {
             events.requestHeadersStart()
             var reportedOutcome = false
@@ -223,6 +226,7 @@ public object CronetBridge {
                     ),
                     onResponseHeadersStart = { events.responseHeadersStart() },
                     call = call,
+                    attempt = attempt,
                 )
             } catch (e: IOException) {
                 events.requestFailed(e)
@@ -259,12 +263,20 @@ public object CronetBridge {
                     else events.requestFailed(e)
                     reportedOutcome = true
                     CallRegistry.unregister(call)
+
+                    // Bounded await + deliver attempt before retry or throw
+                    converted.callback.awaitAndDeliver()
+
                     if (!retried && isRetryable(e, call, request)) {
                         retried = true
+                        attempt++
                         continue
                     }
                     throw e
                 }
+
+                // Headers arrived! Dispatch onResponseStarted BEFORE responseHeadersEnd.
+                notifyResponseStarted(call, converted.callback, attempt)
 
                 val response = converted.getResponse()
                 events.responseHeadersEnd(response)
@@ -385,6 +397,33 @@ public object CronetBridge {
         } catch (t: Throwable) {
             if (listenerLoggedOnce.compareAndSet(false, true)) {
                 SarieBridge.logger?.log(Log.WARN, "SarieListener.onRouted threw; routing continues", t)
+            }
+        }
+    }
+
+    private fun notifyResponseStarted(call: Call, callback: OkHttpBridgeCallback, attempt: Int) {
+        val listener = SarieBridge.listener ?: return
+        val urlResponseInfo = callback.headersFuture.getNow(null) ?: return
+        val negotiatedProtocol = urlResponseInfo.negotiatedProtocol
+        val info = SarieResponseInfo(
+            protocol = SarieTimingsMapper.parseProtocol(negotiatedProtocol),
+            negotiatedProtocol = negotiatedProtocol,
+            httpStatusCode = urlResponseInfo.httpStatusCode,
+            wasCached = urlResponseInfo.wasCached(),
+            handoffAtMillis = callback.sentAtMillis,
+            headersAtMillis = callback.receivedHeadersAtMillis,
+            attempt = attempt,
+            isRedirect = callback.isRedirect,
+        )
+        try {
+            listener.onResponseStarted(call, info)
+        } catch (t: Throwable) {
+            if (responseStartedLoggedOnce.compareAndSet(false, true)) {
+                SarieBridge.logger?.log(
+                    Log.WARN,
+                    "SarieListener.onResponseStarted threw; response processing continues",
+                    t,
+                )
             }
         }
     }

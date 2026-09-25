@@ -35,17 +35,20 @@ import okio.Buffer
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetException
 import org.chromium.net.NetworkException
+import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UploadDataProvider
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import sarie.bridge.mapping.FakeRequestFinishedInfo
 
 /**
  * Bridge-glue tests for [CronetBridge]: bytecode shape of the exact-stock fallback, the Cronet
@@ -81,6 +84,8 @@ class CronetBridgeTest {
         var builderGate: Gate? = null
         var startGate: Gate? = null
         var responseInfo: UrlResponseInfo = FakeUrlResponseInfo()
+        var isRedirect = false
+        var rejectFinishedListener = false
 
         /**
          * Number of requests (in build order) whose start() fails pre-headers with a
@@ -95,7 +100,10 @@ class CronetBridgeTest {
             executor: Executor,
         ): UrlRequest.Builder {
             builderGate?.block()
-            return ScriptedBuilder(url, callback, this).also { builders.add(it) }
+            return ScriptedBuilder(url, callback, this).also {
+                it.rejectFinishedListener = rejectFinishedListener
+                builders.add(it)
+            }
         }
 
         override fun getVersionString(): String = "scripted"
@@ -120,6 +128,9 @@ class CronetBridgeTest {
     ) : UrlRequest.Builder() {
         var builtRequest: ScriptedUrlRequest? = null
             private set
+        var finishedListener: RequestFinishedInfo.Listener? = null
+            private set
+        var rejectFinishedListener = false
 
         override fun setHttpMethod(method: String): UrlRequest.Builder = this
         override fun addHeader(name: String, value: String): UrlRequest.Builder = this
@@ -127,6 +138,13 @@ class CronetBridgeTest {
         override fun setPriority(priority: Int): UrlRequest.Builder = this
         override fun setUploadDataProvider(provider: UploadDataProvider, executor: Executor): UrlRequest.Builder = this
         override fun allowDirectExecutor(): UrlRequest.Builder = this
+        override fun setRequestFinishedListener(
+            listener: RequestFinishedInfo.Listener,
+        ): UrlRequest.Builder {
+            if (rejectFinishedListener) throw UnsupportedOperationException("no finished listener")
+            finishedListener = listener
+            return this
+        }
         override fun build(): UrlRequest =
             ScriptedUrlRequest(callback, engine, engine.builders.count { it.builtRequest != null })
                 .also { builtRequest = it }
@@ -160,8 +178,21 @@ class CronetBridgeTest {
             if (cancelCalls == 0) {
                 if (buildIndex < engine.preHeaderFailures) {
                     callback.onFailed(this, engine.responseInfo, engine.preHeaderFailure)
+                    val finishedListener = engine.builders.getOrNull(buildIndex)?.finishedListener
+                    finishedListener?.onRequestFinished(
+                        FakeRequestFinishedInfo(
+                            url = engine.responseInfo.url,
+                            finishedReason = RequestFinishedInfo.FAILED,
+                            responseInfo = engine.responseInfo,
+                            exception = engine.preHeaderFailure,
+                        ),
+                    )
                 } else {
-                    callback.onResponseStarted(this, engine.responseInfo)
+                    if (engine.isRedirect) {
+                        callback.onRedirectReceived(this, engine.responseInfo, "https://example.com/redirected")
+                    } else {
+                        callback.onResponseStarted(this, engine.responseInfo)
+                    }
                 }
             }
         }
@@ -169,7 +200,19 @@ class CronetBridgeTest {
         override fun cancel() {
             cancelCalls++
             // Real engines deliver onCanceled for started requests; the bridge must cope.
-            if (startEntered) callback.onCanceled(this, engine.responseInfo)
+            if (startEntered) {
+                if (!engine.isRedirect) {
+                    callback.onCanceled(this, engine.responseInfo)
+                }
+                val finishedListener = engine.builders.getOrNull(buildIndex)?.finishedListener
+                finishedListener?.onRequestFinished(
+                    FakeRequestFinishedInfo(
+                        url = engine.responseInfo.url,
+                        finishedReason = RequestFinishedInfo.CANCELED,
+                        responseInfo = engine.responseInfo,
+                    ),
+                )
+            }
         }
 
         override fun followRedirect() {
@@ -858,6 +901,276 @@ class CronetBridgeTest {
 
         assertTrue(messages.any { it == "GET https://example.com/api -> cronet" })
         assertTrue(messages.any { it == "https://example.com/api -> h3" })
+    }
+
+    @Test
+    fun `onResponseStarted fires before application and network interceptors observe the response and before responseHeadersEnd and callEnd`() {
+        val engine = ScriptedCronetEngine()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
+        val order = mutableListOf<String>()
+        var observedInfo: SarieResponseInfo? = null
+
+        val listener = object : SarieListener {
+            override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+                order += "onResponseStarted"
+                observedInfo = info
+            }
+        }
+
+        val appInterceptor = Interceptor { chain ->
+            val response = chain.proceed(chain.request())
+            order += "applicationInterceptor"
+            response
+        }
+
+        val netInterceptor = Interceptor { chain ->
+            val response = chain.proceed(chain.request())
+            order += "networkInterceptor"
+            response
+        }
+
+        val eventListener = object : EventListener() {
+            override fun responseHeadersStart(call: Call) {
+                order += "responseHeadersStart"
+            }
+            override fun responseHeadersEnd(call: Call, response: Response) {
+                order += "responseHeadersEnd"
+            }
+            override fun callEnd(call: Call) {
+                order += "callEnd"
+            }
+        }
+
+        val client = OkHttpClient.Builder()
+            .eventListener(eventListener)
+            .build()
+
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                listener(listener)
+            },
+        )
+
+        val (call, innerChain) = cronetChain(client, "https://example.com/", network = listOf(netInterceptor))
+        val outerChain = RealInterceptorChain(
+            innerChain.call,
+            listOf(appInterceptor, Interceptor { CronetBridge.intercept(innerChain) }),
+            0,
+            null,
+            innerChain.request,
+            client,
+        )
+
+        val response = outerChain.proceed(outerChain.request)
+        response.close()
+        call.eventListener.callEnd(call)
+
+        assertEquals(
+            listOf(
+                "responseHeadersStart",
+                "onResponseStarted",
+                "responseHeadersEnd",
+                "networkInterceptor",
+                "applicationInterceptor",
+                "callEnd",
+            ),
+            order,
+        )
+
+        val info = checkNotNull(observedInfo)
+        assertEquals(SarieProtocol.HTTP_3, info.protocol)
+        assertEquals("h3", info.negotiatedProtocol)
+        assertEquals(200, info.httpStatusCode)
+        assertFalse(info.wasCached)
+        assertEquals(1, info.attempt)
+        assertFalse(info.isRedirect)
+        assertTrue(info.handoffAtMillis > 0L)
+        assertTrue(info.headersAtMillis >= info.handoffAtMillis)
+    }
+
+    @Test
+    fun `pre-headers transport failure with retry delivers attempt 1 onFinished before attempt 2 onResponseStarted`() {
+        val engine = ScriptedCronetEngine()
+        engine.preHeaderFailures = 1
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
+
+        val events = mutableListOf<String>()
+        val finishedAttempts = mutableListOf<Int>()
+        val startedAttempts = mutableListOf<Int>()
+
+        val listener = object : SarieListener {
+            override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+                events += "onResponseStarted:${info.attempt}"
+                startedAttempts += info.attempt
+            }
+
+            override fun onFinished(call: Call, timings: SarieTimings) {
+                events += "onFinished:${timings.attempt}"
+                finishedAttempts += timings.attempt
+            }
+        }
+
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                listener(listener)
+            },
+        )
+
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val response = CronetBridge.intercept(chain)
+        assertEquals(200, response.code)
+
+        // Attempt 1 onFinished must precede Attempt 2 onResponseStarted
+        assertEquals(listOf("onFinished:1", "onResponseStarted:2"), events)
+        assertEquals(listOf(1), finishedAttempts)
+        assertEquals(listOf(2), startedAttempts)
+
+        // Closing the response triggers attempt 2 onFinished
+        response.close()
+        assertEquals(listOf("onFinished:1", "onResponseStarted:2", "onFinished:2"), events)
+        assertEquals(listOf(1, 2), finishedAttempts)
+    }
+
+    @Test
+    fun `redirect emits onResponseStarted and late onFinished with isRedirect true`() {
+        val engine = ScriptedCronetEngine()
+        engine.isRedirect = true
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 302, negotiatedProtocol = "h2")
+
+        val startedLatch = CountDownLatch(1)
+        val finishedLatch = CountDownLatch(1)
+        var startedInfo: SarieResponseInfo? = null
+        var finishedTimings: SarieTimings? = null
+
+        val listener = object : SarieListener {
+            override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+                startedInfo = info
+                startedLatch.countDown()
+            }
+
+            override fun onFinished(call: Call, timings: SarieTimings) {
+                finishedTimings = timings
+                finishedLatch.countDown()
+            }
+        }
+
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                listener(listener)
+            },
+        )
+
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val response = CronetBridge.intercept(chain)
+        assertEquals(302, response.code)
+        response.close()
+
+        assertTrue(startedLatch.await(5, TimeUnit.SECONDS))
+        val info = checkNotNull(startedInfo)
+        assertTrue(info.isRedirect)
+        assertEquals(302, info.httpStatusCode)
+        assertEquals(SarieProtocol.HTTP_2, info.protocol)
+        assertEquals(1, info.attempt)
+
+        assertTrue(finishedLatch.await(5, TimeUnit.SECONDS))
+        val timings = checkNotNull(finishedTimings)
+        assertTrue(timings.isRedirect)
+        assertTrue(timings.deliveredLate)
+        assertEquals(SarieTimings.Result.CANCELED, timings.result)
+        assertEquals(1, timings.attempt)
+    }
+
+    @Test
+    fun `provider rejecting finished listener does not wait and still fires onResponseStarted`() {
+        val engine = ScriptedCronetEngine()
+        engine.rejectFinishedListener = true
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h2")
+
+        var startedInfo: SarieResponseInfo? = null
+        var finishedCalled = false
+
+        val listener = object : SarieListener {
+            override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+                startedInfo = info
+            }
+
+            override fun onFinished(call: Call, timings: SarieTimings) {
+                finishedCalled = true
+            }
+        }
+
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                listener(listener)
+            },
+        )
+
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val startNanos = System.nanoTime()
+        val response = CronetBridge.intercept(chain)
+        response.close()
+        val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos)
+
+        assertNotNull(startedInfo)
+        assertEquals(200, startedInfo!!.httpStatusCode)
+        assertFalse(finishedCalled)
+        assertTrue("Expected elapsedMs < 80 but was $elapsedMs", elapsedMs < 80)
+    }
+
+    @Test
+    fun `throwing onResponseStarted still returns the response`() {
+        val engine = ScriptedCronetEngine()
+        engine.responseInfo = FakeUrlResponseInfo(statusCode = 200, negotiatedProtocol = "h3")
+        SarieBridge.install(
+            engine,
+            SarieConfig {
+                policy(
+                    object : CronetPolicy {
+                        override val allowedOrigins: Set<String> = setOf("example.com")
+                    },
+                )
+                mapper(mapper)
+                listener(
+                    object : SarieListener {
+                        override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+                            throw IllegalStateException("host listener error")
+                        }
+                    },
+                )
+            },
+        )
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+        val response = CronetBridge.intercept(chain)
+        assertEquals(200, response.code)
+        response.close()
     }
 }
 
