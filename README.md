@@ -332,11 +332,17 @@ The debug logger prints `-> okhttp (reason=<value>)`. Use this table to understa
 
 ## Metrics
 
-Pass an optional `SarieListener` to `install`. `onRouted` runs on the caller thread before any I/O. The `reason` is null when the call is going to Cronet, and a `FallbackReason` when it is going to stock OkHttp. The `Call` is the correlation key: tags stay on `call.request()`.
+Pass an optional `SarieListener` to `install`:
 
-`onFinished` runs on Sarie's listener thread, once per Cronet `UrlRequest` (a transport retry reports twice). The argument is Cronet's `RequestFinishedInfo`: wire `receivedByteCount` and `sentByteCount`, DNS / connect / SSL / TTFB timestamps, `socketReused`, and the failure. Cronet has already decoded the body, so `receivedByteCount` is smaller than the string you read. A provider that rejects `setRequestFinishedListener` (some HttpEngine builds) skips `onFinished` for that engine.
+- `onRouted` runs on the caller thread before any network I/O begins. The `reason` is `null` when the call is routed to Cronet, and a `FallbackReason` when falling back to stock OkHttp. The `Call` is the correlation key: tags stay on `call.request()`.
+- `onResponseStarted` runs on the OkHttp caller thread inside the terminal hop when response headers arrive from Cronet, and *before* the `Response` is returned up the chain (before network interceptors, application interceptors like Sentry, and `EventListener.callEnd` see it). It carries `SarieResponseInfo` with the negotiated `SarieProtocol`, HTTP status code, cache status, bridge timestamps, attempt number, and redirect flag.
+- `onFinished` runs once per Cronet `UrlRequest` attempt (a transport retry reports twice). It delivers `SarieTimings`: phase durations in ms (`dnsMs`, `connectMs`, `tlsMs`, `sendMs`, `ttfbMs`, `totalMs`), raw epoch timestamps, socket reuse, wire byte counts (`sentBytes`, `receivedBytes`), error codes, and the final `Result` (`SUCCEEDED`, `FAILED`, `CANCELED`). Wire `receivedBytes` reflects compressed wire size, which is smaller than the decoded body.
 
-There are no process-wide counters. Count `onRouted` and `onFinished` in the listener if you need a total.
+**Delivery guarantee**: Unless the provider rejects finished listeners, `onFinished` runs before the caller's body read returns EOF / throws, before `close()` returns, and before a pre-header failure is thrown or retried. Otherwise it runs later on Sarie's listener thread with `deliveredLate = true`.
+
+Coarse live phase events via `UrlRequest.getStatus` polling are out of scope and a non-goal (polling adds JNI overhead and precision is bounded by the poll interval).
+
+There are no process-wide counters. Count callbacks in the listener if you need a total.
 
 ```kotlin
 SarieBridge.install(context) {
@@ -346,8 +352,13 @@ SarieBridge.install(context) {
             val operation = call.request().tag(Operation::class.java)
         }
 
-        override fun onFinished(call: Call, info: RequestFinishedInfo) {
-            val wireBytes = info.metrics.receivedByteCount
+        override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
+            val protocol = info.protocol // HTTP_3, HTTP_2, etc.
+        }
+
+        override fun onFinished(call: Call, timings: SarieTimings) {
+            val wireBytes = timings.receivedBytes
+            val ttfb = timings.ttfbMs
         }
     })
 }
@@ -372,7 +383,7 @@ Reddit published the result of moving Android feed traffic to HTTP/3: feed failu
 | Flipper / network interceptors blind | Network interceptors run before the Cronet hop. |
 | Fork and package relocation to A/B | No fork. `SarieListener.onRouted` says which transport and why. `okhttp.cronet.enabled=false` turns it off. |
 | Upstream OkHttp contract drift | The plugin's recipe registry fails the build on an unexpected OkHttp shape. |
-| Wire bytes, DNS, connect, TTFB | `SarieListener.onFinished` hands over Cronet's `RequestFinishedInfo`. |
+| Wire bytes, DNS, connect, TTFB | `SarieListener.onFinished` delivers `SarieTimings` (no Cronet types leak); `onResponseStarted` delivers headers and protocol before span/call close. |
 | Cold engine on the first request | Call `install` off the main thread early. Calls made before it returns use stock OkHttp and do not wait. |
 | Preconnect and request priority | One HEAD through the `OkHttpClient` after `install`, plus `addQuicHint`. Priority is the mapper. |
 | Stale DNS | On by default. `configure` can turn it off. |

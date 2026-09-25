@@ -69,8 +69,10 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   while the provider submits body work to the reader executor; one shared thread
   self-deadlocks until write timeout.
 - `FallbackReason.kt`: the pre-send deny enum delivered to `SarieListener.onRouted`.
-- `SarieListener.kt`: optional `onRouted` / `onFinished`. `onFinished` runs on
-  `RequestFinishedExecutor`, not `CronetExecutor`.
+- `SarieListener.kt`, `SarieResponseInfo.kt`, `SarieTimings.kt`, `SarieProtocol.kt`:
+  observer hooks and public metrics types (no Cronet types leak). `onRouted` and `onResponseStarted`
+  run on the OkHttp caller thread; `onFinished` delivers `SarieTimings` synchronously on the reader
+  thread (or via `RequestFinishedExecutor` with `deliveredLate = true` when delayed).
 - `RequestToUrlRequestMapper.kt`, `VerifiedOkHttpVersions.kt`:
   optional `UrlRequest.Builder` hook (default no-op) and generated support.
 
