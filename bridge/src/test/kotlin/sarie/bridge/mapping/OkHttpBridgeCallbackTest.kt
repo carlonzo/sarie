@@ -21,6 +21,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sarie.bridge.RequestFinishedExecutor
 import sarie.bridge.SarieBridge
 import sarie.bridge.SarieConfig
 import sarie.bridge.SarieListener
@@ -447,49 +448,47 @@ class OkHttpBridgeCallbackTest {
     @Test
     fun `gate never delivers twice under races`() {
         val call = OkHttpClient().newCall(Request.Builder().url("https://example.com/").build())
-        val iterations = 500
-
-        for (i in 0 until iterations) {
-            val deliveryCount = AtomicInteger(0)
-            SarieBridge.install(
-                FakeCronetEngine(),
-                SarieConfig {
-                    listener(object : SarieListener {
-                        override fun onFinished(call: Call, timings: SarieTimings) {
-                            deliveryCount.incrementAndGet()
-                        }
-                    })
-                },
-            )
-
+        val deliveries = AtomicInteger(0)
+        SarieBridge.install(
+            FakeCronetEngine(),
+            SarieConfig {
+                listener(object : SarieListener {
+                    override fun onFinished(call: Call, timings: SarieTimings) {
+                        deliveries.incrementAndGet()
+                    }
+                })
+            },
+        )
+        val iterations = 200
+        repeat(iterations) { i ->
             val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000, call = call)
             cb.finishedListenerActive.set(true)
-            val info = FakeRequestFinishedInfo(finishedReason = RequestFinishedInfo.SUCCEEDED)
-
-            val readyLatch = CountDownLatch(2)
-            val startLatch = CountDownLatch(1)
-            val doneLatch = CountDownLatch(2)
-
-            val t1 = Thread {
-                readyLatch.countDown()
-                startLatch.await()
-                cb.tryDeliver(info, deliveredLate = false)
-                doneLatch.countDown()
+            val request = newRequest(cb)
+            cb.onResponseStarted(request, info)
+            val source = cb.bodySourceFuture.get(1, TimeUnit.SECONDS)
+            val start = CountDownLatch(1)
+            // The reader reaches EOF while the finished listener fires on another thread.
+            request.readHandler = { cb.onSucceeded(request, info) }
+            val listenerThread = Thread {
+                start.await()
+                cb.onFinishedInfoReceived(
+                    FakeRequestFinishedInfo(finishedReason = RequestFinishedInfo.SUCCEEDED),
+                )
             }
-
-            val t2 = Thread {
-                readyLatch.countDown()
-                startLatch.await()
-                cb.tryDeliver(info, deliveredLate = true)
-                doneLatch.countDown()
-            }
-
-            t1.start()
-            t2.start()
-            readyLatch.await()
-            startLatch.countDown()
-            assertTrue("iteration $i timed out waiting for race", doneLatch.await(2, TimeUnit.SECONDS))
-            assertEquals("iteration $i delivered count mismatch", 1, deliveryCount.get())
+            listenerThread.start()
+            start.countDown()
+            assertEquals("iteration $i", -1L, source.read(Buffer(), 1024))
+            listenerThread.join(2_000)
         }
+        // The single scheduled thread runs tasks in delay order, so this sentinel runs after every
+        // late-path task, each of which must find the gate taken or take it exactly once.
+        val drained = CountDownLatch(1)
+        RequestFinishedExecutor.executor.schedule(
+            { drained.countDown() },
+            OkHttpBridgeCallback.FINISHED_INFO_WAIT_MS + 1,
+            TimeUnit.MILLISECONDS,
+        )
+        assertTrue(drained.await(5, TimeUnit.SECONDS))
+        assertEquals(iterations, deliveries.get())
     }
 }

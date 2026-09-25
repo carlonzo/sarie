@@ -1,7 +1,7 @@
 package sarie.bridge
 
-import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import okhttp3.Call
 
 /**
@@ -53,13 +53,13 @@ public interface SarieListener {
 }
 
 /**
- * Single daemon thread for [SarieListener.onFinished] fallback delivery.
- * Not [CronetExecutor]: a slow host listener must not stall body reads.
- * The thread starts on the first finished request that uses the fallback path.
+ * Single daemon thread for late [SarieListener.onFinished] delivery (redirect hops, abandoned
+ * bodies, reader wait timed out). Not [CronetExecutor]: a slow host listener must not stall body
+ * reads. The thread starts on the first finished request.
  */
 internal object RequestFinishedExecutor {
-    val executor: Executor by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        Executors.newSingleThreadExecutor { runnable ->
+    val executor: ScheduledExecutorService by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        Executors.newSingleThreadScheduledExecutor { runnable ->
             Thread(runnable, "sarie-request-finished").apply { isDaemon = true }
         }
     }

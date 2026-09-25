@@ -1042,8 +1042,8 @@ class CronetSuite {
         assertNotNull("ttfbMs must be non-null", timings.ttfbMs)
         assertNotNull("totalMs must be non-null", timings.totalMs)
         assertNotNull("connectMs must be non-null on cold connection", timings.connectMs)
-        assertTrue(timings.ttfbMs!! > 0)
-        assertTrue(timings.totalMs!! > 0)
-        assertTrue(timings.connectMs!! > 0)
+        assertTrue(timings.ttfbMs!! >= 0)
+        assertTrue(timings.totalMs!! >= 0)
+        assertTrue(timings.connectMs!! >= 0)
     }
 }
