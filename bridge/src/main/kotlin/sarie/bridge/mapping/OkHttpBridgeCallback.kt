@@ -22,15 +22,21 @@ import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
-import sarie.bridge.SarieBridge
+import okhttp3.Call
 import okio.Buffer
 import okio.Source
 import okio.Timeout
 import org.chromium.net.CronetException
+import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
+import sarie.bridge.RequestFinishedExecutor
+import sarie.bridge.SarieBridge
 
 /**
  * An implementation of Cronet's callback. This is the heart of the bridge and deals with most of
@@ -48,12 +54,15 @@ import org.chromium.net.UrlResponseInfo
 internal class OkHttpBridgeCallback(
     readTimeoutMillis: Long,
     private val onResponseHeadersStart: (() -> Unit)? = null,
+    val call: Call? = null,
+    val attempt: Int = 1,
 ) : UrlRequest.Callback() {
 
-    /** The byte buffer capacity for reading Cronet response bodies. */
-    private companion object {
-        const val CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024
-        const val CANCELED_MESSAGE = "Canceled"
+    internal companion object {
+        const val FINISHED_INFO_WAIT_MS = 100L
+        private const val CRONET_BYTE_BUFFER_CAPACITY = 32 * 1024
+        private const val CANCELED_MESSAGE = "Canceled"
+        private val finishedThrewLogged = AtomicBoolean(false)
     }
 
     /**
@@ -72,8 +81,6 @@ internal class OkHttpBridgeCallback(
 
     /** The read timeout as specified by OkHttp. */
     private val readTimeoutMillis: Long =
-        // So that we don't have to special case infinity. Int.MAX_VALUE is ~infinity for all
-        // practical use cases.
         if (readTimeoutMillis == 0L) Int.MAX_VALUE.toLong() else readTimeoutMillis
 
     /** The response headers. */
@@ -83,6 +90,23 @@ internal class OkHttpBridgeCallback(
     @Volatile
     var responseHeadersDelivered: Boolean = false
         private set
+
+    /** Future completed when Cronet dispatches finished info. */
+    val finishedInfoFuture: CompletableFuture<RequestFinishedInfo> = CompletableFuture()
+
+    /** Set to true when a finished listener was successfully attached to the Cronet request. */
+    val finishedListenerActive: AtomicBoolean = AtomicBoolean(false)
+
+    /** Delivery gate: at most once per request attempt. */
+    val delivered: AtomicBoolean = AtomicBoolean(false)
+
+    /** Whether this attempt was a redirect. */
+    @Volatile
+    var isRedirect: Boolean = false
+        private set
+
+    private val readerAwaiting = AtomicBoolean(false)
+    private val readerDoneLatch = CountDownLatch(1)
 
     private fun deliverResponseHeaders(urlResponseInfo: UrlResponseInfo) {
         responseHeadersDelivered = true
@@ -125,9 +149,7 @@ internal class OkHttpBridgeCallback(
         urlResponseInfo: UrlResponseInfo,
         nextUrl: String,
     ) {
-        // We never follow redirects inside Cronet: pass the 3xx upstream to OkHttp's follow-up
-        // logic. There is no way to retrieve a redirect response's body with Cronet's APIs, so
-        // provide an empty one.
+        isRedirect = true
         receivedHeadersAtMillis = System.currentTimeMillis()
         deliverResponseHeaders(urlResponseInfo)
         check(headersFuture.complete(urlResponseInfo))
@@ -155,22 +177,14 @@ internal class OkHttpBridgeCallback(
         callbackResults.add(CallbackResult(CallbackStep.ON_SUCCESS, null))
     }
 
-    // urlResponseInfo is null when the failure precedes any response (DNS, connect, TLS, pins).
-    // A non-null Kotlin parameter would throw inside Cronet's callback, the futures would never
-    // complete, and the call would hang until the read timeout.
     override fun onFailed(
         urlRequest: UrlRequest,
         urlResponseInfo: UrlResponseInfo?,
         e: CronetException,
     ) {
-        // If this was called before we start reading the body, the exception will propagate in
-        // the futures providing headers and the body wrapper.
         if (headersFuture.completeExceptionally(e) && bodySourceFuture.completeExceptionally(e)) {
             return
         }
-
-        // If this was called as a reaction to a read() call, the read result will propagate the
-        // exception.
         callbackResults.add(CallbackResult(CallbackStep.ON_FAILED, e))
     }
 
@@ -178,9 +192,6 @@ internal class OkHttpBridgeCallback(
         canceled.set(true)
         callbackResults.add(CallbackResult(CallbackStep.ON_CANCELED, null))
 
-        // If there's nobody listening it's possible that the cancellation happened before we even
-        // received anything from the server. In that case inform the thread that's awaiting the
-        // server response as well. This is a no-op if the futures were already set.
         val e = IOException(CANCELED_MESSAGE)
         headersFuture.completeExceptionally(e)
         bodySourceFuture.completeExceptionally(e)
@@ -188,13 +199,97 @@ internal class OkHttpBridgeCallback(
 
     private fun canceledError(): IOException = IOException(CANCELED_MESSAGE)
 
+    /**
+     * Called on the reader / caller thread to await finished info and deliver synchronously.
+     * Returns true if finished info was delivered on this thread; false if timed out, already
+     * delivered, or if no finished listener was active.
+     */
+    fun awaitAndDeliver(timeoutMs: Long = FINISHED_INFO_WAIT_MS): Boolean {
+        if (!finishedListenerActive.get()) return false
+        readerAwaiting.set(true)
+        try {
+            val info = try {
+                if (timeoutMs <= 0L) {
+                    finishedInfoFuture.getNow(null)
+                } else {
+                    finishedInfoFuture.get(timeoutMs, TimeUnit.MILLISECONDS)
+                }
+            } catch (_: TimeoutException) {
+                null
+            } catch (_: ExecutionException) {
+                null
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                null
+            }
+            if (info != null) {
+                return tryDeliver(info, deliveredLate = false)
+            }
+        } finally {
+            readerAwaiting.set(false)
+            readerDoneLatch.countDown()
+        }
+        return false
+    }
+
+    /**
+     * Delivers [RequestFinishedInfo] mapped to [SarieTimings] through the single-delivery gate.
+     * Swallows and logs any exception thrown by the host listener.
+     */
+    fun tryDeliver(info: RequestFinishedInfo, deliveredLate: Boolean): Boolean {
+        if (!delivered.compareAndSet(false, true)) {
+            return false
+        }
+        val currentCall = call ?: return true
+        val listener = SarieBridge.listener ?: return true
+        val timings = SarieTimingsMapper.map(
+            info = info,
+            attempt = attempt,
+            isRedirect = isRedirect,
+            deliveredLate = deliveredLate,
+        )
+        try {
+            listener.onFinished(currentCall, timings)
+        } catch (t: Throwable) {
+            if (finishedThrewLogged.compareAndSet(false, true)) {
+                SarieBridge.logger?.log(Log.WARN, "SarieListener.onFinished threw", t)
+            }
+        }
+        return true
+    }
+
+    /**
+     * Invoked when Cronet's finished listener dispatches finished info.
+     * Runs direct on Cronet's thread; completes the future and schedules fallback delivery.
+     */
+    fun onFinishedInfoReceived(info: RequestFinishedInfo) {
+        finishedInfoFuture.complete(info)
+        scheduleFallbackIfNeeded(info)
+    }
+
+    private fun scheduleFallbackIfNeeded(info: RequestFinishedInfo) {
+        RequestFinishedExecutor.executor.execute {
+            if (delivered.get()) return@execute
+            if (isRedirect) {
+                tryDeliver(info, deliveredLate = true)
+                return@execute
+            }
+            if (readerDoneLatch.count > 0) {
+                try {
+                    readerDoneLatch.await(FINISHED_INFO_WAIT_MS + 50L, TimeUnit.MILLISECONDS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+            }
+            tryDeliver(info, deliveredLate = true)
+        }
+    }
+
     /** A bridge between Cronet's asynchronous callbacks and OkHttp's blocking stream-like reads. */
     private inner class CronetBodySource : Source {
 
-        /** Used for reading data from the network and for writing it downstream. */
         private val buffer = ByteBuffer.allocateDirect(CRONET_BYTE_BUFFER_CAPACITY)
 
-        /** Whether the close() method has been called. */
         @Volatile
         private var closed = false
 
@@ -210,27 +305,22 @@ internal class OkHttpBridgeCallback(
                 return -1
             }
 
-            // A caller requesting 0 bytes doesn't need a network read.
             if (byteCount == 0L) {
                 return 0
             }
 
-            // When entering read() with buffer.position() == 0 the buffer is definitely empty
-            // (we always drain it fully downstream before clearing), so a network read is needed.
             if (buffer.position() == 0) {
                 if (fillBuffer()) {
-                    // Cronet leaves the bytes between position 0 and position; flip to read mode.
                     buffer.flip()
                     check(buffer.hasRemaining()) { "Buffer should have remaining bytes after flip" }
                 } else {
-                    return -1 // End of stream
+                    return -1
                 }
             }
 
             val bytesWritten = copyByteBufferToOkioBuffer(buffer, sink, byteCount)
             check(bytesWritten > 0) { "Bytes written should be positive" }
 
-            // Clear the buffer if it became empty again so it can be refilled on the next read.
             if (!buffer.hasRemaining()) {
                 buffer.clear()
             }
@@ -238,12 +328,6 @@ internal class OkHttpBridgeCallback(
             return bytesWritten.toLong()
         }
 
-        /**
-         * Reads data from the network to fill the buffer. Always requests up to the entire buffer
-         * capacity - larger reads amortize Cronet's per-read overhead (upstream issue #47).
-         *
-         * @return whether any bytes were read; false for onCanceled/onFailed/onSucceeded.
-         */
         private fun fillBuffer(): Boolean {
             check(buffer.position() == 0) { "Buffer position is not 0" }
             check(buffer.limit() == buffer.capacity()) { "Buffer limit is not capacity" }
@@ -259,7 +343,6 @@ internal class OkHttpBridgeCallback(
             }
 
             if (result == null) {
-                // Either poll was interrupted or it timed out.
                 currentRequest.cancel()
                 throw IOException("Timed out reading the response body")
             }
@@ -267,25 +350,29 @@ internal class OkHttpBridgeCallback(
             return when (result.callbackStep) {
                 CallbackStep.ON_FAILED -> {
                     finished.set(true)
+                    awaitAndDeliver()
                     throw IOException(result.exception)
                 }
                 CallbackStep.ON_SUCCESS -> {
                     finished.set(true)
+                    awaitAndDeliver()
                     false
                 }
-                CallbackStep.ON_CANCELED -> throw canceledError()
+                CallbackStep.ON_CANCELED -> {
+                    finished.set(true)
+                    awaitAndDeliver()
+                    throw canceledError()
+                }
                 CallbackStep.ON_READ_COMPLETED -> true
             }
         }
 
-        /** Copies data from the ByteBuffer to the okio Buffer, up to byteCount bytes. */
         private fun copyByteBufferToOkioBuffer(from: ByteBuffer, to: Buffer, byteCount: Long): Int {
             return if (from.remaining() <= byteCount) {
                 to.write(from)
             } else {
                 val originalLimit = from.limit()
                 try {
-                    // Buffer#write(ByteBuffer) has no byteCount overload; clamp via the limit.
                     from.limit(from.position() + byteCount.toInt())
                     to.write(from)
                 } finally {
@@ -303,6 +390,7 @@ internal class OkHttpBridgeCallback(
             closed = true
             if (!finished.get()) {
                 request?.cancel()
+                awaitAndDeliver()
             }
         }
     }

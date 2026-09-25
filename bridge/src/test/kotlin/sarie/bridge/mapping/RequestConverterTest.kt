@@ -4,7 +4,10 @@ import sarie.bridge.RequestToUrlRequestMapper
 import sarie.bridge.SarieBridge
 import sarie.bridge.SarieConfig
 import sarie.bridge.SarieListener
+import sarie.bridge.SarieTimings
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -82,27 +85,33 @@ class RequestConverterTest {
     @Test
     fun `throwing onFinished is swallowed and later calls still deliver`() {
         val request = get()
-        val call = OkHttpClient().newCall(request)
+        val call1 = OkHttpClient().newCall(request)
+        val call2 = OkHttpClient().newCall(request)
         var delivered = 0
+        val latch = CountDownLatch(2)
         SarieBridge.install(
             engine,
             SarieConfig {
                 listener(
                     object : SarieListener {
-                        override fun onFinished(call: Call, info: RequestFinishedInfo) {
+                        override fun onFinished(call: Call, timings: SarieTimings) {
                             delivered++
+                            latch.countDown()
                             throw IllegalStateException("host listener")
                         }
                     },
                 )
             },
         )
-        converter().convert(request, 5_000, 5_000, call = call)
-        val finished = engine.builders.single().finishedListener!!
+        converter().convert(request, 5_000, 5_000, call = call1)
+        val finished1 = engine.builders.first().finishedListener!!
 
-        // Called directly, as Cronet's posted task would: nothing may escape to the thread.
-        finished.onRequestFinished(FinishedInfo)
-        finished.onRequestFinished(FinishedInfo)
+        converter().convert(request, 5_000, 5_000, call = call2)
+        val finished2 = engine.builders.last().finishedListener!!
+
+        finished1.onRequestFinished(FinishedInfo)
+        finished2.onRequestFinished(FinishedInfo)
+        assertTrue(latch.await(2, TimeUnit.SECONDS))
         assertEquals(2, delivered)
     }
 

@@ -1,17 +1,37 @@
 package sarie.bridge.mapping
 
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import okhttp3.Call
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okio.Buffer
+import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import sarie.bridge.SarieBridge
+import sarie.bridge.SarieConfig
+import sarie.bridge.SarieListener
+import sarie.bridge.SarieTimings
 
 class OkHttpBridgeCallbackTest {
+
+    @After
+    fun tearDown() {
+        SarieBridge.uninstall()
+    }
 
     private val info: UrlResponseInfo = FakeUrlResponseInfo()
 
@@ -282,5 +302,194 @@ class OkHttpBridgeCallbackTest {
     fun `readTimeoutMillis zero means effectively infinite`() {
         // Must not throw; 0 is OkHttp's "no timeout".
         OkHttpBridgeCallback(readTimeoutMillis = 0)
+    }
+
+    @Test
+    fun `finished info arriving just after ON_SUCCESS is delivered before read returns -1, on the reader thread, deliveredLate = false`() {
+        val deliveredTimings = AtomicReference<SarieTimings>()
+        val deliveryThread = AtomicReference<Thread>()
+        val call = OkHttpClient().newCall(Request.Builder().url("https://example.com/").build())
+
+        SarieBridge.install(
+            FakeCronetEngine(),
+            SarieConfig {
+                listener(object : SarieListener {
+                    override fun onFinished(call: Call, timings: SarieTimings) {
+                        deliveredTimings.set(timings)
+                        deliveryThread.set(Thread.currentThread())
+                    }
+                })
+            },
+        )
+
+        val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000, call = call)
+        cb.finishedListenerActive.set(true)
+        val request = newRequest(cb)
+        cb.onResponseStarted(request, info)
+        val source = cb.bodySourceFuture.get(1, TimeUnit.SECONDS)
+
+        request.readHandler = {
+            cb.onSucceeded(request, info)
+            cb.onFinishedInfoReceived(
+                FakeRequestFinishedInfo(
+                    metrics = FakeMetrics(totalTimeMs = 42L),
+                    finishedReason = RequestFinishedInfo.SUCCEEDED,
+                ),
+            )
+        }
+
+        val readerThread = Thread.currentThread()
+        val readResult = source.read(Buffer(), 1024)
+
+        assertEquals(-1L, readResult)
+        assertNotNull(deliveredTimings.get())
+        assertEquals(readerThread, deliveryThread.get())
+        assertFalse(deliveredTimings.get()!!.deliveredLate)
+        assertEquals(42L, deliveredTimings.get()!!.totalMs)
+    }
+
+    @Test
+    fun `finished info never arriving - read returns -1 after wait bound, later arrival delivered once with deliveredLate = true`() {
+        val deliveredTimings = AtomicReference<SarieTimings>()
+        val deliveryThread = AtomicReference<Thread>()
+        val call = OkHttpClient().newCall(Request.Builder().url("https://example.com/").build())
+        val fallbackLatch = CountDownLatch(1)
+
+        SarieBridge.install(
+            FakeCronetEngine(),
+            SarieConfig {
+                listener(object : SarieListener {
+                    override fun onFinished(call: Call, timings: SarieTimings) {
+                        deliveredTimings.set(timings)
+                        deliveryThread.set(Thread.currentThread())
+                        fallbackLatch.countDown()
+                    }
+                })
+            },
+        )
+
+        val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000, call = call)
+        cb.finishedListenerActive.set(true)
+        val request = newRequest(cb)
+        cb.onResponseStarted(request, info)
+        val source = cb.bodySourceFuture.get(1, TimeUnit.SECONDS)
+
+        request.readHandler = {
+            cb.onSucceeded(request, info)
+        }
+
+        val readerThread = Thread.currentThread()
+        val start = System.currentTimeMillis()
+        val readResult = source.read(Buffer(), 1024)
+        val elapsed = System.currentTimeMillis() - start
+
+        assertEquals(-1L, readResult)
+        assertTrue("expected wait for bound >= 90ms, got $elapsed", elapsed >= 90L)
+        assertNull(deliveredTimings.get())
+
+        cb.onFinishedInfoReceived(
+            FakeRequestFinishedInfo(
+                metrics = FakeMetrics(totalTimeMs = 99L),
+                finishedReason = RequestFinishedInfo.SUCCEEDED,
+            ),
+        )
+
+        assertTrue(fallbackLatch.await(2, TimeUnit.SECONDS))
+        assertNotNull(deliveredTimings.get())
+        assertTrue(deliveredTimings.get()!!.deliveredLate)
+        assertNotEquals(readerThread, deliveryThread.get())
+        assertEquals(99L, deliveredTimings.get()!!.totalMs)
+    }
+
+    @Test
+    fun `close mid-body delivers CANCELED before returning when info arrives within bound`() {
+        val deliveredTimings = AtomicReference<SarieTimings>()
+        val deliveryThread = AtomicReference<Thread>()
+        val call = OkHttpClient().newCall(Request.Builder().url("https://example.com/").build())
+
+        SarieBridge.install(
+            FakeCronetEngine(),
+            SarieConfig {
+                listener(object : SarieListener {
+                    override fun onFinished(call: Call, timings: SarieTimings) {
+                        deliveredTimings.set(timings)
+                        deliveryThread.set(Thread.currentThread())
+                    }
+                })
+            },
+        )
+
+        val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000, call = call)
+        cb.finishedListenerActive.set(true)
+        val request = newRequest(cb)
+        cb.onResponseStarted(request, info)
+        val source = cb.bodySourceFuture.get(1, TimeUnit.SECONDS)
+
+        request.cancelHandler = {
+            cb.onFinishedInfoReceived(
+                FakeRequestFinishedInfo(
+                    metrics = FakeMetrics(totalTimeMs = 15L),
+                    finishedReason = RequestFinishedInfo.CANCELED,
+                ),
+            )
+        }
+
+        val callerThread = Thread.currentThread()
+        source.close()
+
+        assertNotNull(deliveredTimings.get())
+        assertEquals(callerThread, deliveryThread.get())
+        assertEquals(SarieTimings.Result.CANCELED, deliveredTimings.get()!!.result)
+        assertFalse(deliveredTimings.get()!!.deliveredLate)
+        assertEquals(1, request.cancelCalls)
+    }
+
+    @Test
+    fun `gate never delivers twice under races`() {
+        val call = OkHttpClient().newCall(Request.Builder().url("https://example.com/").build())
+        val iterations = 500
+
+        for (i in 0 until iterations) {
+            val deliveryCount = AtomicInteger(0)
+            SarieBridge.install(
+                FakeCronetEngine(),
+                SarieConfig {
+                    listener(object : SarieListener {
+                        override fun onFinished(call: Call, timings: SarieTimings) {
+                            deliveryCount.incrementAndGet()
+                        }
+                    })
+                },
+            )
+
+            val cb = OkHttpBridgeCallback(readTimeoutMillis = 1_000, call = call)
+            cb.finishedListenerActive.set(true)
+            val info = FakeRequestFinishedInfo(finishedReason = RequestFinishedInfo.SUCCEEDED)
+
+            val readyLatch = CountDownLatch(2)
+            val startLatch = CountDownLatch(1)
+            val doneLatch = CountDownLatch(2)
+
+            val t1 = Thread {
+                readyLatch.countDown()
+                startLatch.await()
+                cb.tryDeliver(info, deliveredLate = false)
+                doneLatch.countDown()
+            }
+
+            val t2 = Thread {
+                readyLatch.countDown()
+                startLatch.await()
+                cb.tryDeliver(info, deliveredLate = true)
+                doneLatch.countDown()
+            }
+
+            t1.start()
+            t2.start()
+            readyLatch.await()
+            startLatch.countDown()
+            assertTrue("iteration $i timed out waiting for race", doneLatch.await(2, TimeUnit.SECONDS))
+            assertEquals("iteration $i delivered count mismatch", 1, deliveryCount.get())
+        }
     }
 }

@@ -106,6 +106,9 @@ class FakeUrlRequest(private val builder: FakeUrlRequestBuilder) : UrlRequest() 
     /** Scripted reaction to read(); invoked synchronously on the caller's thread. */
     var readHandler: ((ByteBuffer) -> Unit)? = null
 
+    /** Scripted reaction to cancel(); invoked synchronously on the caller's thread. */
+    var cancelHandler: (() -> Unit)? = null
+
     val callback: UrlRequest.Callback get() = builder.callback
 
     override fun start() {
@@ -114,6 +117,7 @@ class FakeUrlRequest(private val builder: FakeUrlRequestBuilder) : UrlRequest() 
 
     override fun cancel() {
         cancelCalls++
+        cancelHandler?.invoke()
     }
 
     override fun followRedirect() {

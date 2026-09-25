@@ -116,12 +116,14 @@ public abstract interface annotation class sarie/bridge/SarieInternalApi : java/
 }
 
 public abstract interface class sarie/bridge/SarieListener {
-	public fun onFinished (Lokhttp3/Call;Lorg/chromium/net/RequestFinishedInfo;)V
+	public fun onFinished (Lokhttp3/Call;Lsarie/bridge/SarieTimings;)V
+	public fun onResponseStarted (Lokhttp3/Call;Lsarie/bridge/SarieResponseInfo;)V
 	public fun onRouted (Lokhttp3/Call;Lsarie/bridge/FallbackReason;)V
 }
 
 public final class sarie/bridge/SarieListener$DefaultImpls {
-	public static fun onFinished (Lsarie/bridge/SarieListener;Lokhttp3/Call;Lorg/chromium/net/RequestFinishedInfo;)V
+	public static fun onFinished (Lsarie/bridge/SarieListener;Lokhttp3/Call;Lsarie/bridge/SarieTimings;)V
+	public static fun onResponseStarted (Lsarie/bridge/SarieListener;Lokhttp3/Call;Lsarie/bridge/SarieResponseInfo;)V
 	public static fun onRouted (Lsarie/bridge/SarieListener;Lokhttp3/Call;Lsarie/bridge/FallbackReason;)V
 }
 
