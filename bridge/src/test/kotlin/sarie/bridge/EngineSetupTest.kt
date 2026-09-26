@@ -158,6 +158,7 @@ class EngineSetupTest {
         assertEquals(true, recording.migration?.enablePathDegradationMigration)
         assertEquals(true, recording.dns?.enableStaleDns)
         assertEquals(true, recording.dns?.preestablishConnectionsToStaleDnsResults)
+        assertEquals(true, recording.dns?.persistHostCache)
 
         // addPublicKeyPins appends. Configure's pin stays; Sarie's pin is applied after it.
         assertEquals(listOf("evil.example", "example.com"), recording.pins.map { it.host })
