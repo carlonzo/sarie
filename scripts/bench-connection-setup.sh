@@ -14,7 +14,7 @@ CLASS=sarie.instrumentation.bench.ConnectionSetupBench
 echo "label,launch,host,stack,phase,position,proto,reused,dns,conn,tls,ttfb,wall"
 run() { # label launch
   adb logcat -c
-  adb shell am instrument -w -e bench true -e label "$1" -e launch "$2" -e class "$CLASS" "$RUNNER" >&2
+  adb shell am instrument -w -e label "$1" -e launch "$2" -e class "$CLASS" "$RUNNER" >&2
   adb logcat -d -s SarieBench:I | grep -o "BENCH,$1,$2,.*" | cut -d, -f2-
 }
 for i in $(seq 1 "$RUNS"); do adb shell pm clear sarie.instrumentation >&2; run fresh "$i"; done

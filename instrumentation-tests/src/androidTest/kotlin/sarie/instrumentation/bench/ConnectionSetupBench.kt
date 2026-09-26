@@ -27,7 +27,6 @@ import org.chromium.net.QuicOptions
 import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import sarie.bridge.CronetOptOut
 import sarie.bridge.DefaultPolicy
@@ -41,7 +40,7 @@ import sarie.bridge.SarieTimings
  * Connection-setup benchmark: stock OkHttp vs Sarie vs a plain CronetEngine, cold then warm, one
  * request each per host. One `am instrument` run is one app launch; `scripts/bench-connection-setup.sh`
  * runs it N times (with and without `pm clear`) to separate first-launch from persisted state.
- * Skipped unless the instrumentation arg `bench=true` is set. Emits `SarieBench` logcat CSV rows.
+ * Excluded from the Gradle connected suites (`notPackage`). Emits `SarieBench` logcat CSV rows.
  */
 class ConnectionSetupBench {
 
@@ -58,7 +57,10 @@ class ConnectionSetupBench {
 
     @Test
     fun connectionSetup() {
-        assumeTrue("set -e bench true", args.getString("bench") == "true")
+        // Short QUIC idle timeout (both Cronet engines) so the resume phase gets a fresh connection.
+        // Built inline, not in a helper: a QuicOptions return type breaks JUnit's method scan on
+        // the minified app, where R8 strips the unused class.
+        val shortIdle = QuicOptions.builder().setIdleConnectionTimeoutSeconds(IDLE_SECONDS).build()
         val context: Context = ApplicationProvider.getApplicationContext()
 
         val sarieTimings = ConcurrentHashMap<Call, SarieTimings>()
@@ -74,7 +76,7 @@ class ConnectionSetupBench {
                 })
                 configure { b ->
                     hosts.forEach { b.addQuicHint(it.first, 443, 443) }
-                    b.setQuicOptions(shortIdle())
+                    b.setQuicOptions(shortIdle)
                 }
             },
         )
@@ -84,7 +86,7 @@ class ConnectionSetupBench {
             .setStoragePath(File(context.cacheDir, "bench-cronet").apply { mkdirs() }.absolutePath)
             .enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, 0L)
             .apply { hosts.forEach { addQuicHint(it.first, 443, 443) } }
-            .setQuicOptions(shortIdle())
+            .setQuicOptions(shortIdle)
             .build()
 
         val stockEvents = StockEvents()
@@ -225,9 +227,6 @@ class ConnectionSetupBench {
         override fun secureConnectEnd(call: Call, handshake: Handshake?) { m(call).tlsEnd = now() }
         override fun responseHeadersStart(call: Call) { m(call).headersStart = now() }
     }
-
-    // Short QUIC idle timeout (both Cronet engines) so the resume phase gets a fresh connection.
-    private fun shortIdle() = QuicOptions.builder().setIdleConnectionTimeoutSeconds(IDLE_SECONDS).build()
 
     private companion object {
         const val TAG = "SarieBench"
