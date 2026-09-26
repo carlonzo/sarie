@@ -215,7 +215,7 @@ SarieBridge.install(context) {
 }
 ```
 
-Stale DNS is on unless `configure` replaces it (`DnsOptions.builder().enableStaleDns(false).build()` passed to `setDnsOptions`). A provider that rejects stale DNS does not fail `install`.
+Stale DNS is on, with Cronet's host cache persisted to the storage path so a cold start can connect to the last known IP while the fresh lookup runs. `configure` replaces both when it calls `setDnsOptions` (for example `DnsOptions.builder().enableStaleDns(false).build()`). A provider that rejects the DNS options does not fail `install`.
 
 After `install` returns, one cheap HEAD through the same `OkHttpClient` opens a QUIC connection Cronet can reuse:
 
@@ -386,7 +386,7 @@ Reddit published the result of moving Android feed traffic to HTTP/3: feed failu
 | Wire bytes, DNS, connect, TTFB | `SarieListener.onFinished` delivers `SarieTimings` (no Cronet types leak); `onResponseStarted` delivers headers and protocol before span/call close. |
 | Cold engine on the first request | Call `install` off the main thread early. Calls made before it returns use stock OkHttp and do not wait. |
 | Preconnect and request priority | One HEAD through the `OkHttpClient` after `install`, plus `addQuicHint`. Priority is the mapper. |
-| Stale DNS | On by default. `configure` can turn it off. |
+| Stale DNS | On by default, host cache persisted across restarts. `configure` can turn it off. |
 
 Sarie does not invent an `InetAddress`, a `Connection`, or a handshake for OkHttp's `EventListener`. It does not show compressed bytes inside a network interceptor, because Cronet decodes the body first. POST 0-RTT is a QUIC limit.
 

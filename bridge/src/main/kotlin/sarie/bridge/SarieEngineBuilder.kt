@@ -9,7 +9,8 @@ import org.chromium.net.DnsOptions
 /**
  * Order: overridable defaults, then [configure], then bridge-owned settings. [configure] cannot
  * leave brotli, cache mode, storage path, or pin bypass at its own values. Migration options and
- * stale DNS are overridable; a provider that rejects either does not fail setup.
+ * stale DNS (with a persisted host cache) are overridable; a provider that rejects either does
+ * not fail setup.
  */
 internal fun applyEngineConfiguration(
     builder: CronetEngine.Builder,
@@ -37,6 +38,9 @@ private fun applyOverridableDefaults(builder: CronetEngine.Builder) {
             DnsOptions.builder()
                 .enableStaleDns(true)
                 .preestablishConnectionsToStaleDnsResults(true)
+                // Restored entries come back expired, so they only serve stale DNS: a cold start
+                // connects to the last known IP while the fresh lookup runs.
+                .persistHostCache(true)
                 .build(),
         )
     }

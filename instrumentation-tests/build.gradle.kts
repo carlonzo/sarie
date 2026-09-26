@@ -18,6 +18,8 @@ android {
         applicationId = "sarie.instrumentation"
         minSdk = libs.versions.minSdk.get().toInt()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Benchmarks hit public hosts and run only via scripts/bench-connection-setup.sh.
+        testInstrumentationRunnerArguments["notPackage"] = "sarie.instrumentation.bench"
     }
 
     buildTypes {
