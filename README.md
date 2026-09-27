@@ -464,10 +464,9 @@ The `:demo` module contains an interactive showcase comparing `OkHttp (stock)` a
 ```
 
 ### Scenarios
-1. **Round trip**: 20 sequential GETs against `cloudflare-quic.com`. Compares cold connection setup time and warm p50 / p95 latencies.
+1. **Connection benchmark**: Per URL and per stack, the first request's DNS / connect / TLS / TTFB, the warm p50 over 10 requests on the open connection, and the TTFB of a resumed connection (TLS 1.3 resumption for stock, QUIC 0-RTT for Sarie) once every connection has idled out. The URL list is editable in the app (**URLs**) and persisted; it defaults to `images.unsplash.com`, `cloudflare-quic.com`, `www.google.com`, `cdn.jsdelivr.net`.
 2. **Parallel images**: Enqueues 100 unique image URLs concurrently from `images.unsplash.com`. Shows total wall time, time to first image, per-image latency percentiles (p50/p95/p99), and fills a thumbnail grid live.
-3. **Connection setup**: One cold GET per host across 4 public origins (`images.unsplash.com`, `cloudflare-quic.com`, `www.google.com`, `cdn.jsdelivr.net`). Breaks down DNS, connect, TLS, and TTFB phases.
-4. **Big download / migration**: Downloads a ~9 MB file (`cdn.jsdelivr.net`) on both stacks concurrently with progress bars. On a real device, switch Wi-Fi ↔ mobile data mid-download: QUIC connection migration keeps Sarie going, while stock TCP breaks.
+3. **Big download / migration**: Downloads a ~9 MB file (`cdn.jsdelivr.net`) on both stacks concurrently with progress bars. On a real device, switch Wi-Fi ↔ mobile data mid-download: QUIC connection migration keeps Sarie going, while stock TCP breaks.
 
 ### Simulating bad network (`netem.sh`)
 To demonstrate HTTP/3 head-of-line blocking resistance under packet loss and latency:

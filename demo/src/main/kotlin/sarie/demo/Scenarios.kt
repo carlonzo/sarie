@@ -13,20 +13,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 
-data class RoundTripRun(
-    val coldMs: Long,
-    val warmP50Ms: Long,
-    val warmP95Ms: Long,
-    val protocol: String,
-    val firstCall: Call? = null,
-)
-
-data class RoundTripResult(
-    val stock: RoundTripRun,
-    val sarie: RoundTripRun,
-    val sarieColdMs: Long?,
-)
-
 data class ParallelRun(
     val wallTotalMs: Long,
     val firstImageMs: Long,
@@ -43,16 +29,6 @@ data class ParallelImagesResult(
     val sarie: ParallelRun,
 )
 
-data class HostSetupMetrics(
-    val host: String,
-    val stack: String,
-    val dnsMs: Long?,
-    val connMs: Long?,
-    val tlsMs: Long?,
-    val ttfbMs: Long?,
-    val socketReused: Boolean = false,
-)
-
 data class DownloadProgress(
     val bytesRead: Long,
     val totalBytes: Long,
@@ -67,120 +43,6 @@ object Scenarios {
     private fun clearScenarioMetrics(clients: Clients) {
         DemoLog.finishedCalls.clear()
         clients.stockEventListener.callMetrics.clear()
-    }
-
-    fun runRoundTrip(clients: Clients): RoundTripResult {
-        clearScenarioMetrics(clients)
-
-        val runSequence = listOf(
-            Stack.STOCK,
-            Stack.SARIE,
-            Stack.SARIE,
-            Stack.STOCK,
-            Stack.STOCK,
-            Stack.SARIE,
-        )
-
-        val stockRuns = mutableListOf<RoundTripRun>()
-        val sarieRuns = mutableListOf<RoundTripRun>()
-
-        for (stack in runSequence) {
-            when (stack) {
-                Stack.STOCK -> {
-                    clients.stockClient.connectionPool.evictAll()
-                    val run = executeRoundTripRun(clients.stockClient)
-                    stockRuns.add(run)
-                }
-                Stack.SARIE -> {
-                    val run = executeRoundTripRun(clients.sarieClient)
-                    sarieRuns.add(run)
-                }
-            }
-        }
-
-        val stockColds = stockRuns.map { it.coldMs }.toLongArray()
-        val stockP50s = stockRuns.map { it.warmP50Ms }.toLongArray()
-        val stockP95s = stockRuns.map { it.warmP95Ms }.toLongArray()
-        val stockProtocol = stockRuns.lastOrNull()?.protocol ?: "h2"
-
-        val firstSarieCall = sarieRuns.firstOrNull()?.firstCall
-        val sarieColdMs: Long? = if (firstSarieCall != null) {
-            val future = DemoLog.finishedCalls.computeIfAbsent(firstSarieCall) { java.util.concurrent.CompletableFuture() }
-            val info = try {
-                future.get(2, java.util.concurrent.TimeUnit.SECONDS)
-            } catch (_: Exception) {
-                null
-            } finally {
-                DemoLog.finishedCalls.remove(firstSarieCall)
-            }
-            if (info?.socketReused == false) {
-                sarieRuns.first().coldMs
-            } else {
-                null
-            }
-        } else {
-            null
-        }
-
-        val sarieP50s = sarieRuns.map { it.warmP50Ms }.toLongArray()
-        val sarieP95s = sarieRuns.map { it.warmP95Ms }.toLongArray()
-        val sarieProtocol = sarieRuns.lastOrNull()?.protocol ?: "h3"
-
-        val stockSummary = RoundTripRun(
-            coldMs = Stats.median(stockColds),
-            warmP50Ms = Stats.median(stockP50s),
-            warmP95Ms = Stats.median(stockP95s),
-            protocol = stockProtocol,
-        )
-        val sarieSummary = RoundTripRun(
-            coldMs = sarieRuns.firstOrNull()?.coldMs ?: 0L,
-            warmP50Ms = Stats.median(sarieP50s),
-            warmP95Ms = Stats.median(sarieP95s),
-            protocol = sarieProtocol,
-        )
-
-        return RoundTripResult(
-            stock = stockSummary,
-            sarie = sarieSummary,
-            sarieColdMs = sarieColdMs,
-        )
-    }
-
-    private fun executeRoundTripRun(client: OkHttpClient): RoundTripRun {
-        val request = Request.Builder()
-            .url("https://cloudflare-quic.com/")
-            .head()
-            .build()
-
-        val durations = LongArray(20)
-        var lastProtocol = ""
-        var firstCall: Call? = null
-
-        for (i in 0 until 20) {
-            val startNs = System.nanoTime()
-            val call = client.newCall(request)
-            if (i == 0) {
-                firstCall = call
-            }
-            val response = call.execute()
-            response.use {
-                lastProtocol = it.protocol.toString()
-            }
-            durations[i] = (System.nanoTime() - startNs) / 1_000_000
-        }
-
-        val coldMs = durations[0]
-        val warmDurations = durations.copyOfRange(1, 20)
-        val warmP50 = Stats.percentile(warmDurations, 50.0)
-        val warmP95 = Stats.percentile(warmDurations, 95.0)
-
-        return RoundTripRun(
-            coldMs = coldMs,
-            warmP50Ms = warmP50,
-            warmP95Ms = warmP95,
-            protocol = lastProtocol,
-            firstCall = firstCall,
-        )
     }
 
     fun runParallelImages(
@@ -345,103 +207,6 @@ object Scenarios {
             protocolCounts = countsMap,
             failedCount = failedCount.get(),
         )
-    }
-
-    data class HostTarget(
-        val shortName: String,
-        val url: String,
-    )
-
-    private val SETUP_TARGETS = listOf(
-        HostTarget("unsplash", "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=100&q=60"),
-        HostTarget("cloudflare", "https://cloudflare-quic.com/"),
-        HostTarget("google", "https://www.google.com/"),
-        HostTarget("jsdelivr", "https://cdn.jsdelivr.net/npm/jquery@3.7.1/package.json"),
-    )
-
-    fun runConnectionSetup(clients: Clients): List<HostSetupMetrics> {
-        clearScenarioMetrics(clients)
-
-        val rows = mutableListOf<HostSetupMetrics>()
-
-        for ((targetIndex, target) in SETUP_TARGETS.withIndex()) {
-            val runSequence = if (targetIndex % 2 == 0) {
-                listOf(Stack.STOCK, Stack.SARIE)
-            } else {
-                listOf(Stack.SARIE, Stack.STOCK)
-            }
-
-            var stockMetrics: HostSetupMetrics? = null
-            var sarieMetrics: HostSetupMetrics? = null
-
-            for (stack in runSequence) {
-                when (stack) {
-                    Stack.STOCK -> {
-                        clients.stockClient.connectionPool.evictAll()
-                        val req = Request.Builder().url(target.url).build()
-                        val call = clients.stockClient.newCall(req)
-                        try {
-                            val resp = call.execute()
-                            resp.close()
-                        } catch (_: Exception) {}
-                        val m = clients.stockEventListener.callMetrics.remove(call)
-                        val dns = if (m?.dnsStartMs != null && m.dnsEndMs != null) m.dnsEndMs!! - m.dnsStartMs!! else null
-                        val conn = if (m?.connectStartMs != null && m.connectEndMs != null) m.connectEndMs!! - m.connectStartMs!! else null
-                        val tls = if (m?.secureConnectStartMs != null && m.secureConnectEndMs != null) m.secureConnectEndMs!! - m.secureConnectStartMs!! else null
-                        val ttfb = if (m?.responseHeadersStartMs != null && m.callStartMs != null) {
-                            m.responseHeadersStartMs!! - m.callStartMs!!
-                        } else null
-                        stockMetrics = HostSetupMetrics(
-                            host = target.shortName,
-                            stack = "stock",
-                            dnsMs = dns,
-                            connMs = conn,
-                            tlsMs = tls,
-                            ttfbMs = ttfb,
-                            socketReused = false,
-                        )
-                    }
-                    Stack.SARIE -> {
-                        val req = Request.Builder().url(target.url).build()
-                        val call = clients.sarieClient.newCall(req)
-                        try {
-                            val resp = call.execute()
-                            resp.close()
-                        } catch (_: Exception) {}
-                        val future = DemoLog.finishedCalls.computeIfAbsent(call) { java.util.concurrent.CompletableFuture() }
-                        val info = try {
-                            future.get(2, java.util.concurrent.TimeUnit.SECONDS)
-                        } catch (_: Exception) {
-                            null
-                        } finally {
-                            DemoLog.finishedCalls.remove(call)
-                        }
-                        val reused = info?.socketReused ?: false
-                        val dns = if (!reused) info?.dnsMs else null
-                        val conn = if (!reused) info?.connectMs else null
-                        val tls = if (!reused) info?.tlsMs else null
-                        val ttfb = if (info?.responseStartAtMillis != null && info.requestStartAtMillis != null) {
-                            info.responseStartAtMillis!! - info.requestStartAtMillis!!
-                        } else info?.ttfbMs
-
-                        sarieMetrics = HostSetupMetrics(
-                            host = target.shortName,
-                            stack = "Sarie",
-                            dnsMs = dns,
-                            connMs = conn,
-                            tlsMs = tls,
-                            ttfbMs = ttfb,
-                            socketReused = reused,
-                        )
-                    }
-                }
-            }
-
-            stockMetrics?.let { rows.add(it) }
-            sarieMetrics?.let { rows.add(it) }
-        }
-
-        return rows
     }
 
     fun runDownloadMigration(
