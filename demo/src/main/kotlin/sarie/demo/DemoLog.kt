@@ -113,7 +113,7 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
 
     // SarieListener.onRouted
     override fun onRouted(call: Call, reason: FallbackReason?) {
-        val path = call.request().url.encodedPath
+        val path = "${call.request().url.host}${call.request().url.encodedPath}"
         val method = call.request().method
         val line: String
         if (reason == null) {
@@ -128,7 +128,7 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
 
     // SarieListener.onResponseStarted
     override fun onResponseStarted(call: Call, info: SarieResponseInfo) {
-        val path = call.request().url.encodedPath
+        val path = "${call.request().url.host}${call.request().url.encodedPath}"
         val line = "${now()} [headers] ${info.protocol} ${info.httpStatusCode} $path (attempt=${info.attempt})"
         addLine(cronetBuffer, line, updateLastLine = false)
     }
@@ -137,7 +137,7 @@ object DemoLog : SarieLogger, SarieListener, Interceptor {
     override fun onFinished(call: Call, timings: SarieTimings) {
         finishedCalls.computeIfAbsent(call) { CompletableFuture() }.complete(timings)
 
-        val path = call.request().url.encodedPath
+        val path = "${call.request().url.host}${call.request().url.encodedPath}"
         val totalMs = timings.totalMs ?: -1
         val dnsStr = timings.dnsMs?.let { "${it}ms" } ?: "—"
         val connStr = timings.connectMs?.let { "${it}ms" } ?: "—"
