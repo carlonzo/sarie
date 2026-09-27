@@ -73,9 +73,8 @@ import kotlinx.coroutines.launch
 import sarie.bridge.SarieBridge
 
 enum class ScenarioType {
-    ROUND_TRIP,
+    CONNECTION,
     PARALLEL,
-    SETUP,
     DOWNLOAD,
 }
 
@@ -153,9 +152,12 @@ fun DemoScreen(executor: ExecutorService? = null) {
 
     var runningScenario by remember { mutableStateOf<ScenarioType?>(null) }
 
-    // Round Trip state
-    var roundTripResult by remember { mutableStateOf<RoundTripResult?>(null) }
-    var roundTripError by remember { mutableStateOf<String?>(null) }
+    // Connection benchmark state
+    var benchUrls by remember { mutableStateOf(BenchUrls.load(context)) }
+    var benchRows by remember { mutableStateOf<List<HostBench>?>(null) }
+    var benchStatus by remember { mutableStateOf<String?>(null) }
+    var benchError by remember { mutableStateOf<String?>(null) }
+    var editingUrls by remember { mutableStateOf(false) }
 
     // Parallel Images state
     var parallelResult by remember { mutableStateOf<ParallelImagesResult?>(null) }
@@ -165,10 +167,6 @@ fun DemoScreen(executor: ExecutorService? = null) {
             repeat(100) { add(ThumbItem()) }
         }
     }
-
-    // Connection Setup state
-    var setupResult by remember { mutableStateOf<List<HostSetupMetrics>?>(null) }
-    var setupError by remember { mutableStateOf<String?>(null) }
 
     // Download Migration state
     var stockDownloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
@@ -309,24 +307,31 @@ fun DemoScreen(executor: ExecutorService? = null) {
                 .verticalScroll(rememberScrollState())
                 .padding(8.dp)
         ) {
-            RoundTripCard(
-                result = roundTripResult,
-                error = roundTripError,
-                isRunning = runningScenario == ScenarioType.ROUND_TRIP,
+            ConnectionBenchCard(
+                rows = benchRows,
+                status = benchStatus,
+                error = benchError,
+                isRunning = runningScenario == ScenarioType.CONNECTION,
                 isAnyRunning = runningScenario != null,
+                onEditUrls = { editingUrls = true },
                 onRun = {
-                    runningScenario = ScenarioType.ROUND_TRIP
-                    roundTripError = null
+                    runningScenario = ScenarioType.CONNECTION
+                    benchError = null
+                    benchRows = null
+                    val urls = benchUrls
                     executor?.execute {
                         try {
-                            val res = Scenarios.runRoundTrip(DemoApp.instance.clients)
-                            mainHandler.post {
-                                roundTripResult = res
-                                runningScenario = null
+                            ConnectionBench.run(DemoApp.instance.clients, urls) { rows, status ->
+                                mainHandler.post {
+                                    benchRows = rows
+                                    benchStatus = status
+                                }
                             }
                         } catch (e: Exception) {
+                            mainHandler.post { benchError = e.message ?: e.javaClass.simpleName }
+                        } finally {
                             mainHandler.post {
-                                roundTripError = e.message
+                                benchStatus = null
                                 runningScenario = null
                             }
                         }
@@ -374,33 +379,6 @@ fun DemoScreen(executor: ExecutorService? = null) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            ConnectionSetupCard(
-                result = setupResult,
-                error = setupError,
-                isRunning = runningScenario == ScenarioType.SETUP,
-                isAnyRunning = runningScenario != null,
-                onRun = {
-                    runningScenario = ScenarioType.SETUP
-                    setupError = null
-                    executor?.execute {
-                        try {
-                            val res = Scenarios.runConnectionSetup(DemoApp.instance.clients)
-                            mainHandler.post {
-                                setupResult = res
-                                runningScenario = null
-                            }
-                        } catch (e: Exception) {
-                            mainHandler.post {
-                                setupError = e.message
-                                runningScenario = null
-                            }
-                        }
-                    }
-                }
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
             DownloadMigrationCard(
                 stockUiState = stockDownloadProgress.toUiState(),
                 sarieUiState = sarieDownloadProgress.toUiState(),
@@ -431,96 +409,18 @@ fun DemoScreen(executor: ExecutorService? = null) {
             Spacer(modifier = Modifier.height(72.dp))
         }
     }
-}
 
-@Composable
-fun RoundTripCard(
-    result: RoundTripResult?,
-    error: String?,
-    isRunning: Boolean,
-    isAnyRunning: Boolean,
-    onRun: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Round trip",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                Button(
-                    onClick = onRun,
-                    enabled = !isAnyRunning
-                ) {
-                    Text(if (isRunning) "Running..." else "Run")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            val stacks = listOf("stock" to result?.stock, "Sarie" to result?.sarie)
-
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("", modifier = Modifier.weight(1f))
-                for ((name, run) in stacks) {
-                    val protocolSuffix = run?.protocol?.let { " $it" } ?: ""
-                    Text(
-                        text = "$name$protocolSuffix",
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.sp,
-                        textAlign = TextAlign.End,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-
-            val rows = listOf(
-                "cold" to { name: String, run: RoundTripRun? ->
-                    if (name == "Sarie") {
-                        result?.sarieColdMs?.let { "${it} ms" } ?: if (run != null) "warm (restart app)" else "—"
-                    } else {
-                        run?.let { "${it.coldMs} ms" } ?: "—"
-                    }
-                },
-                "warm p50" to { _: String, run: RoundTripRun? -> run?.let { "${it.warmP50Ms} ms" } ?: "—" },
-                "warm p95" to { _: String, run: RoundTripRun? -> run?.let { "${it.warmP95Ms} ms" } ?: "—" },
-            )
-
-            for ((label, format) in rows) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Text(label, fontSize = 12.sp, modifier = Modifier.weight(1f))
-                    for ((name, run) in stacks) {
-                        Text(
-                            text = format(name, run),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-
-            if (error != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Error: $error",
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 11.sp
-                )
-            }
-        }
+    if (editingUrls) {
+        BenchUrlsDialog(
+            initial = benchUrls,
+            onDismiss = { editingUrls = false },
+            onSave = { urls ->
+                BenchUrls.save(context, urls)
+                benchUrls = urls
+                benchRows = null
+                editingUrls = false
+            },
+        )
     }
 }
 
@@ -651,114 +551,6 @@ fun ParallelImagesCard(
             Text(
                 text = protocolCountsText,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp
-            )
-
-            if (error != null) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Error: $error",
-                    color = MaterialTheme.colorScheme.error,
-                    fontSize = 11.sp
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun ConnectionSetupCard(
-    result: List<HostSetupMetrics>?,
-    error: String?,
-    isRunning: Boolean,
-    isAnyRunning: Boolean,
-    onRun: () -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Connection setup",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
-                Button(
-                    onClick = onRun,
-                    enabled = !isAnyRunning
-                ) {
-                    Text(if (isRunning) "Running..." else "Run")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(modifier = Modifier.fillMaxWidth()) {
-                Text("host", fontWeight = FontWeight.Bold, fontSize = 11.sp, modifier = Modifier.weight(1.5f))
-                Text("dns", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
-                Text("conn", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
-                Text("tls", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
-                Text("ttfb", fontWeight = FontWeight.Bold, fontSize = 11.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
-            }
-
-            if (result != null) {
-                for (row in result) {
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "${row.host} (${row.stack})",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            modifier = Modifier.weight(1.5f)
-                        )
-                        fun formatCell(value: Long?, reused: Boolean): String = when {
-                            reused -> "reused"
-                            value != null -> "${value}ms"
-                            else -> "—"
-                        }
-                        Text(
-                            text = formatCell(row.dnsMs, row.socketReused),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = formatCell(row.connMs, row.socketReused),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = formatCell(row.tlsMs, row.socketReused),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = if (row.ttfbMs != null) "${row.ttfbMs}ms" else "—",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            textAlign = TextAlign.End,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "QUIC folds connect+TLS into one handshake; Cronet's ssl range sits inside connect for QUIC.",
                 fontSize = 11.sp
             )
 
