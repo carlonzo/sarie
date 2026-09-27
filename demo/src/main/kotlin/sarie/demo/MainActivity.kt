@@ -69,6 +69,7 @@ import com.chuckerteam.chucker.api.Chucker
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import sarie.bridge.SarieBridge
 
@@ -149,6 +150,16 @@ fun DemoScreen(executor: ExecutorService? = null) {
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     val logVersion = DemoLog.version
+
+    // SarieBridge.install() runs on a background thread (DemoApp.onCreate) and isn't Compose
+    // state, so poll it briefly instead of reading it once and freezing on "not installed".
+    var engineVersion by remember { mutableStateOf(SarieBridge.engine?.versionString) }
+    LaunchedEffect(Unit) {
+        while (engineVersion == null) {
+            delay(200)
+            engineVersion = SarieBridge.engine?.versionString
+        }
+    }
 
     var runningScenario by remember { mutableStateOf<ScenarioType?>(null) }
 
@@ -292,7 +303,7 @@ fun DemoScreen(executor: ExecutorService? = null) {
                     Column {
                         Text("Sarie demo", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            text = SarieBridge.engine?.versionString ?: "engine: not installed",
+                            text = engineVersion ?: "engine: not installed",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }

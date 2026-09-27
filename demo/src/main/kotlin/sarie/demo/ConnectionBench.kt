@@ -1,5 +1,6 @@
 package sarie.demo
 
+import java.net.InetAddress
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 import okhttp3.Call
@@ -57,7 +58,11 @@ object ConnectionBench {
         fun publish(status: String) = onUpdate(rows.toList(), status)
 
         for ((i, url) in urls.withIndex()) {
-            // Alternate which stack goes first so neither always benefits from the other's DNS lookup.
+            // Both stacks resolve through the same OS resolver (getaddrinfo), so whichever ran
+            // first would otherwise absorb the entire cold DNS lookup and make the other look
+            // artificially faster. Warm it once, outside either stack's numbers, so "first" is
+            // measuring connection setup, not a DNS race.
+            warmDns(rows[i].host)
             val order = if (i % 2 == 0) listOf(true, false) else listOf(false, true)
             for (isStock in order) {
                 publish("${rows[i].host}: ${if (isStock) "stock" else "Sarie"}")
@@ -94,6 +99,14 @@ object ConnectionBench {
 
         publish("done")
         return rows
+    }
+
+    private fun warmDns(host: String) {
+        try {
+            InetAddress.getAllByName(host)
+        } catch (_: Exception) {
+            // Left to the real request: it'll surface as a normal error row instead.
+        }
     }
 
     private fun execute(call: Call): Pair<String, String?> = try {
