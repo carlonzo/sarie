@@ -128,15 +128,15 @@ class EngineSetupTest {
         applyEngineConfiguration(builder, storage, translation.groups) {
             builder.enableQuic(false)
             builder.enableHttp2(false)
-            builder.enableBrotli(true)
+            builder.enableBrotli(false)
             builder.setStoragePath("/evil")
             builder.enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, 99L)
             builder.enablePublicKeyPinningBypassForLocalTrustAnchors(true)
             builder.addPublicKeyPins("evil.example", setOf(byteArrayOf(1)), true, Date(0))
         }
 
-        val configureBrotli = recording.events.indexOf("brotli=true")
-        val ownedBrotli = recording.events.lastIndexOf("brotli=false")
+        val configureBrotli = recording.events.indexOf("brotli=false")
+        val ownedBrotli = recording.events.lastIndexOf("brotli=true")
         val migration = recording.events.indexOf("migration")
         val dns = recording.events.indexOf("dns")
         assertTrue(migration < dns)
@@ -149,7 +149,7 @@ class EngineSetupTest {
 
         assertEquals(true, recording.quic)
         assertEquals(true, recording.http2)
-        assertEquals(false, recording.brotli)
+        assertEquals(true, recording.brotli)
         assertEquals(storage, recording.recordedStorage)
         assertEquals(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, recording.cacheMode)
         assertEquals(0L, recording.cacheMaxSize)
@@ -179,11 +179,11 @@ class EngineSetupTest {
         val recording = RecordingBuilder(rejectMigration = true)
         val builder = CronetEngine.Builder(recording)
         applyEngineConfiguration(builder, "/storage", emptyList()) {
-            builder.enableBrotli(true)
+            builder.enableBrotli(false)
         }
         assertNull(recording.migration)
         assertEquals(true, recording.dns?.enableStaleDns)
-        assertEquals(false, recording.brotli)
+        assertEquals(true, recording.brotli)
         assertEquals("/storage", recording.recordedStorage)
         assertEquals(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, recording.cacheMode)
     }
@@ -199,7 +199,7 @@ class EngineSetupTest {
         val override = recording.events.lastIndexOf("dns")
         assertTrue(defaults < override)
         assertEquals(false, recording.dns?.enableStaleDns)
-        assertEquals(false, recording.brotli)
+        assertEquals(true, recording.brotli)
     }
 
     @Test
@@ -209,7 +209,7 @@ class EngineSetupTest {
         applyEngineConfiguration(builder, "/storage", emptyList())
         assertNull(recording.dns)
         assertEquals(true, recording.migration?.enableDefaultNetworkMigration)
-        assertEquals(false, recording.brotli)
+        assertEquals(true, recording.brotli)
         assertEquals("/storage", recording.recordedStorage)
         assertEquals(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, recording.cacheMode)
     }

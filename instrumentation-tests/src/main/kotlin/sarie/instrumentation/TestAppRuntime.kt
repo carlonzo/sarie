@@ -21,9 +21,9 @@ import sarie.bridge.SarieTimings
  *
  * Modes (instrumentation arg `mode`, default "stock"):
  * - "cronet": Sarie builds the engine (`SarieBridge.install(context, config)`).
- *   QUIC hints go through [configure]. Brotli stays off. The bridge never shuts the engine down.
+ *   QUIC hints go through [configure]. Brotli is on. The bridge never shuts the engine down.
  * - "borrowed": host-built engine passed to `SarieBridge.install(engine, config)`. Used by the HTTP
- *   cache bypass test and the brotli decode test. No pins.
+ *   cache bypass test. No pins.
  * - "fallback": Sarie-built engine, policy permanently disabled -> every request falls back.
  * - "stock": no snapshot; OkHttp runs entirely stock.
  *
@@ -51,16 +51,15 @@ object TestAppRuntime {
         freshStorage: Boolean = false,
         netLog: Boolean = false,
         client: OkHttpClient? = null,
-        brotli: Boolean = false,
         diskCache: Boolean = false,
     ) {
         if (mode == MODE_STOCK) return
         val context: Context = ApplicationProvider.getApplicationContext()
         val policy = testPolicy(mode)
         if (mode == MODE_BORROWED) {
-            installBorrowed(context, policy, quicHintHost, quicHintPort, freshStorage, brotli, diskCache)
+            installBorrowed(context, policy, quicHintHost, quicHintPort, freshStorage, diskCache)
         } else {
-            // Sarie-built. Do not call enableBrotli(true) and do not shut the engine down.
+            // Sarie-built. Do not shut the engine down.
             SarieBridge.install(
                 context,
                 SarieConfig {
@@ -89,7 +88,7 @@ object TestAppRuntime {
     }
 
     /**
-     * Host-built engine. [brotli] is the brotli-decode test; [diskCache] is the cache-bypass
+     * Host-built engine. [diskCache] is the cache-bypass
      * test (`HTTP_CACHE_DISK`). Pin bypass stays on so chains anchored by the NSC test CA are
      * not treated as pin failures — the Sarie-built engine forces that flag off instead.
      */
@@ -99,13 +98,11 @@ object TestAppRuntime {
         quicHintHost: String?,
         quicHintPort: Int,
         freshStorage: Boolean,
-        brotli: Boolean,
         diskCache: Boolean,
     ) {
         val builder = CronetEngine.Builder(context)
             .enableQuic(true)
             .enableHttp2(true)
-            .enableBrotli(brotli)
             .enablePublicKeyPinningBypassForLocalTrustAnchors(true)
         val storage = if (freshStorage || diskCache) {
             File(context.cacheDir, "cronet-borrowed-" + System.nanoTime()).apply { mkdirs() }
