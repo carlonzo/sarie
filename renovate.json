@@ -14,9 +14,10 @@
   "packageRules": [
     {
       "description": "Do not bump okhttp compile floor; it must stay pinned to the oldest supported OkHttp version in RecipeRegistry.",
-      "matchDepNames": [
-        "okhttp-min"
+      "matchPackageNames": [
+        "com.squareup.okhttp3:okhttp"
       ],
+      "matchCurrentVersion": "5.4.0",
       "enabled": false
     },
     {
