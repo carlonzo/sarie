@@ -50,6 +50,16 @@ plugins {
 
 > **Note**: AGP transforms dependency bytecode at the application level (`InstrumentationScope.ALL`). If OkHttp is declared in an Android library module, you still apply `com.carlonzo.sarie` to the application module packaging the final APK.
 
+Optionally configure the plugin in the module's build script:
+
+```kotlin
+sarie {
+    enabled.set(true)               // false: no bytecode rewrite and no version guards (default true)
+    failOnUntested.set(false)       // true: an untested (newer) OkHttp fails the build instead of warning
+    allowUnfingerprinted.set(false) // true: a fingerprint mismatch warns instead of failing
+}
+```
+
 Next, add OkHttp and the Sarie bridge to your app's dependencies:
 
 ```kotlin

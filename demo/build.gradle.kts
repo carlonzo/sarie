@@ -4,7 +4,7 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
-okhttpCronet {
+sarie {
     failOnUntested.set(true)
 }
 

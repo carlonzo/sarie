@@ -72,6 +72,20 @@ class TransportPluginTest {
                 result.output.contains("okhttp 4"),
         )
     }
+
+    @Test(timeout = 1_800_000L)
+    fun `enabled false skips both guards even for okhttp 4`() {
+        val dir = prepareFixture(okhttpVersion = "4.12.0")
+        File(dir, "build.gradle.kts").appendText("\nsarie { enabled.set(false) }\n")
+        val result = GradleRunner.create()
+            .withPluginClasspath()
+            .withProjectDir(dir)
+            .withArguments(fixtureArgs())
+            .withEnvironment(System.getenv() + ("JAVA_HOME" to testJavaHome()))
+            .build()
+        assertEquals(TaskOutcome.SKIPPED, result.task(":verifyOkHttpPin")!!.outcome)
+        assertEquals(TaskOutcome.SKIPPED, result.task(":verifyOkHttpFingerprint")!!.outcome)
+    }
 }
 
 // Shared with ConfigurationCacheStoreTest.

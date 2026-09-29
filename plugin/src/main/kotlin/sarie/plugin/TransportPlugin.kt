@@ -9,9 +9,10 @@ import org.gradle.api.provider.Property
 import java.io.File
 
 /**
- * Host-app extension: `okhttpCronet { enabled; okhttpVersion; allowUnfingerprinted; failOnUntested }`.
+ * Host-app extension: `sarie { enabled; okhttpVersion; allowUnfingerprinted; failOnUntested }`.
+ * `enabled = false` turns off both the bytecode rewrite and the version guards.
  */
-abstract class OkhttpCronetExtension {
+abstract class SarieExtension {
     abstract val enabled: Property<Boolean>
     abstract val okhttpVersion: Property<String>
     abstract val allowUnfingerprinted: Property<Boolean>
@@ -45,7 +46,7 @@ abstract class OkhttpCronetExtension {
  */
 class TransportPlugin : Plugin<Project> {
     override fun apply(target: Project) {
-        val extension = target.extensions.create("okhttpCronet", OkhttpCronetExtension::class.java)
+        val extension = target.extensions.create("sarie", SarieExtension::class.java)
         target.plugins.withId("com.android.application") {
             target.logger.lifecycle("[okhttp-cronet] META-INF marker skipped: no public Variant API for generated assets")
             registerInstrumentation(target, extension)
@@ -68,7 +69,7 @@ class TransportPlugin : Plugin<Project> {
         }
     }
 
-    private fun registerInstrumentation(project: Project, extension: OkhttpCronetExtension) {
+    private fun registerInstrumentation(project: Project, extension: SarieExtension) {
         val androidComponents = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
         androidComponents.onVariants(androidComponents.selector().all()) { variant ->
             if (extension.enabled.get()) {
@@ -78,7 +79,7 @@ class TransportPlugin : Plugin<Project> {
                 ) { params ->
                     params.okhttpVersion.set(extension.okhttpVersion.orElse("family"))
                     val force = extension.forceInstrument.get() ||
-                        project.providers.gradleProperty("okhttpCronet.forceInstrument").orNull == "true"
+                        project.providers.gradleProperty("sarie.forceInstrument").orNull == "true"
                     if (force) {
                         params.invalidateToken.set(System.currentTimeMillis())
                     }
@@ -90,7 +91,7 @@ class TransportPlugin : Plugin<Project> {
         }
     }
 
-    private fun registerGuards(project: Project, extension: OkhttpCronetExtension) {
+    private fun registerGuards(project: Project, extension: SarieExtension) {
         val classpaths = project.provider {
             project.configurations.matching { config ->
                 config.isCanBeResolved &&
@@ -115,12 +116,14 @@ class TransportPlugin : Plugin<Project> {
             else RecipeRegistry.forVersion(resolved.first()).fingerprintArtifacts.values
                 .map { coords -> resolveArtifactFile(project, coords) }
         }
+        val enabled = extension.enabled
         val pin = project.tasks.register("verifyOkHttpPin", VerifyOkHttpPinTask::class.java) { task ->
             task.group = "verification"
             task.description = "Accepts supported okhttp versions, warns on untested (newer) ones, " +
                 "fails on older/unsupported ones (including okhttp 4)."
             task.okhttpVersions.set(versions)
             task.failOnUntested.set(extension.failOnUntested)
+            task.onlyIf { enabled.get() }
         }
         val fingerprint = project.tasks.register(
             "verifyOkHttpFingerprint",
@@ -133,6 +136,7 @@ class TransportPlugin : Plugin<Project> {
             task.fingerprintArtifacts.from(artifactFiles)
             task.allowUnfingerprinted.set(extension.allowUnfingerprinted)
             task.failOnUntested.set(extension.failOnUntested)
+            task.onlyIf { enabled.get() }
         }
         // AGP's project-level preBuild is the earliest hook every variant assembly depends on.
         project.tasks.matching { it.name == "preBuild" }.configureEach { preBuild ->
