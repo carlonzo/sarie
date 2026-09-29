@@ -23,7 +23,7 @@ The visitor factory's parameters are `OkhttpCronetInstrumentationParams` with
 `okhttpVersion: Property<String>` and optional `invalidateToken: Property<Long>`; only
 simple `Property` types cross the AGP instrumentation worker boundary (`okhttpVersion`
 defaults to `"family"`, `invalidateToken` can be set via `forceInstrument` or
-`-PokhttpCronet.forceInstrument=true` to invalidate AGP's transform cache during
+`-Psarie.forceInstrument=true` to invalidate AGP's transform cache during
 development).
 
 ## Rewrite pipeline

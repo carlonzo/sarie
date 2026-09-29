@@ -1,0 +1,39 @@
+# Release: push a tag like v0.1.0 -> publishes :bridge and :plugin to Maven Central (auto-released).
+# Version comes from the tag (VERSION_NAME in gradle.properties is only the dev default).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: release
+    env:
+      ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+      ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_KEY_PASSWORD }}
+      ORG_GRADLE_PROJECT_signAllPublications: "true"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v6
+      - uses: android-actions/setup-android@v4
+      - name: Unpin machine-local JDK path
+        run: |
+          sed -i '/^org.gradle.java.home=/d' gradle.properties
+          sed -i '/^org.gradle.java.home=/d' plugin/gradle.properties
+      - name: Publish
+        run: >
+          ./gradlew --no-daemon publishToMavenCentral
+          -PVERSION_NAME=${GITHUB_REF_NAME#v}
+          -PmavenCentralAutomaticPublishing=true

@@ -6,7 +6,7 @@ plugins {
 }
 
 // This repo must not merge an unverified okhttp: Renovate bumps fail the pin instead of warning.
-okhttpCronet {
+sarie {
     failOnUntested.set(true)
 }
 
