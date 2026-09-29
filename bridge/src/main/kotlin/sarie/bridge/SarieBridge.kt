@@ -87,8 +87,7 @@ public object SarieBridge {
         context: Context,
         config: SarieConfig,
     ) {
-        val generation = generations.next()
-        // Before the provider lookup: a failed install still reports engine_missing.
+        val generation = beginInstall()
         this.logger = config.debugLogger?.let(::SwallowingLogger)
         this.listener = config.listener
         warmTrustBaseline()
@@ -166,6 +165,12 @@ public object SarieBridge {
         val dirName = cronetStorageDirName(currentProcessName(), context.packageName)
         val storageDir = File(context.cacheDir, dirName)
         if (!storageDir.isDirectory && !storageDir.mkdirs()) {
+            // Async storage init of a live engine can briefly remove the directory.
+            val previous = lastBuilt
+            if (previous != null) {
+                reusePrevious(previous, config, generation, storageDir, "could not create storage dir", null)
+                return
+            }
             logger?.log(
                 Log.WARN,
                 "Could not create ${storageDir.absolutePath}; leaving requests on stock OkHttp " +
@@ -185,30 +190,9 @@ public object SarieBridge {
             if (e !is IllegalStateException && e !is IllegalArgumentException) throw e
             // Cronet refuses a storage path a live engine holds (IllegalStateException), or async
             // storage init briefly removes the directory so setStoragePath fails (IllegalArgumentException).
-            // Sarie never shuts its engine down, so a second install in this process lands here:
-            // keep the engine that owns the path, with the pins it actually enforces.
+            // Sarie never shuts its engine down, so a second install in this process lands here.
             val previous = lastBuilt ?: throw e
-            logger?.log(
-                Log.WARN,
-                "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
-                    "configure from this install are ignored (${e.message}).",
-                e,
-            )
-            val reused = RuntimeSnapshot(
-                engine = previous.engine,
-                policy = config.policy,
-                mapper = config.mapper,
-                sarieBuilt = true,
-                installedPins = previous.installedPins,
-                providerName = previous.providerName,
-                providerVersion = previous.providerVersion,
-            )
-            publishIfCurrentGeneration(generation, reused)
-            logger?.log(
-                Log.INFO,
-                "Cronet installed (built, reused): provider=${previous.providerName} ${previous.providerVersion}, pins=${previous.installedPins.size}, storage=${storageDir.absolutePath}",
-                null,
-            )
+            reusePrevious(previous, config, generation, storageDir, e.message, e)
             return
         }
         val snapshot = RuntimeSnapshot(
@@ -225,6 +209,38 @@ public object SarieBridge {
         logger?.log(
             Log.INFO,
             "Cronet installed (built): provider=${chosen.name} ${chosen.version}, pins=${translation.installedPins.size}, storage=${storageDir.absolutePath}",
+            null,
+        )
+    }
+
+    /** Keep the engine that owns the storage path, with the pins it actually enforces. */
+    private fun reusePrevious(
+        previous: RuntimeSnapshot,
+        config: SarieConfig,
+        generation: Int,
+        storageDir: File,
+        cause: String?,
+        e: Throwable?,
+    ) {
+        logger?.log(
+            Log.WARN,
+            "Sarie already built a Cronet engine in this process; reusing it. Pins and " +
+                "configure from this install are ignored ($cause).",
+            e,
+        )
+        val reused = RuntimeSnapshot(
+            engine = previous.engine,
+            policy = config.policy,
+            mapper = config.mapper,
+            sarieBuilt = true,
+            installedPins = previous.installedPins,
+            providerName = previous.providerName,
+            providerVersion = previous.providerVersion,
+        )
+        publishIfCurrentGeneration(generation, reused)
+        logger?.log(
+            Log.INFO,
+            "Cronet installed (built, reused): provider=${previous.providerName} ${previous.providerVersion}, pins=${previous.installedPins.size}, storage=${storageDir.absolutePath}",
             null,
         )
     }
@@ -313,6 +329,15 @@ public object SarieBridge {
             generations.next()
             current = null
         }
+    }
+
+    /**
+     * Drops the previous snapshot: until this install publishes, calls report engine_missing
+     * instead of running on the old engine with the old policy.
+     */
+    internal fun beginInstall(): Int = synchronized(generations) {
+        current = null
+        generations.next()
     }
 
     /** Locked with [uninstall] so a late Play Services callback cannot publish after it. */
