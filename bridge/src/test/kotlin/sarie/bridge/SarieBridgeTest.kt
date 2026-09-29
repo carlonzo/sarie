@@ -246,6 +246,13 @@ class SarieBridgeTest {
     }
 
     @Test
+    fun `a context install drops the previous snapshot until it publishes`() {
+        SarieBridge.install(FakeCronetEngine(), config)
+        SarieBridge.beginInstall()
+        assertNull(SarieBridge.snapshot())
+    }
+
+    @Test
     fun `rejected borrowed install keeps the current snapshot`() {
         val engine = FakeCronetEngine()
         SarieBridge.install(engine, config)
