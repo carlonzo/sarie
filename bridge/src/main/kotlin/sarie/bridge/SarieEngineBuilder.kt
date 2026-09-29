@@ -54,7 +54,7 @@ private fun applyBridgeOwned(
     val expiry = pinExpiryDate()
     builder.enableQuic(true)
     builder.enableHttp2(true)
-    builder.enableBrotli(false)
+    builder.enableBrotli(true)
     builder.setStoragePath(storagePath)
     builder.enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK_NO_HTTP, 0L)
     builder.enablePublicKeyPinningBypassForLocalTrustAnchors(false)

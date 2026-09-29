@@ -107,9 +107,8 @@ class CronetSuite {
         installedEngine = TestAppRuntime.lastEngine
     }
 
-    /** Borrowed host-built engine. [brotli] and [diskCache] are the two tests that need one. */
+    /** Borrowed host-built engine. [diskCache] is the cache-bypass test. */
     private fun installBorrowed(
-        brotli: Boolean = false,
         diskCache: Boolean = false,
         quicHintHost: String? = null,
     ) {
@@ -117,7 +116,6 @@ class CronetSuite {
             mode = TestAppRuntime.MODE_BORROWED,
             quicHintHost = quicHintHost,
             freshStorage = true,
-            brotli = brotli,
             diskCache = diskCache,
         )
         installedEngine = TestAppRuntime.lastEngine
@@ -347,7 +345,7 @@ class CronetSuite {
 
         // (b) Unencoded response: the bridge keeps Content-Length. An explicit
         // Accept-Encoding: identity is denied (content_encoding), so /ok pins that
-        // behavior on the Cronet path. The Sarie-built engine advertises gzip, deflate.
+        // behavior on the Cronet path. The Sarie-built engine advertises gzip, deflate, br.
         client.newCall(Request.Builder().url("$ORIGIN/ok").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertNull(response.header("Content-Encoding"))
@@ -359,10 +357,9 @@ class CronetSuite {
     }
 
     @Test
-    fun brotliDecodedOnBorrowedEngine() {
-        // /compress/br forces Content-Encoding: br. The Sarie-built engine leaves brotli off,
-        // so the successful decode runs on a borrowed engine that enables it.
-        installBorrowed(brotli = true)
+    fun brotliDecodedOnSarieBuiltEngine() {
+        // /compress/br forces Content-Encoding: br. The Sarie-built engine enables brotli.
+        installCronet(quicHintHost = null)
         OkHttpClient().newCall(Request.Builder().url("$ORIGIN/compress/br").build()).execute().use { response ->
             assertEquals(200, response.code)
             assertNull(
@@ -380,18 +377,14 @@ class CronetSuite {
         val client = OkHttpClient()
 
         // Default request: no Accept-Encoding, so the call stays on Cronet. The Sarie-built
-        // engine has brotli off and advertises gzip, deflate.
+        // engine has brotli on and advertises gzip, deflate, br.
         client.newCall(Request.Builder().url("$ORIGIN/headers").build()).execute().use { response ->
             assertEquals(200, response.code)
             val echoed = response.body.string()
             println("AE-ECHO-BEGIN\n$echoed\nAE-ECHO-END")
             assertTrue(
-                "Sarie-built engine must advertise gzip, deflate (no br), got:\n$echoed",
-                echoed.contains("Accept-Encoding: [gzip, deflate]"),
-            )
-            assertFalse(
-                "brotli must not be advertised on the Sarie-built engine, got:\n$echoed",
-                echoed.contains("Accept-Encoding: [gzip, deflate, br]") || echoed.contains(", br]"),
+                "Sarie-built engine must advertise gzip, deflate, br, got:\n$echoed",
+                echoed.contains("Accept-Encoding: [gzip, deflate, br]"),
             )
         }
         assertCronetServed()
@@ -930,11 +923,11 @@ class CronetSuite {
         val cronet = echoedHeaders(cronetEcho)
         assertEquals(listOf("same"), cronet["X-Parity"])
         // Recorded on cronet 500.0.2 (COMPATIBILITY row 24): Chromium adds an RFC 9218
-        // Priority header and advertises deflate next to gzip. Any other diff fails.
+        // Priority header and advertises deflate and br next to gzip. Any other diff fails.
         val diff = headerDiff(stock, cronet)
         assertEquals(
             "wire header diff changed; record it in COMPATIBILITY.md",
-            "cronet-added: [Priority]\nAccept-Encoding stock=[gzip] cronet=[gzip, deflate]\n",
+            "cronet-added: [Priority]\nAccept-Encoding stock=[gzip] cronet=[gzip, deflate, br]\n",
             diff,
         )
     }

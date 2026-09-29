@@ -151,7 +151,7 @@ public enum class FallbackReason {
      * without including `gzip`.
      *
      * Why Cronet cannot serve: Cronet manages compression and transparent decompression
-     * (`gzip, deflate`) internally. When an app requests manual or unhandled encodings, the
+     * (`gzip, deflate, br`) internally. When an app requests manual or unhandled encodings, the
      * bridge steps aside so OkHttp and the app can coordinate decompression.
      *
      * Resolution: Remove manual `Accept-Encoding` headers from the request (Cronet decompresses
