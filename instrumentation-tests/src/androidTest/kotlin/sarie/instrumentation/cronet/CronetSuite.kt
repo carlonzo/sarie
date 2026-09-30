@@ -16,6 +16,12 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.SSLPeerUnverifiedException
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.request.get
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpProtocolVersion
+import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
 import okhttp3.Cache
 import okhttp3.CacheControl
@@ -354,6 +360,23 @@ class CronetSuite {
         }
 
         assertCronetServed(minCount = 2)
+    }
+
+    @Test
+    fun ktor2OkHttpEngineOverH3() {
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        val client = HttpClient(OkHttp)
+        try {
+            runBlocking {
+                val response = client.get("https://cloudflare-quic.com/")
+                assertEquals(200, response.status.value)
+                assertTrue(response.bodyAsText().isNotEmpty())
+                assertEquals(HttpProtocolVersion.QUIC, response.version)
+            }
+        } finally {
+            client.close()
+        }
+        assertCronetServed()
     }
 
     @Test

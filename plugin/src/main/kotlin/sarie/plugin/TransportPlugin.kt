@@ -73,20 +73,26 @@ class TransportPlugin : Plugin<Project> {
         val androidComponents = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
         androidComponents.onVariants(androidComponents.selector().all()) { variant ->
             if (extension.enabled.get()) {
-                variant.instrumentation.transformClassesWith(
-                    ConnectInterceptorVisitorFactory::class.java,
-                    InstrumentationScope.ALL,
-                ) { params ->
-                    params.okhttpVersion.set(extension.okhttpVersion.orElse("family"))
-                    val force = extension.forceInstrument.get() ||
-                        project.providers.gradleProperty("sarie.forceInstrument").orNull == "true"
-                    if (force) {
-                        params.invalidateToken.set(System.currentTimeMillis())
+                listOfNotNull(variant, variant.androidTest).forEach { component ->
+                    component.instrumentation.transformClassesWith(
+                        ConnectInterceptorVisitorFactory::class.java,
+                        InstrumentationScope.ALL,
+                    ) { params ->
+                        params.okhttpVersion.set(extension.okhttpVersion.orElse("family"))
+                        val force = extension.forceInstrument.get() ||
+                            project.providers.gradleProperty("sarie.forceInstrument").orNull == "true"
+                        if (force) {
+                            params.invalidateToken.set(System.currentTimeMillis())
+                        }
                     }
+                    component.instrumentation.transformClassesWith(
+                        KtorProtocolPatchFactory::class.java,
+                        InstrumentationScope.ALL,
+                    ) { }
+                    component.instrumentation.setAsmFramesComputationMode(
+                        FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
+                    )
                 }
-                variant.instrumentation.setAsmFramesComputationMode(
-                    FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
-                )
             }
         }
     }

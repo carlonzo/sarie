@@ -27,6 +27,7 @@ dependencies {
     // (compileOnly does not reach tests).
     testImplementation(libs.agp.api)
     testImplementation(libs.asm)
+    testImplementation(libs.asm.commons)
     testImplementation(libs.okhttp.min)
 }
 

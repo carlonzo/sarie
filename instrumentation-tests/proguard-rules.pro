@@ -150,3 +150,8 @@
 # (keepAllForTest) sees the tested app's classes but not those rules.
 -dontwarn com.google.android.gms.net.CronetProviderInstaller
 -dontwarn com.google.android.gms.tasks.**
+
+# (7) ktor-client-okhttp references optional desktop/JVM management and slf4j classes
+# not present on Android.
+-dontwarn java.lang.management.**
+-dontwarn org.slf4j.**
