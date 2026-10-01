@@ -61,7 +61,7 @@ object RecipeRegistry {
 
     /** Fail-closed recipe lookup: unknown versions have no fingerprint recipe. */
     fun forVersion(v: String): Recipe =
-        recipes[v] ?: error("okhttp-cronet: no recipe for okhttp $v; known: ${recipes.keys}")
+        recipes[v] ?: error("sarie: no recipe for okhttp $v; known: ${recipes.keys}")
 
     fun guardFor(v: String): GuardSpec = recipes[v]?.guard ?: familyGuard
 
@@ -82,11 +82,11 @@ object RecipeRegistry {
     }
 
     fun untestedWarning(v: String): String =
-        "okhttp-cronet: okhttp $v is UNTESTED (verified: ${recipes.keys.sorted()}); the " +
+        "sarie: okhttp $v is UNTESTED (verified: ${recipes.keys.sorted()}); the " +
             "structural guard still applies but the fingerprint identity check is skipped"
 
     fun unsupportedMessage(v: String): String =
-        "okhttp-cronet: okhttp $v is not supported (supported: ${recipes.keys.sorted()}; " +
+        "sarie: okhttp $v is not supported (supported: ${recipes.keys.sorted()}; " +
             "older versions including okhttp 4 are not supported)"
 
     private fun recipe(version: String) = Recipe(

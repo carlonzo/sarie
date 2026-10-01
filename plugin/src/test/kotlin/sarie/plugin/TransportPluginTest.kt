@@ -68,7 +68,7 @@ class TransportPluginTest {
         println(result.output) // evidence: full fixture build log with the unsupported failure
         assertTrue(
             "expected the unsupported message, got:\n${result.output}",
-            result.output.contains("okhttp-cronet: okhttp 4.12.0 is not supported") &&
+            result.output.contains("sarie: okhttp 4.12.0 is not supported") &&
                 result.output.contains("okhttp 4"),
         )
     }
@@ -126,7 +126,7 @@ private fun fixtureArgs(): List<String> = listOf("assembleDebug", "--console=pla
 internal fun prepareFixture(okhttpVersion: String? = null, fixture: String = "sample-app"): File {
     val source = File("src/test/fixtures/$fixture")
     check(source.isDirectory) { "fixture not found at ${source.absolutePath}" }
-    val dir = Files.createTempDirectory("okhttp-cronet-fixture-").toFile()
+    val dir = Files.createTempDirectory("sarie-fixture-").toFile()
     source.copyRecursively(dir)
     val catalogDest = File(dir, "gradle/libs.versions.toml")
     catalogDest.parentFile.mkdirs()

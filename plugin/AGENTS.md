@@ -22,7 +22,7 @@ consumers), so a library apply registers only the pin/fingerprint guards and log
 the rewrite still needs the plugin on the application that packages the APK. OkHttp
 declared only in a library is still rewritten there as a transitive class.
 
-The visitor factory's parameters are `OkhttpCronetInstrumentationParams` with
+The visitor factory's parameters are `SarieInstrumentationParams` with
 `okhttpVersion: Property<String>` and optional `invalidateToken: Property<Long>`; only
 simple `Property` types cross the AGP instrumentation worker boundary (`okhttpVersion`
 defaults to `"family"`, `invalidateToken` can be set via `forceInstrument` or

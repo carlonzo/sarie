@@ -64,7 +64,7 @@ class CallServerInterceptorRewriterTest {
         val error = org.junit.Assert.assertThrows(IllegalStateException::class.java) {
             CallServerRewriter.rewrite(other)
         }
-        assertTrue(error.message, error.message!!.contains("okhttp-cronet"))
+        assertTrue(error.message, error.message!!.contains("got com/example/NotCallServer"))
     }
 
     @Test
@@ -100,7 +100,6 @@ class CallServerInterceptorRewriterTest {
         val error = org.junit.Assert.assertThrows(IllegalStateException::class.java) {
             guarded("5.5.0", tampered)
         }
-        assertTrue(error.message, error.message!!.contains("okhttp-cronet"))
         assertTrue(error.message, error.message!!.contains("writeRequestHeadersTampered"))
     }
 

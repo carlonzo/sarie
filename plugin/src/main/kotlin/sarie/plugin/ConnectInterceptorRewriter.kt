@@ -34,7 +34,7 @@ object ConnectInterceptorRewriter {
     fun rewrite(classBytes: ByteArray): ByteArray {
         val reader = ClassReader(classBytes)
         check(reader.className == TARGET_CLASS) {
-            "okhttp-cronet: expected class $TARGET_CLASS, got ${reader.className}"
+            "sarie: expected class $TARGET_CLASS, got ${reader.className}"
         }
         var found = false
         val writer = ClassWriter(ClassWriter.COMPUTE_FRAMES)
@@ -62,7 +62,7 @@ object ConnectInterceptorRewriter {
             }
         }, ClassReader.SKIP_FRAMES)
         check(found) {
-            "okhttp-cronet: method $INTERCEPT_NAME$INTERCEPT_DESC not found in $TARGET_CLASS"
+            "sarie: method $INTERCEPT_NAME$INTERCEPT_DESC not found in $TARGET_CLASS"
         }
         return writer.toByteArray()
     }

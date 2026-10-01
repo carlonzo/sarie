@@ -52,7 +52,7 @@ class RecipeRegistryTest {
     @Test
     fun `unknown version fails closed with the known-version list`() {
         val e = assertThrows(IllegalStateException::class.java) { RecipeRegistry.forVersion("4.12.0") }
-        assertTrue(e.message, e.message!!.contains("okhttp-cronet: no recipe for okhttp 4.12.0"))
+        assertTrue(e.message, e.message!!.contains("sarie: no recipe for okhttp 4.12.0"))
         for (known in RecipeRegistry.recipes.keys) {
             assertTrue(e.message, e.message!!.contains(known))
         }
@@ -124,7 +124,7 @@ class RecipeRegistryTest {
     @Test
     fun `untested warning names the version, the verified set and the skipped check`() {
         val warning = RecipeRegistry.untestedWarning("5.5.1")
-        assertTrue(warning, warning.contains("okhttp-cronet: okhttp 5.5.1 is UNTESTED"))
+        assertTrue(warning, warning.contains("sarie: okhttp 5.5.1 is UNTESTED"))
         assertTrue(warning, warning.contains("verified: ${RecipeRegistry.recipes.keys.sorted()}"))
         assertTrue(warning, warning.contains("structural guard"))
         assertTrue(warning, warning.contains("fingerprint identity check is skipped"))

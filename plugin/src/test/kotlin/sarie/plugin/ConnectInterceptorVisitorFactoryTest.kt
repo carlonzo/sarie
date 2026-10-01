@@ -38,11 +38,11 @@ class ConnectInterceptorVisitorFactoryTest {
     @Test
     fun `createClassVisitor creates guard visitor with configured okhttp version parameter`() {
         val project = org.gradle.testfixtures.ProjectBuilder.builder().build()
-        val paramsProperty = project.objects.property(OkhttpCronetInstrumentationParams::class.java)
+        val paramsProperty = project.objects.property(SarieInstrumentationParams::class.java)
         paramsProperty.set(fakeParams("5.5.0"))
 
         val factory = object : ConnectInterceptorVisitorFactory() {
-            override val parameters: Property<OkhttpCronetInstrumentationParams> = paramsProperty
+            override val parameters: Property<SarieInstrumentationParams> = paramsProperty
             override val instrumentationContext: InstrumentationContext
                 get() = throw UnsupportedOperationException("not needed for createClassVisitor")
         }
@@ -59,11 +59,11 @@ class ConnectInterceptorVisitorFactoryTest {
     @Test
     fun `createClassVisitor falls back to family guard when okhttp version is omitted`() {
         val project = org.gradle.testfixtures.ProjectBuilder.builder().build()
-        val paramsProperty = project.objects.property(OkhttpCronetInstrumentationParams::class.java)
+        val paramsProperty = project.objects.property(SarieInstrumentationParams::class.java)
         paramsProperty.set(fakeParams(null))
 
         val factory = object : ConnectInterceptorVisitorFactory() {
-            override val parameters: Property<OkhttpCronetInstrumentationParams> = paramsProperty
+            override val parameters: Property<SarieInstrumentationParams> = paramsProperty
             override val instrumentationContext: InstrumentationContext
                 get() = throw UnsupportedOperationException("not needed for createClassVisitor")
         }
@@ -79,15 +79,15 @@ class ConnectInterceptorVisitorFactoryTest {
 }
 
 private fun factory(): ConnectInterceptorVisitorFactory = object : ConnectInterceptorVisitorFactory() {
-    override val parameters: Property<OkhttpCronetInstrumentationParams>
+    override val parameters: Property<SarieInstrumentationParams>
         get() = throw UnsupportedOperationException("not needed for isInstrumentable")
     override val instrumentationContext: InstrumentationContext
         get() = throw UnsupportedOperationException("not needed for isInstrumentable")
 }
 
-private fun fakeParams(version: String? = null, invalidateToken: Long? = null): OkhttpCronetInstrumentationParams {
+private fun fakeParams(version: String? = null, invalidateToken: Long? = null): SarieInstrumentationParams {
     val project = org.gradle.testfixtures.ProjectBuilder.builder().build()
-    return object : OkhttpCronetInstrumentationParams {
+    return object : SarieInstrumentationParams {
         override val okhttpVersion: Property<String> = project.objects.property(String::class.java).apply {
             if (version != null) set(version)
         }

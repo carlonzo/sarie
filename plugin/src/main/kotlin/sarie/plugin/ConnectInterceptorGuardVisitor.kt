@@ -16,7 +16,7 @@ import org.gradle.api.tasks.Optional
  * Worker-serializable instrumentation parameters; only simple Property types cross the AGP
  * instrumentation worker boundary.
  */
-interface OkhttpCronetInstrumentationParams : InstrumentationParameters {
+interface SarieInstrumentationParams : InstrumentationParameters {
     @get:Input
     val okhttpVersion: Property<String>
 
@@ -26,7 +26,7 @@ interface OkhttpCronetInstrumentationParams : InstrumentationParameters {
 }
 
 /** The AGP instrumentation entry point; only ever installed on Android application variants. */
-abstract class ConnectInterceptorVisitorFactory : AsmClassVisitorFactory<OkhttpCronetInstrumentationParams> {
+abstract class ConnectInterceptorVisitorFactory : AsmClassVisitorFactory<SarieInstrumentationParams> {
     override fun isInstrumentable(classData: ClassData): Boolean = isTargetClass(classData.className)
 
     override fun createClassVisitor(
@@ -86,7 +86,7 @@ internal class ConnectInterceptorGuardVisitor(
             InstrumentTarget.CONNECT_INTERCEPTOR -> RecordingMethodVisitor(delegate) { insns ->
                 val problems = guard.verify(insns)
                 check(problems.isEmpty()) {
-                    "okhttp-cronet: ConnectInterceptor.intercept does not match the pinned stock shape; " +
+                    "sarie: ConnectInterceptor.intercept does not match the pinned stock shape; " +
                         "refusing to rewrite.\n" +
                         problems.joinToString("\n") { "- $it" } +
                         "\nCaptured instructions:\n" +
@@ -106,7 +106,7 @@ internal class ConnectInterceptorGuardVisitor(
         val target = InstrumentationTargets.byInternalName(name)
         if (target != null) {
             check(targetMethodSeen) {
-                "okhttp-cronet: method ${expectedMethod(target)} not found in " +
+                "sarie: method ${expectedMethod(target)} not found in " +
                     "$name; refusing to rewrite"
             }
         }

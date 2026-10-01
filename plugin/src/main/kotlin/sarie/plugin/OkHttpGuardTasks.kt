@@ -46,13 +46,13 @@ internal fun pinDecision(versions: Set<String>): PinDecision {
     val supported = RecipeRegistry.recipes.keys.sorted()
     if (versions.isEmpty()) {
         return PinDecision.Fail(
-            "okhttp-cronet: no com.squareup.okhttp3:okhttp resolved on any runtimeClasspath; " +
+            "sarie: no com.squareup.okhttp3:okhttp resolved on any runtimeClasspath; " +
                 "the trampoline rewrite has nothing to apply to. Add a supported okhttp version ($supported).",
         )
     }
     if (versions.size != 1) {
         return PinDecision.Fail(
-            "okhttp-cronet: multiple okhttp versions resolved (${versions.joinToString()}); " +
+            "sarie: multiple okhttp versions resolved (${versions.joinToString()}); " +
                 "supported: $supported",
         )
     }
@@ -88,7 +88,7 @@ abstract class VerifyOkHttpPinTask : DefaultTask() {
             )
         ) {
             PinDecision.Ok -> Unit
-            is PinDecision.Warn -> logger.warn("[okhttp-cronet] ${decision.message}")
+            is PinDecision.Warn -> logger.warn("[sarie] ${decision.message}")
             is PinDecision.Fail -> throw GradleException(decision.message)
         }
     }
@@ -123,7 +123,7 @@ abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
         when (val decision = applyFailOnUntested(pinDecision(versions), failOnUntested.get())) {
             is PinDecision.Fail -> throw GradleException(decision.message)
             is PinDecision.Warn -> {
-                logger.warn("[okhttp-cronet] ${decision.message}")
+                logger.warn("[sarie] ${decision.message}")
                 return
             }
             PinDecision.Ok -> Unit
@@ -145,7 +145,7 @@ abstract class VerifyOkHttpFingerprintTask : DefaultTask() {
                     target.classEntry,
                 ) ?: continue
                 if (allow) {
-                    logger.warn("[okhttp-cronet] $failure")
+                    logger.warn("[sarie] $failure")
                 } else {
                     throw GradleException(failure)
                 }
@@ -163,7 +163,7 @@ internal fun fingerprintFailure(
     classEntry: String = InstrumentTarget.CONNECT_INTERCEPTOR.classEntry,
 ): String? {
     if (actual.equals(expected, ignoreCase = true)) return null
-    val message = "okhttp-cronet: $classEntry fingerprint mismatch for " +
+    val message = "sarie: $classEntry fingerprint mismatch for " +
         "$coordinates (expected=$expected actual=$actual); the pinned rewrite is not safe " +
         "for this okhttp build. Align your okhttp version with the pinned one."
     return if (allowUnfingerprinted) {
@@ -201,12 +201,12 @@ internal fun classEntryBytes(
             if (variant == Variant.ANDROID && entry.name == "classes.jar") {
                 return classEntryInJar(zip.readBytes(), classEntry)
                     ?: throw GradleException(
-                        "okhttp-cronet: $classEntry not found inside classes.jar of $coordinates",
+                        "sarie: $classEntry not found inside classes.jar of $coordinates",
                     )
             }
             entry = zip.nextEntry
         }
-        throw GradleException("okhttp-cronet: $classEntry not found in $coordinates")
+        throw GradleException("sarie: $classEntry not found in $coordinates")
     }
 }
 

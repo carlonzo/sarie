@@ -5,7 +5,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
 
 private val DAEMON_THREAD_FACTORY = ThreadFactory { runnable ->
-    Thread(runnable, "okhttp-cronet-callbacks").apply { isDaemon = true }
+    Thread(runnable, "sarie-callbacks").apply { isDaemon = true }
 }
 
 /**

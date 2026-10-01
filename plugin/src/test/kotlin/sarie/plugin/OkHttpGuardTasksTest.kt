@@ -200,7 +200,7 @@ class OkHttpGuardTasksTest {
 private const val CONNECT_INTERCEPTOR_TEST_ENTRY = "okhttp3/internal/connection/ConnectInterceptor.class"
 
 private fun zipOf(entries: Map<String, ByteArray>): File {
-    val file = File.createTempFile("okhttp-cronet-guard-test", ".zip")
+    val file = File.createTempFile("sarie-guard-test", ".zip")
     file.deleteOnExit()
     ZipOutputStream(file.outputStream().buffered()).use { zip ->
         for ((name, bytes) in entries) {
