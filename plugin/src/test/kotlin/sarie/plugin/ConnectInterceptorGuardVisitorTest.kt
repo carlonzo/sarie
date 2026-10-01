@@ -67,7 +67,6 @@ class ConnectInterceptorGuardVisitorTest {
             }
         }
         val e = assertThrows(IllegalStateException::class.java) { guarded("5.5.0", tampered) }
-        assertTrue(e.message, e.message!!.contains("okhttp-cronet"))
         // The failure carries a javap-style dump of the captured instructions.
         assertTrue(e.message, e.message!!.contains("proceedTampered"))
         assertTrue(e.message, e.message!!.contains("CHECKCAST okhttp3/internal/http/RealInterceptorChain"))
@@ -83,7 +82,7 @@ class ConnectInterceptorGuardVisitorTest {
             }
         }
         val e = assertThrows(IllegalStateException::class.java) { guarded("5.5.0", tampered) }
-        assertTrue(e.message, e.message!!.contains("okhttp-cronet"))
+        assertTrue(e.message, e.message!!.contains("does not match the pinned stock shape"))
     }
 
     @Test

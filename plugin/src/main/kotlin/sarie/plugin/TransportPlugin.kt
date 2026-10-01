@@ -54,7 +54,7 @@ class TransportPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         val extension = target.extensions.create("sarie", SarieExtension::class.java)
         target.plugins.withId("com.android.application") {
-            target.logger.lifecycle("[okhttp-cronet] META-INF marker skipped: no public Variant API for generated assets")
+            target.logger.lifecycle("[sarie] META-INF marker skipped: no public Variant API for generated assets")
             registerInstrumentation(target, extension)
             registerGuards(target, extension)
         }
@@ -69,7 +69,7 @@ class TransportPlugin : Plugin<Project> {
                 it.plugins.hasPlugin("com.android.library")
             if (!android) {
                 it.logger.warn(
-                    "[okhttp-cronet] plugin is a no-op outside an Android application or library module",
+                    "[sarie] plugin is a no-op outside an Android application or library module",
                 )
             }
         }
@@ -168,7 +168,7 @@ class TransportPlugin : Plugin<Project> {
         const val PLUGIN_ID: String = "com.carlonzo.sarie"
 
         internal const val LIBRARY_REWRITE_NOTE: String =
-            "[okhttp-cronet] library module: pin/fingerprint guards registered. " +
+            "[sarie] library module: pin/fingerprint guards registered. " +
                 "The ConnectInterceptor rewrite requires this plugin on the application " +
                 "(AGP cannot instrument dependencies into a library AAR)."
     }

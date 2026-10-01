@@ -65,12 +65,12 @@ internal object KtorProtocolPatch {
 
     fun patch(classNode: ClassNode) {
         val clinit = classNode.methods.firstOrNull { it.name == "<clinit>" && it.desc == "()V" }
-            ?: error("okhttp-cronet: ${classNode.name} has no <clinit>; refusing to rewrite")
+            ?: error("sarie: ${classNode.name} has no <clinit>; refusing to rewrite")
         val insns = clinit.instructions.filter { it.opcode >= 0 }
         val stores = verifiedStores(classNode.name, insns)
         if (stores == CURRENT_STORES) return
         check(stores == LEGACY_STORES) {
-            "okhttp-cronet: ${classNode.name} stores $stores match neither Ktor < 3.3 ($LEGACY_STORES) " +
+            "sarie: ${classNode.name} stores $stores match neither Ktor < 3.3 ($LEGACY_STORES) " +
                 "nor Ktor >= 3.3 ($CURRENT_STORES); refusing to rewrite"
         }
         // Insert before the trailing `ALOAD 0; PUTSTATIC; RETURN`: every legacy store (and its
@@ -121,7 +121,7 @@ internal object KtorProtocolPatch {
             problems += "<clinit> does not end with ALOAD 0 / PUTSTATIC $MAPPING_FIELD / RETURN"
         }
         check(problems.isEmpty()) {
-            "okhttp-cronet: $className does not match the Ktor WhenMappings shape; refusing to rewrite:\n" +
+            "sarie: $className does not match the Ktor WhenMappings shape; refusing to rewrite:\n" +
                 problems.joinToString("\n") { " - $it" }
         }
         return stores

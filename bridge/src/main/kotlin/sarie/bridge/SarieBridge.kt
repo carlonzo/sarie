@@ -385,7 +385,7 @@ internal fun warnIfUnverified(runtimeVersion: String) {
     if (runtimeVersion in VerifiedOkHttpVersions) return
     SarieBridge.logger?.log(
         Log.WARN,
-        "okhttp-cronet is running against okhttp $runtimeVersion, which was not verified with this " +
+        "Sarie is running against okhttp $runtimeVersion, which was not verified with this " +
             "build (verified: ${VerifiedOkHttpVersions.sorted().joinToString()}). The build-time " +
             "structural guard covered ConnectInterceptor only; run the verification suites for this version.",
         null,

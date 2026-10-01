@@ -19,7 +19,7 @@ internal object CallServerRewriter {
         val reader = ClassReader(classBytes)
         val expected = InstrumentTarget.CALL_SERVER_INTERCEPTOR.internalName
         check(reader.className == expected) {
-            "okhttp-cronet: expected class $expected, got ${reader.className}"
+            "sarie: expected class $expected, got ${reader.className}"
         }
         var found = false
         val writer = framingWriter(reader)
@@ -40,7 +40,7 @@ internal object CallServerRewriter {
             }
         }, ClassReader.SKIP_FRAMES)
         check(found) {
-            "okhttp-cronet: method ${InstrumentationTargets.INTERCEPT_NAME}${InstrumentationTargets.INTERCEPT_DESC} " +
+            "sarie: method ${InstrumentationTargets.INTERCEPT_NAME}${InstrumentationTargets.INTERCEPT_DESC} " +
                 "not found in $expected"
         }
         return writer.toByteArray()
@@ -200,12 +200,12 @@ internal class CallServerPrefixVisitor(
 
     override fun visitEnd() {
         check(codeStarted) {
-            "okhttp-cronet: CallServerInterceptor.intercept has no code; refusing to rewrite"
+            "sarie: CallServerInterceptor.intercept has no code; refusing to rewrite"
         }
         val insns = recorder.insns
         val problems = CallServerGuard.verify(insns)
         check(problems.isEmpty()) {
-            "okhttp-cronet: CallServerInterceptor.intercept does not match the pinned stock shape; " +
+            "sarie: CallServerInterceptor.intercept does not match the pinned stock shape; " +
                 "refusing to rewrite.\n" +
                 problems.joinToString("\n") { "- $it" } +
                 "\nCaptured instructions:\n" +
@@ -230,7 +230,7 @@ internal class CallServerPrefixVisitor(
             }
         }
         check(injected) {
-            "okhttp-cronet: CallServerInterceptor.intercept preamble was shorter than " +
+            "sarie: CallServerInterceptor.intercept preamble was shorter than " +
                 "${CallServerGuard.PREAMBLE_INSNS} instructions; refusing to rewrite"
         }
     }

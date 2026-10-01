@@ -24,7 +24,7 @@ internal object CacheHooksRewriter {
     private fun rewrite(classBytes: ByteArray, target: InstrumentTarget): ByteArray {
         val reader = ClassReader(classBytes)
         check(reader.className == target.internalName) {
-            "okhttp-cronet: expected class ${target.internalName}, got ${reader.className}"
+            "sarie: expected class ${target.internalName}, got ${reader.className}"
         }
         var found = false
         val writer = CallServerRewriter.framingWriter(reader)
@@ -43,7 +43,7 @@ internal object CacheHooksRewriter {
             }
         }, ClassReader.SKIP_FRAMES)
         check(found) {
-            "okhttp-cronet: cache site ${siteLabel(target)} not found in ${target.internalName}"
+            "sarie: cache site ${siteLabel(target)} not found in ${target.internalName}"
         }
         return writer.toByteArray()
     }
@@ -105,7 +105,7 @@ internal fun substituteVisitor(target: InstrumentTarget, delegate: MethodVisitor
             },
             maxStackDelta = 0,
         )
-        else -> error("okhttp-cronet: $target is not a cache site")
+        else -> error("sarie: $target is not a cache site")
     }
 
 private fun siteLabel(target: InstrumentTarget): String = when (target) {
@@ -247,12 +247,12 @@ internal class CacheSubstituteVisitor(
 
     override fun visitEnd() {
         check(codeStarted) {
-            "okhttp-cronet: $site has no code; refusing to rewrite"
+            "sarie: $site has no code; refusing to rewrite"
         }
         val insns = recorder.insns
         val problems = verify(insns)
         check(problems.isEmpty()) {
-            "okhttp-cronet: $site does not match the pinned stock shape; refusing to rewrite.\n" +
+            "sarie: $site does not match the pinned stock shape; refusing to rewrite.\n" +
                 problems.joinToString("\n") { "- $it" } +
                 "\nCaptured instructions:\n" +
                 insns.joinToString("\n") { "  $it" }
@@ -268,7 +268,7 @@ internal class CacheSubstituteVisitor(
             }
         }
         check(replaced == 1) {
-            "okhttp-cronet: expected to replace exactly one isHttps in $site, replaced $replaced"
+            "sarie: expected to replace exactly one isHttps in $site, replaced $replaced"
         }
         delegate.visitEnd()
     }

@@ -15,7 +15,7 @@ mkdir -p "$CERTS" "$BIG"
 # 1) Root CA (10y, critical CA constraints).
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "$CERTS/ca.key" -out "$CERTS/ca.pem" -days 3650 \
-  -subj "/CN=okhttp-cronet-test-ca" \
+  -subj "/CN=sarie-test-ca" \
   -addext "basicConstraints=critical,CA:TRUE" \
   -addext "keyUsage=critical,keyCertSign,cRLSign"
 

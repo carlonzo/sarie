@@ -200,7 +200,6 @@ class CacheHooksRewriterTest {
         val error = org.junit.Assert.assertThrows(IllegalStateException::class.java) {
             guarded("5.4.0", tampered)
         }
-        assertTrue(error.message, error.message!!.contains("okhttp-cronet"))
         assertTrue(error.message, error.message!!.contains("exactly one HttpUrl.isHttps"))
     }
 
@@ -293,7 +292,7 @@ class CacheHooksRewriterTest {
         val error = org.junit.Assert.assertThrows(IllegalStateException::class.java) {
             CacheHooksRewriter.rewriteEntry(other)
         }
-        assertTrue(error.message, error.message!!.contains("okhttp-cronet"))
+        assertTrue(error.message, error.message!!.contains("got com/example/NotCache"))
     }
 
     @Test
