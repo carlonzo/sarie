@@ -23,6 +23,11 @@ abstract class SarieExtension {
      * Useful during plugin/transform development or debugging with InstrumentationScope.ALL.
      */
     abstract val forceInstrument: Property<Boolean>
+    /**
+     * When true, patches Ktor's OkHttp engine < 3.3 so an HTTP/3 response maps to its `QUIC`
+     * protocol instead of throwing `NoWhenBranchMatchedException`. Default true.
+     */
+    abstract val instrumentKtor: Property<Boolean>
 
     init {
         enabled.convention(true)
@@ -30,6 +35,7 @@ abstract class SarieExtension {
         allowUnfingerprinted.convention(false)
         failOnUntested.convention(false)
         forceInstrument.convention(false)
+        instrumentKtor.convention(true)
     }
 }
 
@@ -73,26 +79,26 @@ class TransportPlugin : Plugin<Project> {
         val androidComponents = project.extensions.getByType(ApplicationAndroidComponentsExtension::class.java)
         androidComponents.onVariants(androidComponents.selector().all()) { variant ->
             if (extension.enabled.get()) {
-                listOfNotNull(variant, variant.androidTest).forEach { component ->
-                    component.instrumentation.transformClassesWith(
-                        ConnectInterceptorVisitorFactory::class.java,
-                        InstrumentationScope.ALL,
-                    ) { params ->
-                        params.okhttpVersion.set(extension.okhttpVersion.orElse("family"))
-                        val force = extension.forceInstrument.get() ||
-                            project.providers.gradleProperty("sarie.forceInstrument").orNull == "true"
-                        if (force) {
-                            params.invalidateToken.set(System.currentTimeMillis())
-                        }
+                variant.instrumentation.transformClassesWith(
+                    ConnectInterceptorVisitorFactory::class.java,
+                    InstrumentationScope.ALL,
+                ) { params ->
+                    params.okhttpVersion.set(extension.okhttpVersion.orElse("family"))
+                    val force = extension.forceInstrument.get() ||
+                        project.providers.gradleProperty("sarie.forceInstrument").orNull == "true"
+                    if (force) {
+                        params.invalidateToken.set(System.currentTimeMillis())
                     }
-                    component.instrumentation.transformClassesWith(
+                }
+                if (extension.instrumentKtor.get()) {
+                    variant.instrumentation.transformClassesWith(
                         KtorProtocolPatchFactory::class.java,
                         InstrumentationScope.ALL,
-                    ) { }
-                    component.instrumentation.setAsmFramesComputationMode(
-                        FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
-                    )
+                    ) {}
                 }
+                variant.instrumentation.setAsmFramesComputationMode(
+                    FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,
+                )
             }
         }
     }

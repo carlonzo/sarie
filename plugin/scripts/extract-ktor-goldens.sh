@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Regenerates src/test/resources/ktor/<version>/OkUtilsKt$WhenMappings.class from Maven Central.
+# The only way to update those goldens; never hand-edit them.
 
-VERSIONS=("2.3.13" "3.2.4" "3.3.0")
+VERSIONS=("2.0.0" "2.2.4" "2.3.13" "3.0.0" "3.2.4" "3.3.0")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_ROOT="$(cd "$SCRIPT_DIR/../src/test/resources" && pwd)/ktor"
 

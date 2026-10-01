@@ -6,6 +6,7 @@ import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
 import sarie.bridge.SarieProtocol
 import sarie.bridge.SarieTimings
+import sarie.instrumentation.KtorProbe
 import sarie.instrumentation.NetworkParity
 import sarie.instrumentation.TestAppRuntime
 import java.io.File
@@ -16,12 +17,6 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.SSLPeerUnverifiedException
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.request.get
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.HttpProtocolVersion
-import kotlinx.coroutines.runBlocking
 import okhttp3.Authenticator
 import okhttp3.Cache
 import okhttp3.CacheControl
@@ -364,18 +359,18 @@ class CronetSuite {
 
     @Test
     fun ktor2OkHttpEngineOverH3() {
+        // Ktor's OkHttp engine < 3.3 has no Protocol.HTTP_3 branch; without the plugin's Ktor
+        // patch an h3 response throws NoWhenBranchMatchedException. cloudflare-quic.com can
+        // answer the first request over h2, so retry until h3 (reported by Ktor as QUIC).
         installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
-        val client = HttpClient(OkHttp)
-        try {
-            runBlocking {
-                val response = client.get("https://cloudflare-quic.com/")
-                assertEquals(200, response.status.value)
-                assertTrue(response.bodyAsText().isNotEmpty())
-                assertEquals(HttpProtocolVersion.QUIC, response.version)
-            }
-        } finally {
-            client.close()
+        val versions = mutableListOf<String>()
+        while (versions.size < 5 && versions.lastOrNull() != "QUIC/1.0") {
+            val result = KtorProbe.get("https://cloudflare-quic.com/")
+            assertEquals(200, result.status)
+            assertTrue(result.bodyLength > 0)
+            versions += result.version
         }
+        assertEquals("versions seen: $versions", "QUIC/1.0", versions.last())
         assertCronetServed()
     }
 

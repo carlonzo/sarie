@@ -47,10 +47,9 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
   response and on a cached HTTPS hit. See `COMPATIBILITY.md`.
 - Callbacks are CPU-only: `RequestConverter` uses `allowDirectExecutor()`, so Cronet invokes
   `OkHttpBridgeCallback` directly on its own threads. Never block inside a callback.
-- Ktor compat patch: instruments exactly `io.ktor.client.engine.okhttp.OkUtilsKt$WhenMappings`
-  `<clinit>`, adding `HTTP_3 -> 6` when stores match the 6-entry Ktor < 3.3 shape (mapping h3 to QUIC),
-  passes through byte-for-byte on Ktor >= 3.3 (where `HTTP_3` is already present), and fails closed on
-  any other shape.
+- One optional fifth site, outside OkHttp: `io.ktor.client.engine.okhttp.OkUtilsKt$WhenMappings.<clinit>`
+  (`sarie { instrumentKtor }`, default true). It adds `HTTP_3 -> 6` (Ktor's QUIC case) only to the
+  exact Ktor < 3.3 store list. Ktor >= 3.3 is semantically unchanged. Any other shape fails the build.
 
 ## Build and test
 

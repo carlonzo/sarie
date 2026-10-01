@@ -80,12 +80,13 @@ dependencies {
     compileOnly(libs.androidx.test.core)
 
     implementation(libs.cronet.embedded)
+    // Ktor 2 (< 3.3) exercises the plugin's Ktor patch. In the app APK, not androidTest, so the
+    // minified variant runs R8 over the patched switch map the way a real app ships it.
+    implementation("io.ktor:ktor-client-okhttp:2.3.13")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.okhttp.logging)
-    // Pinned to Ktor 2 to verify HTTP/3 compatibility rewrite on older Ktor engines (< 3.3.0).
-    androidTestImplementation("io.ktor:ktor-client-okhttp:2.3.13")
     androidTestImplementation("com.squareup.okhttp3:mockwebserver3:$okhttpVersionForTests")
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.core)

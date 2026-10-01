@@ -12,9 +12,11 @@ rewrites do at runtime is `../COMPATIBILITY.md`; do not duplicate it here.
 Outside those it is a no-op with a warning.
 
 On **application** modules it hooks `androidComponents.onVariants` and registers
-`transformClassesWith(ConnectInterceptorVisitorFactory, InstrumentationScope.ALL)` and
-`transformClassesWith(KtorProtocolPatchFactory, InstrumentationScope.ALL)` (on the variant and its
-`androidTest` component) plus `FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS`. AGP forbids
+`transformClassesWith(ConnectInterceptorVisitorFactory, InstrumentationScope.ALL)`, plus
+`transformClassesWith(KtorProtocolPatchFactory, InstrumentationScope.ALL)` unless
+`sarie { instrumentKtor.set(false) }`, plus
+`FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS`. Both are on the app variant only,
+never its test components (the guards skip test classpaths too). AGP forbids
 `InstrumentationScope.ALL` on libraries (instrumenting a dependency AAR has no effect on
 consumers), so a library apply registers only the pin/fingerprint guards and logs that
 the rewrite still needs the plugin on the application that packages the APK. OkHttp
@@ -53,12 +55,15 @@ method was never seen. Each target has its own structural guard.
 
 ## Ktor compatibility patch
 
-`KtorProtocolPatchFactory` instruments `io.ktor.client.engine.okhttp.OkUtilsKt$WhenMappings`
-`<clinit>`. When stores match `{HTTP_1_0:1, HTTP_1_1:2, SPDY_3:3, HTTP_2:4, H2_PRIOR_KNOWLEDGE:5, QUIC:6}`
-(Ktor < 3.3.0), it appends `HTTP_3 -> 6` wrapped in a `NoSuchFieldError` try/catch right before
-the final `putstatic $EnumSwitchMapping$0`, routing HTTP/3 responses to Ktor's QUIC case. When `HTTP_3`
-is already present (Ktor >= 3.3), it passes through unchanged; any other shape fails closed with
-`IllegalStateException`.
+`KtorProtocolPatch.kt` instruments `io.ktor.client.engine.okhttp.OkUtilsKt$WhenMappings.<clinit>`.
+The guard requires every `IASTORE` to be `ALOAD 0` / `GETSTATIC Protocol.X` / `ordinal()` / const,
+and the method to end with the single `ALOAD 0` / `PUTSTATIC $EnumSwitchMapping$0` / `RETURN`.
+The ordered stores must then be exactly `HTTP_1_0:1, HTTP_1_1:2, SPDY_3:3, HTTP_2:4,
+H2_PRIOR_KNOWLEDGE:5, QUIC:6` (Ktor 2.0.0 to 3.2.x; 2.0.x has no `NoSuchFieldError` handlers,
+later versions do). In that case one plain `HTTP_3 -> 6` store is inserted before the trailing
+`ALOAD 0`. The same list plus `HTTP_3:7` (Ktor >= 3.3) is left alone. Anything else throws
+`IllegalStateException`. Goldens under `src/test/resources/ktor/` come only from
+`scripts/extract-ktor-goldens.sh`.
 
 ## Guards
 
@@ -98,15 +103,13 @@ TestKit forks must use temurin-21 (see the JDK note in that file).
 
 ## Invariants
 
-- Instrument exactly the registered targets (plus the Ktor compat patch for
-  `io.ktor.client.engine.okhttp.OkUtilsKt$WhenMappings`), and only the four methods in the rewrite
-  pipeline (plus `OkUtilsKt$WhenMappings.<clinit>`).
+- Instrument exactly the registered targets, and only the four methods in the rewrite pipeline.
+  The one exception is the Ktor patch on `OkUtilsKt$WhenMappings.<clinit>`.
 - Descriptors stay `CronetBridge.intercept` and `CronetBridge.callServer`
   `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`, `CacheHooks.expectTlsBlock`
   `(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`, and `CacheHooks.requireHandshake`
   `(Lokhttp3/Request;)Z`. `ConnectInterceptor` stays a full replace. `CallServerInterceptor`
   stays a prefix. The two cache sites each replace one `isHttps`.
 - Never touch `<clinit>`, `INSTANCE`, or a constructor other than the one
-  `Cache$Entry.<init>(Source)` site, except for the Ktor compat patch which touches only
-  `OkUtilsKt$WhenMappings.<clinit>`.
-- Goldens under `plugin/src/test/resources/stock/` are script-generated; never hand-edit them.
+  `Cache$Entry.<init>(Source)` site. The Ktor patch's `<clinit>` is not an OkHttp class.
+- Goldens under `plugin/src/test/resources/stock/` and `ktor/` are script-generated; never hand-edit them.

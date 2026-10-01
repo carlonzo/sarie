@@ -32,6 +32,7 @@ play-services-cronet = { module = "com.google.android.gms:play-services-cronet",
 junit = { module = "junit:junit", version.ref = "junit" }
 asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
 asm-commons = { module = "org.ow2.asm:asm-commons", version.ref = "asm" }
+asm-tree = { module = "org.ow2.asm:asm-tree", version.ref = "asm" }
 agp = { module = "com.android.tools.build:gradle", version.ref = "agp" }
 agp-api = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
