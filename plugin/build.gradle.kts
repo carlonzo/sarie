@@ -19,6 +19,7 @@ dependencies {
     compileOnly(libs.agp.api)
     compileOnly(libs.asm)
     compileOnly(libs.asm.commons)
+    compileOnly(libs.asm.tree)
     // Test-only: rewriter and fingerprint work compile against OkHttp classes; never exposed as api.
     compileOnly(libs.okhttp.min)
     testImplementation(gradleTestKit())
@@ -27,6 +28,7 @@ dependencies {
     // (compileOnly does not reach tests).
     testImplementation(libs.agp.api)
     testImplementation(libs.asm)
+    testImplementation(libs.asm.tree)
     testImplementation(libs.okhttp.min)
 }
 

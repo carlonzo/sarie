@@ -23,6 +23,11 @@ abstract class SarieExtension {
      * Useful during plugin/transform development or debugging with InstrumentationScope.ALL.
      */
     abstract val forceInstrument: Property<Boolean>
+    /**
+     * When true, patches Ktor's OkHttp engine < 3.3 so an HTTP/3 response maps to its `QUIC`
+     * protocol instead of throwing `NoWhenBranchMatchedException`. Default true.
+     */
+    abstract val instrumentKtor: Property<Boolean>
 
     init {
         enabled.convention(true)
@@ -30,6 +35,7 @@ abstract class SarieExtension {
         allowUnfingerprinted.convention(false)
         failOnUntested.convention(false)
         forceInstrument.convention(false)
+        instrumentKtor.convention(true)
     }
 }
 
@@ -83,6 +89,12 @@ class TransportPlugin : Plugin<Project> {
                     if (force) {
                         params.invalidateToken.set(System.currentTimeMillis())
                     }
+                }
+                if (extension.instrumentKtor.get()) {
+                    variant.instrumentation.transformClassesWith(
+                        KtorProtocolPatchFactory::class.java,
+                        InstrumentationScope.ALL,
+                    ) {}
                 }
                 variant.instrumentation.setAsmFramesComputationMode(
                     FramesComputationMode.COMPUTE_FRAMES_FOR_INSTRUMENTED_METHODS,

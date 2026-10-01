@@ -6,6 +6,7 @@ import sarie.bridge.FallbackReason
 import sarie.bridge.SarieBridge
 import sarie.bridge.SarieProtocol
 import sarie.bridge.SarieTimings
+import sarie.instrumentation.KtorProbe
 import sarie.instrumentation.NetworkParity
 import sarie.instrumentation.TestAppRuntime
 import java.io.File
@@ -354,6 +355,23 @@ class CronetSuite {
         }
 
         assertCronetServed(minCount = 2)
+    }
+
+    @Test
+    fun ktor2OkHttpEngineOverH3() {
+        // Ktor's OkHttp engine < 3.3 has no Protocol.HTTP_3 branch; without the plugin's Ktor
+        // patch an h3 response throws NoWhenBranchMatchedException. cloudflare-quic.com can
+        // answer the first request over h2, so retry until h3 (reported by Ktor as QUIC).
+        installCronet(quicHintHost = "cloudflare-quic.com", quicHintPort = 443)
+        val versions = mutableListOf<String>()
+        while (versions.size < 5 && versions.lastOrNull() != "QUIC/1.0") {
+            val result = KtorProbe.get("https://cloudflare-quic.com/")
+            assertEquals(200, result.status)
+            assertTrue(result.bodyLength > 0)
+            versions += result.version
+        }
+        assertEquals("versions seen: $versions", "QUIC/1.0", versions.last())
+        assertCronetServed()
     }
 
     @Test

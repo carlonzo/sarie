@@ -150,3 +150,15 @@
 # (keepAllForTest) sees the tested app's classes but not those rules.
 -dontwarn com.google.android.gms.net.CronetProviderInstaller
 -dontwarn com.google.android.gms.tasks.**
+
+
+# (7) KtorProbe - the androidTest's only entry into Ktor (CronetSuite.ktor2OkHttpEngineOverH3).
+# Without it R8 strips the unused Ktor client from the app: NoClassDefFoundError
+# io/ktor/client/engine/okhttp/OkHttp. Ktor itself is NOT kept, so R8 still optimizes the
+# plugin-patched OkUtilsKt$WhenMappings switch map.
+-keep class sarie.instrumentation.KtorProbe { *; }
+-keep class sarie.instrumentation.KtorProbe$Result { *; }
+
+# (8) Ktor 2 pulls slf4j-api 1.7, whose org.slf4j.LoggerFactory.bind() looks up the optional
+# binding org.slf4j.impl.StaticLoggerBinder (absent: slf4j falls back to NOP). R8: Missing class.
+-dontwarn org.slf4j.impl.StaticLoggerBinder

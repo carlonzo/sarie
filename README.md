@@ -58,6 +58,7 @@ sarie {
     enabled.set(true)               // false: no bytecode rewrite and no version guards (default true)
     failOnUntested.set(false)       // true: an untested (newer) OkHttp fails the build instead of warning
     allowUnfingerprinted.set(false) // true: a fingerprint mismatch warns instead of failing
+    instrumentKtor.set(true)        // false: skip the Ktor < 3.3 HTTP/3 compat patch (COMPATIBILITY.md row 37)
 }
 ```
 
