@@ -82,7 +82,7 @@ dependencies {
     implementation(libs.cronet.embedded)
     // Ktor 2 (< 3.3) exercises the plugin's Ktor patch. In the app APK, not androidTest, so the
     // minified variant runs R8 over the patched switch map the way a real app ships it.
-    implementation("io.ktor:ktor-client-okhttp:2.3.13")
+    implementation("io.ktor:ktor-client-okhttp:3.6.0")
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.junit)
