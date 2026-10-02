@@ -69,15 +69,36 @@ internal class RequestBodyEvents(
  */
 internal object UploadDataProviders {
 
+    /**
+     * Creates the provider for [body], applying the decision rule documented above.
+     *
+     * @param contentLength the body length as already measured by the caller. Passing it spares
+     * the body another [RequestBody.contentLength] round-trip - a MultipartBody re-sums every
+     * part per call and a custom body may do I/O. It defaults to measuring the body, so callers
+     * that never measured it stay correct.
+     */
     fun create(
         body: RequestBody,
         bodyReaderExecutor: ExecutorService,
         writeTimeoutMillis: Long,
         requestBodyEvents: RequestBodyEvents? = null,
-    ): UploadDataProvider = if (body.isOneShot() || body.contentLength() == -1L) {
-        StreamingUploadDataProvider(body, bodyReaderExecutor, writeTimeoutMillis, requestBodyEvents)
+        contentLength: Long = body.contentLength(),
+    ): UploadDataProvider = if (body.isOneShot() || contentLength == -1L) {
+        StreamingUploadDataProvider(
+            body,
+            bodyReaderExecutor,
+            writeTimeoutMillis,
+            requestBodyEvents,
+            contentLength,
+        )
     } else {
-        BufferedUploadDataProvider(body, bodyReaderExecutor, writeTimeoutMillis, requestBodyEvents)
+        BufferedUploadDataProvider(
+            body,
+            bodyReaderExecutor,
+            writeTimeoutMillis,
+            requestBodyEvents,
+            contentLength,
+        )
     }
 
     /**
@@ -89,6 +110,7 @@ internal object UploadDataProviders {
         private val bodyReaderExecutor: ExecutorService,
         writeTimeoutMillis: Long,
         private val requestBodyEvents: RequestBodyEvents?,
+        private val contentLength: Long,
     ) : UploadDataProvider() {
 
         private val writeTimeoutMillis: Long =
@@ -97,7 +119,7 @@ internal object UploadDataProviders {
         private var materialized: ByteArray? = null
         private var offset = 0
 
-        override fun getLength(): Long = body.contentLength()
+        override fun getLength(): Long = contentLength
 
         @Synchronized
         override fun read(sink: UploadDataSink, buffer: ByteBuffer) {
@@ -155,6 +177,7 @@ internal object UploadDataProviders {
         private val readExecutor: ExecutorService,
         writeTimeoutMillis: Long,
         private val requestBodyEvents: RequestBodyEvents?,
+        private val contentLength: Long,
     ) : UploadDataProvider() {
 
         private val writeTimeoutMillis: Long =
@@ -164,13 +187,13 @@ internal object UploadDataProviders {
         private var readTask: Future<*>? = null
         private var totalBytesReadFromOkHttp = 0L
 
-        override fun getLength(): Long = body.contentLength()
+        override fun getLength(): Long = contentLength
 
         override fun read(sink: UploadDataSink, buffer: ByteBuffer) {
             ensureReadTaskStarted()
 
             try {
-                if (getLength() == -1L) {
+                if (contentLength == -1L) {
                     val result = readFromOkHttp(buffer)
                     if (result == ReadResult.END_OF_BODY) {
                         requestBodyEvents?.end(totalBytesReadFromOkHttp)
@@ -190,13 +213,12 @@ internal object UploadDataProviders {
 
         private fun readKnownBodyLength(sink: UploadDataSink, buffer: ByteBuffer) {
             val readResult = readFromOkHttp(buffer)
-            val length = getLength()
 
-            if (totalBytesReadFromOkHttp > length) {
-                throw bodyTooLong(length)
+            if (totalBytesReadFromOkHttp > contentLength) {
+                throw bodyTooLong(contentLength)
             }
 
-            if (totalBytesReadFromOkHttp < length) {
+            if (totalBytesReadFromOkHttp < contentLength) {
                 when (readResult) {
                     ReadResult.SUCCESS -> sink.onReadSucceeded(false)
                     ReadResult.END_OF_BODY ->
@@ -220,7 +242,7 @@ internal object UploadDataProviders {
 
             val readResult = readFromOkHttp(buffer)
             if (readResult != ReadResult.END_OF_BODY) {
-                throw bodyTooLong(getLength())
+                throw bodyTooLong(contentLength)
             }
 
             check(buffer.position() == 0) {

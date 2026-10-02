@@ -17,8 +17,9 @@ import org.chromium.net.CronetEngine
  * Settings specify which install path they apply to:
  * - **Built install** ([SarieBridge.install] with `Context`): supports all settings.
  * - **Borrowed install** ([SarieBridge.install] with `CronetEngine`): supports [policy],
- *   [mapper], [listener], and [debugLogger]. Setting [certificatePinner] or [configure] on a
- *   borrowed install throws [IllegalArgumentException].
+ *   [mapper], [listener], and [debugLogger]. A borrowed engine is already built, so setting
+ *   [certificatePinner] or [configure] on it throws [IllegalArgumentException] naming the
+ *   setting.
  */
 public class SarieConfig private constructor(builder: Builder) {
     /**
@@ -59,18 +60,25 @@ public class SarieConfig private constructor(builder: Builder) {
      */
     public val debugLogger: SarieLogger? = builder.debugLogger
 
+    internal val isConfigureSet: Boolean get() = configure !== NOOP_CONFIGURE
+
     /**
-     * Customization hook invoked on Cronet's [CronetEngine.Builder] before the engine is built.
+     * Engine configuration action invoked on Cronet's [CronetEngine.Builder] before the engine is
+     * built.
      *
-     * Runs after overridable defaults (connection migration and stale DNS) and before bridge-owned
-     * settings (HTTP/3 on, cache off, storage path, and pins).
+     * This is the hook for any Cronet-only knob: [QuicOptions] (including the broken-service
+     * settings), the network quality estimator, the user agent, the thread priority, QUIC hints
+     * and public-key pins all go through it.
      *
-     * Applies to the built [SarieBridge.install] path only. Defaults to a no-op action. Setting this
-     * on a borrowed install throws [IllegalArgumentException].
+     * Runs after Sarie's overridable defaults (connection migration, stale DNS, and the
+     * broken-service QUIC knobs) and before bridge-owned settings (HTTP/3 on, cache off, storage
+     * path, and pins).
+     *
+     * Applies to the built [SarieBridge.install] path only. Defaults to a no-op action. Setting
+     * this on a borrowed install throws [IllegalArgumentException].
      */
     public val configure: (CronetEngine.Builder) -> Unit = builder.configure
 
-    internal val isConfigureSet: Boolean get() = configure !== NOOP_CONFIGURE
 
     /**
      * Creates a new [Builder] initialized with this configuration's current values.

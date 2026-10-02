@@ -11,6 +11,7 @@ import sarie.instrumentation.NetworkParity
 import sarie.instrumentation.TestAppRuntime
 import java.io.File
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.util.Random
 import java.util.concurrent.CountDownLatch
@@ -276,6 +277,90 @@ class CronetSuite {
             )
         }
         assertCronetServed()
+    }
+
+    /**
+     * On-device proof that a partially filled read chunk is surfaced on arrival.
+     *
+     * `/sse` emits 3 events 2s apart and then closes. A bridge that withheld a partial chunk to
+     * fill its 32 KiB read buffer would deliver event 0 only at end-of-stream (~4s), so the
+     * first-event budget below sits below the 2s gap *and* far below the ~4s the whole stream
+     * takes. The paired total-time assertion proves we really did span the gaps rather than
+     * reading one pre-buffered blob, which is what makes the first assertion meaningful.
+     */
+    @Test
+    fun sseEventsSurfaceOnArrivalNotAtEndOfStream() {
+        installCronet()
+
+        val client = OkHttpClient.Builder().readTimeout(15, TimeUnit.SECONDS).build()
+        val startedNanos = System.nanoTime()
+        val firstEventNanos = AtomicReference<Long>()
+
+        client.newCall(Request.Builder().url("$ORIGIN/sse").build()).execute().use { response ->
+            assertEquals(200, response.code)
+            assertTrue(
+                "expected an event stream, got ${response.header("Content-Type")}",
+                response.header("Content-Type")?.startsWith("text/event-stream") == true,
+            )
+            val source = response.body.source()
+            for (i in 0 until 3) {
+                assertEquals("data: event-$i", source.readUtf8LineStrict())
+                if (i == 0) firstEventNanos.set(System.nanoTime() - startedNanos)
+                assertEquals("", source.readUtf8LineStrict())
+            }
+            assertNull("stream should end after the third event", source.readUtf8Line())
+        }
+
+        val firstEventMs = TimeUnit.NANOSECONDS.toMillis(firstEventNanos.get())
+        val totalMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos)
+        assertTrue(
+            "first SSE event arrived after ${firstEventMs}ms; a partial chunk must be surfaced " +
+                "on arrival, not withheld until the read buffer fills or the stream ends",
+            firstEventMs < 1_500,
+        )
+        assertTrue(
+            "3 events 2s apart finished in ${totalMs}ms; the stream did not really span its gaps",
+            totalMs >= 4_000,
+        )
+        assertCronetServed()
+    }
+
+    /**
+     * A callTimeout must abort a Cronet request that stalls, with OkHttp's own
+     * `InterruptedIOException("timeout")` shape, and must not be mistaken for a read timeout.
+     *
+     * `/slow` sends its headers immediately and then never sends a body byte, so with a read
+     * timeout far longer than the call timeout the call deadline is the only thing that can end
+     * the read. Stock OkHttp bounds the body this way; before this change the bridge did not and
+     * the read simply hung.
+     *
+     * The header phase is deliberately *not* re-bounded by the bridge - OkHttp's own
+     * `AsyncTimeout` already covers it and now reaches Cronet through the rewritten
+     * `RealCall.cancel()` - and `BridgeTerminalPathTest` pins that the bridge does not pre-empt it.
+     */
+    @Test
+    fun callTimeoutBoundsAStalledBodyOverCronet() {
+        installCronet()
+        val client = OkHttpClient.Builder()
+            .callTimeout(1, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .build()
+
+        // `execute()` returns as soon as `/slow`'s headers land; it is the BODY read that stalls,
+        // so that is what the call deadline has to end. Reading inside `use` also closes the body,
+        // which cancels the engine request and lets tearDown shut the engine down.
+        val thrown = assertThrows(IOException::class.java) {
+            client.newCall(Request.Builder().url("$ORIGIN/slow").build()).execute().use { response ->
+                response.body.source().read(ByteArray(16))
+            }
+        }
+
+        assertTrue("thrown was ${thrown.javaClass.name}: $thrown", thrown is InterruptedIOException)
+        assertEquals("timeout", thrown.message)
+        assertFalse(
+            "a call timeout must not surface as the read timeout",
+            thrown is SocketTimeoutException,
+        )
     }
 
     @Test

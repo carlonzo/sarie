@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Generate golden stock/rewritten artifacts for every released okhttp 5.x version,
-# structurally verify each against the registered guard shapes, and regenerate:
-#   - plugin/src/test/resources/stock/<version>/{android,jvm}/ (goldens + Textifier dumps)
+# Structurally verify each released okhttp 5.x version against the registered guard shapes,
+# and regenerate:
 #   - plugin/src/main/kotlin/sarie/plugin/GoldenFingerprints.kt
 #   - bridge/src/main/kotlin/sarie/bridge/VerifiedOkHttpVersions.kt
-#   - plugin/recipe-verification-report.md (version -> guard -> pinned/excluded)
+#
+# Nothing is written under src/test/resources: the verification table, the per-version
+# exclusion reasons and the Textifier dumps are scratch output, printed or kept under build/.
+#
+# The generated dumps mirror sarie.plugin.ConnectInterceptorRewriter's algorithm
+# (discard intercept body, emit ALOAD 1 / INVOKESTATIC CronetBridge.intercept / ARETURN,
+# COMPUTE_FRAMES); the unit tests assert the instruction list independently.
 #
 # Deterministic + re-runnable: pinned Maven Central URLs, pinned ASM 9.7.1 for the dump +
 # shape-check tool. Versions processed = released 5.x list ∪ registry-pinned versions ∪ args,
 # so every run re-verifies every pinned version and refuses to keep a pinned version whose
 # bytecode no longer matches the registered shape (never force-fit, never pin a lie).
-#
-# rewritten.txt mirrors sarie.plugin.ConnectInterceptorRewriter's algorithm
-# (discard intercept body, emit ALOAD 1 / INVOKESTATIC CronetBridge.intercept / ARETURN,
-# COMPUTE_FRAMES); the unit tests assert the instruction list independently.
 #
 # Usage: JAVA_HOME=<temurin-21> ./generate-fingerprints.sh [okhttp-version ...]
 set -euo pipefail
@@ -21,11 +22,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"          # plugin/
 ROOT_DIR="$(cd "$PLUGIN_DIR/.." && pwd)"            # repo root
-RES="$PLUGIN_DIR/src/test/resources/stock"
 CACHE="$PLUGIN_DIR/build/golden-cache"
 GOLDEN_KT="$PLUGIN_DIR/src/main/kotlin/sarie/plugin/GoldenFingerprints.kt"
 BRIDGE_KT="$ROOT_DIR/bridge/src/main/kotlin/sarie/bridge/VerifiedOkHttpVersions.kt"
-REPORT="$PLUGIN_DIR/recipe-verification-report.md"
 REGISTRY_KT="$PLUGIN_DIR/src/main/kotlin/sarie/plugin/RecipeRegistry.kt"
 
 # Released stable okhttp 5.x versions on Maven Central (re-verified against
@@ -110,6 +109,50 @@ public class Dump {
     static final String COMPUTE_CANDIDATE = "computeCandidate";
     static final String COMPUTE_CANDIDATE_DESC = "()Lokhttp3/internal/cache/CacheStrategy;";
 
+    static final String CANCEL = "cancel";
+    static final String CANCEL_DESC = "()V";
+
+    /** Mirrors sarie.plugin.RealCallCancelGuard.EXPECTED verbatim. */
+    static final String[] REAL_CALL_CANCEL = {
+        "ALOAD 0",
+        "GETFIELD okhttp3/internal/connection/RealCall.canceled Z",
+        "IFEQ L0",
+        "RETURN",
+        "ALOAD 0",
+        "ICONST_1",
+        "PUTFIELD okhttp3/internal/connection/RealCall.canceled Z",
+        "ALOAD 0",
+        "GETFIELD okhttp3/internal/connection/RealCall.exchange Lokhttp3/internal/connection/Exchange;",
+        "DUP",
+        "IFNULL L1",
+        "INVOKEVIRTUAL okhttp3/internal/connection/Exchange.cancel ()V",
+        "GOTO L2",
+        "POP",
+        "ALOAD 0",
+        "GETFIELD okhttp3/internal/connection/RealCall.plansToCancel Ljava/util/concurrent/CopyOnWriteArrayList;",
+        "INVOKEVIRTUAL java/util/concurrent/CopyOnWriteArrayList.iterator ()Ljava/util/Iterator;",
+        "DUP",
+        "LDC iterator(...)",
+        "INVOKESTATIC kotlin/jvm/internal/Intrinsics.checkNotNullExpressionValue (Ljava/lang/Object;Ljava/lang/String;)V",
+        "ASTORE 1",
+        "ALOAD 1",
+        "INVOKEINTERFACE java/util/Iterator.hasNext ()Z",
+        "IFEQ L3",
+        "ALOAD 1",
+        "INVOKEINTERFACE java/util/Iterator.next ()Ljava/lang/Object;",
+        "CHECKCAST okhttp3/internal/connection/RoutePlanner$Plan",
+        "ASTORE 2",
+        "ALOAD 2",
+        "INVOKEINTERFACE okhttp3/internal/connection/RoutePlanner$Plan.cancel ()V",
+        "GOTO L4",
+        "ALOAD 0",
+        "GETFIELD okhttp3/internal/connection/RealCall.eventListener Lokhttp3/EventListener;",
+        "ALOAD 0",
+        "CHECKCAST okhttp3/Call",
+        "INVOKEVIRTUAL okhttp3/EventListener.canceled (Lokhttp3/Call;)V",
+        "RETURN",
+    };
+
     public static void main(String[] args) throws Exception {
         byte[] in = Files.readAllBytes(Path.of(args[0]));
         String mode = args.length > 3 ? args[3] : "connect";
@@ -118,6 +161,7 @@ public class Dump {
         if (mode.equals("callserver")) rewritten = rewriteCallServer(in);
         else if (mode.equals("cacheentry")) rewritten = rewriteCacheEntry(in);
         else if (mode.equals("cachestrategy")) rewritten = rewriteCacheStrategy(in);
+        else if (mode.equals("realcall")) rewritten = rewriteRealCall(in);
         else rewritten = rewrite(in);
         dump(rewritten, Path.of(args[2]));
         StringBuilder sb = new StringBuilder();
@@ -138,6 +182,10 @@ public class Dump {
             record(in, insns, COMPUTE_CANDIDATE, COMPUTE_CANDIDATE_DESC);
             problems = verifyCacheStrategy(insns);
             shape = "cache-strategy";
+        } else if (mode.equals("realcall")) {
+            record(in, insns, CANCEL, CANCEL_DESC);
+            problems = verifyRealCallCancel(insns);
+            shape = "realcall-cancel";
         } else {
             record(in, insns, INTERCEPT_NAME, INTERCEPT_DESC);
             problems = verify(insns);
@@ -148,6 +196,20 @@ public class Dump {
         if (!problems.isEmpty()) {
             for (String i : insns) System.out.println("INSN " + i);
         }
+    }
+
+    /** Mirrors RealCallCancelGuard: the whole stream is pinned, not a prefix. */
+    static List<String> verifyRealCallCancel(List<String> insns) {
+        List<String> problems = new ArrayList<>();
+        int max = Math.max(insns.size(), REAL_CALL_CANCEL.length);
+        for (int i = 0; i < max; i++) {
+            String actual = i < insns.size() ? insns.get(i) : "<end of method>";
+            String expected = i < REAL_CALL_CANCEL.length ? REAL_CALL_CANCEL[i] : "<end of method>";
+            if (!actual.equals(expected)) {
+                problems.add("instruction " + i + ": expected " + expected + ", found " + actual);
+            }
+        }
+        return problems;
     }
 
     /** Mirrors CacheEntryGuard: one HttpUrl.isHttps, local 6 is the Okio.buffer result. */
@@ -278,7 +340,7 @@ public class Dump {
                         insns.add(NAME.getOrDefault(opcode, "?") + " " + owner + "." + name + " " + descriptor);
                     }
                     @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
-                        insns.add(NAME.getOrDefault(opcode, "?") + " L" + labelId(label));
+                        insns.add(NAME.getOrDefault(opcode, "?") + " " + labelId(label));
                     }
                     @Override public void visitLdcInsn(Object value) { insns.add("LDC " + value); }
                     @Override public void visitIincInsn(int value, int increment) {
@@ -354,6 +416,7 @@ public class Dump {
         Map.entry(Opcodes.IFNULL, "IFNULL"),
         Map.entry(Opcodes.IFNONNULL, "IFNONNULL"),
         Map.entry(Opcodes.IFEQ, "IFEQ"),
+        Map.entry(Opcodes.GOTO, "GOTO"),
         Map.entry(Opcodes.LDC, "LDC")
     );
 
@@ -547,6 +610,81 @@ public class Dump {
         }, ClassReader.SKIP_FRAMES);
         return cw.toByteArray();
     }
+
+    /**
+     * Mirrors sarie.plugin.RealCallRewriter: the stock cancel() body is preserved and
+     * `ALOAD 0` / INVOKESTATIC CronetBridge.notifyCanceled is spliced in before the terminal
+     * RETURN. The already-canceled fast path keeps its own RETURN.
+     */
+    static byte[] rewriteRealCall(byte[] bytes) {
+        ClassReader reader = new ClassReader(bytes);
+        ClassWriter cw = framingWriter(reader);
+        reader.accept(new ClassVisitor(Opcodes.ASM9, cw) {
+            @Override
+            public MethodVisitor visitMethod(int access, String name, String descriptor,
+                    String signature, String[] exceptions) {
+                MethodVisitor target = super.visitMethod(access, name, descriptor, signature, exceptions);
+                if (!name.equals(CANCEL) || !descriptor.equals(CANCEL_DESC)) return target;
+                final List<java.util.function.Consumer<MethodVisitor>> events = new ArrayList<>();
+                final List<Boolean> isInstruction = new ArrayList<>();
+                return new MethodVisitor(Opcodes.ASM9) {
+                    @Override public void visitCode() { }
+                    @Override public void visitInsn(int opcode) { record(opcode); }
+                    @Override public void visitIntInsn(int opcode, int operand) {
+                        record((MethodVisitor mv) -> mv.visitIntInsn(opcode, operand));
+                    }
+                    @Override public void visitVarInsn(int opcode, int var) {
+                        record((MethodVisitor mv) -> mv.visitVarInsn(opcode, var));
+                    }
+                    @Override public void visitTypeInsn(int opcode, String type) {
+                        record((MethodVisitor mv) -> mv.visitTypeInsn(opcode, type));
+                    }
+                    @Override public void visitFieldInsn(int opcode, String owner, String field,
+                            String fieldDesc) {
+                        record((MethodVisitor mv) -> mv.visitFieldInsn(opcode, owner, field, fieldDesc));
+                    }
+                    @Override public void visitMethodInsn(int opcode, String owner, String method,
+                            String methodDesc, boolean isInterface) {
+                        record((MethodVisitor mv) -> mv.visitMethodInsn(opcode, owner, method, methodDesc, isInterface));
+                    }
+                    @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
+                        record((MethodVisitor mv) -> mv.visitJumpInsn(opcode, label));
+                    }
+                    @Override public void visitLabel(org.objectweb.asm.Label label) {
+                        events.add((MethodVisitor mv) -> mv.visitLabel(label));
+                        isInstruction.add(false);
+                    }
+                    @Override public void visitLdcInsn(Object value) {
+                        record((MethodVisitor mv) -> mv.visitLdcInsn(value));
+                    }
+                    @Override public void visitMaxs(int maxStack, int maxLocals) {
+                        target.visitCode();
+                        int terminal = -1;
+                        for (int i = 0; i < isInstruction.size(); i++) {
+                            if (isInstruction.get(i)) terminal = i;
+                        }
+                        if (terminal < 0) throw new IllegalStateException("cancel() has no instructions");
+                        for (int i = 0; i < events.size(); i++) {
+                            if (i == terminal) {
+                                target.visitVarInsn(Opcodes.ALOAD, 0);
+                                target.visitMethodInsn(Opcodes.INVOKESTATIC, "sarie/bridge/CronetBridge",
+                                        "notifyCanceled", "(Lokhttp3/internal/connection/RealCall;)V", false);
+                            }
+                            events.get(i).accept(target);
+                        }
+                        target.visitMaxs(maxStack + 1, maxLocals);
+                    }
+                    @Override public void visitEnd() { target.visitEnd(); }
+                    void record(int opcode) { record((MethodVisitor mv) -> mv.visitInsn(opcode)); }
+                    void record(java.util.function.Consumer<MethodVisitor> event) {
+                        events.add(event);
+                        isInstruction.add(true);
+                    }
+                };
+            }
+        }, ClassReader.SKIP_FRAMES);
+        return cw.toByteArray();
+    }
 }
 EOF
 
@@ -566,7 +704,9 @@ declare -A VERIFIED_MAP=()
 for V in "${VERSIONS[@]}"; do
   AAR_URL="https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp-android/$V/okhttp-android-$V.aar"
   JAR_URL="https://repo1.maven.org/maven2/com/squareup/okhttp3/okhttp-jvm/$V/okhttp-jvm-$V.jar"
-  VRES="$RES/$V"
+  # Scratch area under the download cache: the extracted stock classes and the Textifier
+  # dumps are verification inputs and outputs, never checked-in goldens.
+  VRES="$CACHE/verify-$V"
   mkdir -p "$VRES/android" "$VRES/jvm"
 
   fetch "$AAR_URL" "$CACHE/okhttp-android-$V.aar"
@@ -614,10 +754,13 @@ $(grep -E '^(PROBLEM|INSN) ' <<<"$ANDROID_OUT")
 "
   CALL_MAP=""
   CACHE_MAP=""
+  REALCALL_MAP=""
   CS_CELL="-"
   CACHE_CELL="-"
+  REALCALL_CELL="-"
   # Historical dumps stay ConnectInterceptor-only. Pinned versions also fingerprint
-  # CallServerInterceptor and both cache sites on both artifacts; a shape miss fails the pin.
+  # CallServerInterceptor, both cache sites and RealCall on both artifacts; a shape miss fails
+  # the pin.
   if [ "$PINNED_CELL" = yes ]; then
     rm -rf "$CACHE/android-cs-$V" "$CACHE/jvm-cs-$V"
     unzip -q -o "$CACHE/aar-x-$V/classes.jar" okhttp3/internal/http/CallServerInterceptor.class -d "$CACHE/android-cs-$V"
@@ -718,16 +861,56 @@ $(grep -E '^(PROBLEM|INSN) ' <<<"$CF_ANDROID_OUT")
     fi
     echo "$V cache-entry: android=$CE_ANDROID_HASH jvm=$CE_JVM_HASH shape=$CE_OK"
     echo "$V cache-strategy: android=$CF_ANDROID_HASH jvm=$CF_JVM_HASH shape=$CF_OK"
+
+    rm -rf "$CACHE/android-rc-$V" "$CACHE/jvm-rc-$V"
+    unzip -q -o "$CACHE/aar-x-$V/classes.jar" okhttp3/internal/connection/RealCall.class -d "$CACHE/android-rc-$V"
+    unzip -q -o "$CACHE/okhttp-jvm-$V.jar" okhttp3/internal/connection/RealCall.class -d "$CACHE/jvm-rc-$V"
+    cp "$CACHE/android-rc-$V/okhttp3/internal/connection/RealCall.class" "$VRES/android/RealCall.class"
+    cp "$CACHE/jvm-rc-$V/okhttp3/internal/connection/RealCall.class" "$VRES/jvm/RealCall.class"
+    RC_ANDROID_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/android/RealCall.class" "$VRES/android/RealCall.stock.txt" "$VRES/android/RealCall.rewritten.txt" realcall)"
+    RC_JVM_OUT="$("$JAVA" -cp "$DUMP_TOOL" Dump "$VRES/jvm/RealCall.class" "$VRES/jvm/RealCall.stock.txt" "$VRES/jvm/RealCall.rewritten.txt" realcall)"
+    RC_ANDROID_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$RC_ANDROID_OUT")"
+    RC_JVM_HASH="$(grep -E '^[0-9a-f]{64}$' <<<"$RC_JVM_OUT")"
+    KT_BODY+="    val REAL_CALL_ANDROID_${VER_ID} = \"$RC_ANDROID_HASH\"
+    val REAL_CALL_JVM_${VER_ID} = \"$RC_JVM_HASH\"
+"
+    REALCALL_MAP=",
+            InstrumentTarget.REAL_CALL to mapOf(
+                Variant.ANDROID to REAL_CALL_ANDROID_${VER_ID},
+                Variant.JVM to REAL_CALL_JVM_${VER_ID},
+            )"
+    if grep -q "SHAPE realcall-cancel MATCH" <<<"$RC_ANDROID_OUT" && grep -q "SHAPE realcall-cancel MATCH" <<<"$RC_JVM_OUT"; then
+      REALCALL_CELL="realcall-cancel"
+    else
+      VERIFIED_MAP[$V]=no
+      REALCALL_CELL="NOMATCH"
+      REASON="RealCall.cancel does not match the pinned stock shape"
+      if [ "$NOTES" = "structurally verified" ]; then
+        NOTES="EXCLUDED: $REASON"
+      else
+        NOTES="$NOTES; $REASON"
+      fi
+      EXCLUDED_SECTIONS+="### $V RealCall
+
+$REASON. Problems reported by the shape check (android variant; jvm equivalent omitted):
+
+\`\`\`
+$(grep -E '^(PROBLEM|INSN) ' <<<"$RC_ANDROID_OUT")
+\`\`\`
+
+"
+    fi
+    echo "$V realcall: android=$RC_ANDROID_HASH jvm=$RC_JVM_HASH shape=$REALCALL_CELL"
   fi
 
-  REPORT_ROWS+="| $V | \`$ANDROID_HASH\` / \`$JVM_HASH\` | $( [ "${VERIFIED_MAP[$V]}" = yes ] && echo "$SHAPE_NAME" || echo '-' ) | $PINNED_CELL | $CS_CELL | $CACHE_CELL | $NOTES |
+  REPORT_ROWS+="| $V | \`$ANDROID_HASH\` / \`$JVM_HASH\` | $( [ "${VERIFIED_MAP[$V]}" = yes ] && echo "$SHAPE_NAME" || echo '-' ) | $PINNED_CELL | $CS_CELL | $CACHE_CELL | $REALCALL_CELL | $NOTES |
 "
 
   KT_WHEN+="        \"$V\" -> mapOf(
             InstrumentTarget.CONNECT_INTERCEPTOR to mapOf(
                 Variant.ANDROID to CONNECT_INTERCEPTOR_ANDROID_${VER_ID},
                 Variant.JVM to CONNECT_INTERCEPTOR_JVM_${VER_ID},
-            )${CALL_MAP}${CACHE_MAP},
+            )${CALL_MAP}${CACHE_MAP}${REALCALL_MAP},
         )
 "
 
@@ -761,8 +944,8 @@ cat > "$BRIDGE_KT" <<EOF
 package sarie.bridge
 
 // Generated by plugin/scripts/generate-fingerprints.sh: the okhttp versions pinned in
-// RecipeRegistry and structurally verified against the registered guard (see
-// plugin/recipe-verification-report.md). Do not hand-edit; rerun the script.
+// RecipeRegistry and structurally verified against the registered guard. Do not hand-edit;
+// rerun the script.
 internal val VerifiedOkHttpVersions: Set<String> = setOf(
 $VERIFIED_PINNED)
 EOF
@@ -772,7 +955,7 @@ cat > "$GOLDEN_KT" <<EOF
 package sarie.plugin
 
 // Generated by plugin/scripts/generate-fingerprints.sh from the pinned okhttp
-// artifacts (see plugin/recipe-verification-report.md). Do not hand-edit.
+// artifacts. Do not hand-edit.
 object GoldenFingerprints {
 $KT_BODY
     fun fingerprintsFor(version: String): Map<InstrumentTarget, Map<Variant, String>>? = when (version) {
@@ -781,19 +964,11 @@ $KT_WHEN        else -> null
 }
 EOF
 
-REPORT_BODY="# OkHttp recipe verification report
-
-Generated by \`plugin/scripts/generate-fingerprints.sh\` (pinned Maven Central artifacts).
-ConnectInterceptor structural check = \`RecipeRegistry.CANONICAL_GUARD\` (ASM 9.7.1).
-Pinned versions also require the CallServerInterceptor F7 prefix and both cache sites
-(Cache.Entry source constructor, CacheStrategy.Factory.computeCandidate) on both artifacts.
-Historical (unpinned) versions stay ConnectInterceptor-only so an unpinned shape cannot fail the script.
-A version is pinned in \`RecipeRegistry\` only when every checked shape matches; versions matching no
-registered shape are excluded, never force-fit. Do not hand-edit; rerun the script.
-
-| okhttp version | ConnectInterceptor.class sha256 (android / jvm) | connect guard | pinned | callserver guard | cache guards | notes |
-|---|---|---|---|---|---|---|
-$REPORT_ROWS
-$EXCLUDED_SECTIONS"
-
-printf '%s\n' "$REPORT_BODY" > "$REPORT"
+# The verification table and the per-version exclusion reasons are diagnostics, not tracked
+# data: print them for whoever ran the script instead of writing a generated markdown file.
+echo "== OkHttp recipe verification =="
+echo "okhttp version | ConnectInterceptor.class sha256 (android / jvm) | connect guard | pinned | callserver guard | cache guards | realcall guard | notes"
+printf '%s\n' "$REPORT_ROWS"
+if [ -n "$EXCLUDED_SECTIONS" ]; then
+    printf '\n%s\n' "$EXCLUDED_SECTIONS"
+fi

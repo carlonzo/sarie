@@ -4,6 +4,7 @@ import com.android.build.api.instrumentation.ClassData
 import com.android.build.api.instrumentation.InstrumentationContext
 import com.android.build.api.instrumentation.InstrumentationParameters
 import org.gradle.api.provider.Property
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,9 +22,16 @@ class ConnectInterceptorVisitorFactoryTest {
         assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.http.CallServerInterceptor")))
         assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.Cache\$Entry")))
         assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.cache.CacheStrategy\$Factory")))
+        assertTrue(factory.isInstrumentable(fakeClassData("okhttp3.internal.connection.RealCall")))
+        assertEquals(
+            "every registered target must be instrumentable",
+            InstrumentTarget.entries.map { it.dotName }.toSet(),
+            InstrumentTarget.entries.map { it.dotName }
+                .filter { factory.isInstrumentable(fakeClassData(it)) }
+                .toSet(),
+        )
         for (other in listOf(
             "okhttp3.internal.connection.RetryAndFollowUpInterceptor",
-            "okhttp3.internal.connection.RealCall",
             "okhttp3.internal.http.RealInterceptorChain",
             "okhttp3.OkHttpClient",
             "okhttp3.Cache",

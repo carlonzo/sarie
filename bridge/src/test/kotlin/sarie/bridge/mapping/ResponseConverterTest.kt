@@ -155,6 +155,90 @@ class ResponseConverterTest {
     }
 
     @Test
+    fun `every coding Cronet handles strips the encoding headers even across repeated headers`() {
+        val response = convert(
+            FakeUrlResponseInfo(
+                headersAsList = listOf(
+                    FakeUrlResponseInfo.headerEntry("Content-Encoding", "gzip"),
+                    FakeUrlResponseInfo.headerEntry("Content-Encoding", "br, zstd"),
+                    FakeUrlResponseInfo.headerEntry("Content-Length", "100"),
+                    FakeUrlResponseInfo.headerEntry("X-Keep", "yes"),
+                ),
+            ),
+            body = "decoded",
+        )
+
+        assertEquals(null, response.header("Content-Encoding"))
+        assertEquals(null, response.header("Content-Length"))
+        assertEquals("yes", response.header("X-Keep"))
+        assertEquals(-1L, response.body!!.contentLength())
+        assertEquals("decoded", response.body!!.string())
+    }
+
+    @Test
+    fun `one unknown coding among repeated headers keeps encoding and length`() {
+        val response = convert(
+            FakeUrlResponseInfo(
+                headersAsList = listOf(
+                    FakeUrlResponseInfo.headerEntry("Content-Encoding", "gzip"),
+                    FakeUrlResponseInfo.headerEntry("Content-Encoding", "br, custom"),
+                    FakeUrlResponseInfo.headerEntry("Content-Length", "7"),
+                ),
+            ),
+        )
+
+        assertEquals(listOf("gzip", "br, custom"), response.headers.values("Content-Encoding"))
+        assertEquals("7", response.header("Content-Length"))
+        assertEquals(7L, response.body!!.contentLength())
+    }
+
+    @Test
+    fun `a Content-Encoding carrying no coding keeps the headers verbatim`() {
+        // Nothing Cronet could have decoded, so the length stays and the body is passed through.
+        val response = convert(
+            FakeUrlResponseInfo(
+                headersAsList = listOf(
+                    FakeUrlResponseInfo.headerEntry("Content-Encoding", " , "),
+                    FakeUrlResponseInfo.headerEntry("Content-Length", "4"),
+                ),
+            ),
+            body = "raw!",
+        )
+
+        // OkHttp trims the value on the way in; what matters is that the header survives.
+        assertEquals(",", response.header("Content-Encoding"))
+        assertEquals("4", response.header("Content-Length"))
+        assertEquals("raw!", response.body!!.string())
+    }
+
+    @Test
+    fun `header order and content survive mixed-case duplicate names`() {
+        // The map route would group each name's values together and reorder these; the list route
+        // keeps wire order, which callers can observe.
+        val response = convert(
+            FakeUrlResponseInfo(
+                headersAsList = listOf(
+                    FakeUrlResponseInfo.headerEntry("X-A", "1"),
+                    FakeUrlResponseInfo.headerEntry("Set-Cookie", "a=1"),
+                    FakeUrlResponseInfo.headerEntry("x-a", "2"),
+                    FakeUrlResponseInfo.headerEntry("Set-Cookie", "b=2"),
+                    FakeUrlResponseInfo.headerEntry("Content-Type", "text/plain"),
+                ),
+            ),
+        )
+
+        assertEquals(
+            listOf("X-A", "Set-Cookie", "x-a", "Set-Cookie", "Content-Type"),
+            (0 until response.headers.size).map { response.headers.name(it) },
+        )
+        assertEquals(
+            listOf("1", "a=1", "2", "b=2", "text/plain"),
+            (0 until response.headers.size).map { response.headers.value(it) },
+        )
+        assertEquals(5, response.headers.size)
+    }
+
+    @Test
     fun `204 has empty body without exception`() {
         val response = convert(FakeUrlResponseInfo(statusCode = 204, statusText = "No Content"))
 

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Read this first: this repo ships HTTP/3 for OkHttp apps by rewriting four registered OkHttp
+Read this first: this repo ships HTTP/3 for OkHttp apps by rewriting five registered OkHttp
 call sites at build time and routing allowed requests through Cronet at runtime. Nothing here
 forks OkHttp and no user-visible interceptor is added. Before changing anything, read the
 module AGENTS.md for the code you touch and `COMPATIBILITY.md` for the behavior contract.
@@ -15,7 +15,9 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
 
 - `plugin/` (AGP ASM, `InstrumentationScope.ALL`) rewrites exactly the registered targets.
   `ConnectInterceptor.intercept` is a full replace. `CallServerInterceptor.intercept` is a
-  prefix. The two cache sites each replace one `isHttps`. Descriptors are in the hard
+  prefix. The two cache sites each replace one `isHttps`. `RealCall.cancel()` keeps its body and
+  gains one appended `CronetBridge.notifyCanceled`, which is how a cancel reaches the engine
+  without paying OkHttp's per-call `addEventListener` aggregate. Descriptors are in the hard
   invariants below and in `plugin/AGENTS.md`.
 - The bridge re-evaluates policy per request (`PolicyEngine.shouldHandle`). Allow registers a
   cycle and `proceed`s with no exchange (network interceptors run); `CronetBridge.callServer`
@@ -29,7 +31,7 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
 
 ## Hard invariants (MUST NOT break)
 
-- Exactly four sites, descriptors exact:
+- Exactly five sites, descriptors exact:
   - `CronetBridge.intercept` `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;` —
     `ConnectInterceptor.intercept` is a full replace.
   - `CronetBridge.callServer` `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;` —
@@ -38,6 +40,9 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
     one `HttpUrl.isHttps` in `Cache$Entry.<init>(Source)`.
   - `CacheHooks.requireHandshake` `(Lokhttp3/Request;)Z` — replaces the one `Request.isHttps`
     in `CacheStrategy$Factory.computeCandidate`.
+  - `CronetBridge.notifyCanceled` `(Lokhttp3/internal/connection/RealCall;)V` — appended to
+    `RealCall.cancel()`, which stays otherwise untouched. It is a no-op for calls the bridge
+    never registered; OkHttp's `addEventListener` is deliberately not used for cancellation.
 - The bridge must never call `ConnectInterceptor.INSTANCE.intercept`; that recurses into
   itself. The deny path re-implements the stock body instead.
 - No cross-engine retry after a Cronet request has started.
@@ -47,7 +52,7 @@ whether Cronet or stock OkHttp handles it. Behavior is `COMPATIBILITY.md` — do
   response and on a cached HTTPS hit. See `COMPATIBILITY.md`.
 - Callbacks are CPU-only: `RequestConverter` uses `allowDirectExecutor()`, so Cronet invokes
   `OkHttpBridgeCallback` directly on its own threads. Never block inside a callback.
-- One optional fifth site, outside OkHttp: `io.ktor.client.engine.okhttp.OkUtilsKt$WhenMappings.<clinit>`
+- One optional sixth site, outside OkHttp: `io.ktor.client.engine.okhttp.OkUtilsKt$WhenMappings.<clinit>`
   (`sarie { instrumentKtor }`, default true). It adds `HTTP_3 -> 6` (Ktor's QUIC case) only to the
   exact Ktor < 3.3 store list. Ktor >= 3.3 is semantically unchanged. Any other shape fails the build.
 

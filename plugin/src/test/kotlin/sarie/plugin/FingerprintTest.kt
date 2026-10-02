@@ -14,7 +14,7 @@ import org.objectweb.asm.Opcodes
 class FingerprintTest {
 
     @Test
-    fun `baked constants equal sha256 of the stock goldens`() {
+    fun `baked constants equal sha256 of the resolved stock bytecode`() {
         for ((version, variant) in allRecipeVariants()) {
             val recipe = RecipeRegistry.forVersion(version)
             for (target in InstrumentTarget.entries) {

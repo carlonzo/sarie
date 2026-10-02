@@ -2,7 +2,7 @@
 #
 # Start (from the repo ROOT - cert/log paths are relative to CWD):
 #   ./scripts/download-caddy.sh && ./scripts/gen-certs.sh
-#   python3 scripts/slow-backend.py &          # stalling backend for /slow (stop: pkill -f slow-backend.py)
+#   python3 scripts/slow-backend.py &          # streaming backend for /slow and /sse (stop: pkill -f slow-backend.py)
 #   ./scripts/bin/caddy run --config scripts/Caddyfile &
 # Stop:
 #   pkill -f 'caddy run --config scripts/Caddyfile'; pkill -f slow-backend.py
@@ -71,6 +71,15 @@
 
 	# Sends 200 + headers immediately, then stalls forever (readTimeout testing).
 	handle /slow {
+		reverse_proxy 127.0.0.1:8444 {
+			flush_interval -1
+		}
+	}
+
+	# Server-sent events: 3 events, 2s apart, then the stream closes. The gaps are much wider
+	# than any read buffer, so a client that withheld a partial chunk until its buffer filled
+	# would deliver the first event only at end-of-stream instead of on arrival.
+	handle /sse {
 		reverse_proxy 127.0.0.1:8444 {
 			flush_interval -1
 		}

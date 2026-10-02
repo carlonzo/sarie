@@ -224,4 +224,81 @@ class UploadDataProvidersTest {
             processExecutor.shutdownNow()
         }
     }
+
+    /** A body that records how often it is asked for its length. */
+    private class CountingBody(
+        private val contentLength: Long,
+        private val oneShot: Boolean = false,
+        private val payload: String = "hello",
+    ) : RequestBody() {
+        var contentLengthCalls = 0
+            private set
+
+        override fun contentType() = null
+
+        override fun contentLength(): Long {
+            contentLengthCalls++
+            return contentLength
+        }
+
+        override fun isOneShot(): Boolean = oneShot
+
+        override fun writeTo(sink: BufferedSink) {
+            sink.writeUtf8(payload)
+        }
+    }
+
+    @Test
+    fun `buffered provider serves the caller-measured length without re-measuring`() {
+        val body = CountingBody(contentLength = 999)
+        val provider = UploadDataProviders.create(
+            body,
+            executor,
+            writeTimeoutMillis = 5_000,
+            contentLength = 5,
+        )
+
+        assertEquals(0, body.contentLengthCalls)
+        assertEquals(5L, provider.getLength())
+        assertTrue(bytes("hello").contentEquals(readOnce(provider, sink())))
+        assertEquals(5L, provider.getLength())
+        assertEquals(0, body.contentLengthCalls)
+    }
+
+    @Test
+    fun `streaming provider serves the caller-measured length across reads`() {
+        val body = CountingBody(contentLength = 999, oneShot = true)
+        val provider = UploadDataProviders.create(
+            body,
+            executor,
+            writeTimeoutMillis = 5_000,
+            contentLength = 5,
+        )
+        val sink = sink()
+
+        assertEquals(5L, provider.getLength())
+        assertTrue(bytes("hello").contentEquals(readOnce(provider, sink)))
+        assertEquals(listOf(false), sink.readSucceeded)
+        assertTrue(sink.readErrors.isEmpty())
+        assertEquals(0, body.contentLengthCalls)
+    }
+
+    @Test
+    fun `unknown-length caller value drives the streaming provider without re-measuring`() {
+        val body = CountingBody(contentLength = 5)
+        val provider = UploadDataProviders.create(
+            body,
+            executor,
+            writeTimeoutMillis = 5_000,
+            contentLength = -1,
+        )
+        val sink = sink()
+
+        assertEquals(-1L, provider.getLength())
+        assertTrue(bytes("hello").contentEquals(readOnce(provider, sink)))
+        // The second read signals the end of the body.
+        provider.read(sink, buffer())
+        assertEquals(listOf(false, true), sink.readSucceeded)
+        assertEquals(0, body.contentLengthCalls)
+    }
 }

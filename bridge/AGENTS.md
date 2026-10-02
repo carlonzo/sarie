@@ -49,9 +49,10 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   exist is `COMPATIBILITY.md`.
 - `CacheHooks.kt`: the two cache `isHttps` replacements. `SarieBridge.isEnabled()` false
   makes them the stock checks.
-- `SarieBridge.kt`, `SarieConfig.kt`, `SarieEngineBuilder.kt`, `CronetProviders.kt`,
-  `CronetStorage.kt`, `PinTranslation.kt`, `RuntimeSnapshot.kt`, `CronetPolicy.kt`,
-  `DefaultPolicy.kt`, `CronetOptOut.kt`, `SarieLogger.kt`: lifecycle, configuration, and logging.
+- `SarieBridge.kt`, `SarieConfig.kt`, `SarieEngineBuilder.kt`, `SarieNetLog.kt`,
+  `CronetProviders.kt`, `CronetStorage.kt`, `PinTranslation.kt`,
+  `RuntimeSnapshot.kt`, `CronetPolicy.kt`, `DefaultPolicy.kt`, `CronetOptOut.kt`,
+  `SarieLogger.kt`: lifecycle, configuration, and logging.
   The host may call `install(context, config)`, which builds the engine. `install(engine, config)`
   remains the borrowed path. The bridge never calls `shutdown()` on either. `SarieConfig` holds
   policy, mapper, listener, pins, engine configuration, and the optional `SarieLogger`.
@@ -60,10 +61,20 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   priority constants. `RequestConverter` and `ResponseConverter` are built once onto the snapshot.
   `DefaultPolicy()` admits every origin that passes the other rules; a non-empty `allowedOrigins`
   is optional. Kill switch via system property `okhttp.cronet.enabled=false`.
+  `SarieNetLog` drives the engine's NetLog at runtime; it works on a borrowed engine too,
+  because it binds to whichever engine started the capture. It is runtime-only, since the
+  engine does not exist before `build()`. Every other Cronet-only knob (QUIC options, network
+  quality estimator, user agent, thread priority, QUIC hints) goes through the host's raw
+  `SarieConfig.configure` hook, which already receives the `CronetEngine.Builder`; Sarie does
+  not mirror that surface.
+  `SarieLogger.isLoggable` gates per-call message construction; `SwallowingLogger` delegates it
+  (and fails closed to "not loggable" if the host throws), otherwise the gate would be dead for
+  every installed logger.
 - `RoutedCycle.kt`: per-call scheme, host, and port for the allow branch, plus whether the terminal hop was reached.
-- `CallRegistry.kt`: cancellation. 5-step ordered protocol with a per-call `EventListener`
-  (public `Call.addEventListener`) and a single-delivery CAS so the engine is canceled exactly
-  once.
+- `CallRegistry.kt`: cancellation. 5-step ordered protocol with a single-delivery CAS so the
+  engine is canceled exactly once. Delivery comes from the rewritten `RealCall.cancel()`
+  (`CronetBridge.notifyCanceled`), not from `Call.addEventListener`, whose per-call aggregate
+  listener is pure garbage on this path.
 - `CronetExecutor.kt` (`CronetExecutor`, `CronetUploadExecutor`): two DISTINCT single-thread
   executors on purpose. Cronet posts `UploadDataProvider.read()` onto the upload executor
   while the provider submits body work to the reader executor; one shared thread
@@ -78,13 +89,15 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
 
 ## Invariants
 
-- Four sites, descriptors exact, all `@JvmStatic` where the plugin calls them:
+- Five sites, descriptors exact, all `@JvmStatic` where the plugin calls them:
   - `CronetBridge.intercept` `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`
     (`ConnectInterceptor` full replace).
   - `CronetBridge.callServer` `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`
     (`CallServerInterceptor` prefix).
   - `CacheHooks.expectTlsBlock` `(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`.
   - `CacheHooks.requireHandshake` `(Lokhttp3/Request;)Z`.
+  - `CronetBridge.notifyCanceled` `(Lokhttp3/internal/connection/RealCall;)V`
+    (`RealCall.cancel()` append).
 
 - Callback overrides in `OkHttpBridgeCallback` stay CPU-only (they run under
   `allowDirectExecutor()` on Cronet's threads). `CacheHooks` is not a Cronet callback.
@@ -95,6 +108,13 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
 - OkHttp internals access pattern: `@file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")`
   plus compiled references only. Never use reflection for internals.
 - Public API changes need an `.api` dump update in the same commit.
+- The response body is returned exactly as `ResponseConverter` built it. There is no wrapper
+  layer: unregistering the call on body close belongs to `OkHttpBridgeCallback`, and adding a
+  second buffered source costs a full extra copy of every response byte.
+- A partially filled read chunk is surfaced to the caller immediately. okio's
+  `RealBufferedSource.read` performs one source read and returns `min(byteCount, buffered)`, and
+  `okhttp-sse` only ever asks for >= 1 byte, so withholding a chunk to fill the buffer would
+  stall a server-sent-event stream. `BodySourceStreamingTest` pins this.
 
 ## Test map
 

@@ -5,6 +5,7 @@ import sarie.bridge.SarieProtocol
 import sarie.bridge.SarieTimings
 import sarie.instrumentation.NetworkParity
 import sarie.instrumentation.TestAppRuntime
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -103,6 +104,51 @@ class MinifiedSuite {
                 response.protocol == Protocol.HTTP_2 || response.protocol == Protocol.HTTP_3,
             )
         }
+        assertCronetServed()
+    }
+
+    /**
+     * Cancellation under R8. Delivery now rides the rewritten `RealCall.cancel()`
+     * (`CronetBridge.notifyCanceled`) rather than `Call.addEventListener`, so R8 must keep
+     * that appended call site resolvable. Without it a cancel silently stops reaching Cronet
+     * and the body read hangs instead of aborting, which is exactly what this asserts against.
+     */
+    @Test
+    fun cancelAfterHeadersAbortsBodyThroughTheRewrite() {
+        installCronet()
+
+        val client = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
+        val call = client.newCall(Request.Builder().url("$ORIGIN/big?mb=5").build())
+        val headers = CountDownLatch(1)
+        val cancelled = CountDownLatch(1)
+        val error = AtomicReference<Throwable>()
+        val reader = Thread {
+            try {
+                call.execute().use { response ->
+                    headers.countDown() // execute() returns once headers arrive
+                    cancelled.await(10, TimeUnit.SECONDS)
+                    val source = response.body.source()
+                    val chunk = ByteArray(8 * 1024)
+                    while (source.read(chunk) != -1) {
+                        // drain; the cancel must abort this loop
+                    }
+                }
+            } catch (t: Throwable) {
+                error.set(t)
+            }
+        }
+        reader.start()
+        assertTrue("headers never arrived", headers.await(15, TimeUnit.SECONDS))
+        call.cancel()
+        cancelled.countDown()
+        reader.join(15_000)
+        assertFalse("reader thread still alive after cancel", reader.isAlive)
+
+        val thrown = error.get()
+        assertTrue(
+            "expected body read to abort with IOException(Canceled), got: $thrown",
+            thrown is IOException && thrown.message?.contains("Canceled") == true,
+        )
         assertCronetServed()
     }
 

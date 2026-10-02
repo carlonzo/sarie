@@ -68,19 +68,16 @@ internal class ResponseConverter {
         // Content-Encoding headers if Cronet didn't decode; strip Content-Length of decoded
         // responses for the same reason.
 
-        var contentLengthString: String? = null
+        // Content-Encoding is absent on most responses, so the coding list is only built when
+        // there is something to split; see keepsEncodingAffectedHeaders.
+        val keepEncodingAffectedHeaders = keepsEncodingAffectedHeaders(
+            cronetResponseInfo.allHeaders[CONTENT_ENCODING_HEADER_NAME],
+        )
 
-        // Theoretically content encodings can be scattered across multiple comma-separated
-        // Content-Encoding headers. This list contains individual encodings.
-        val contentEncodingItems = (cronetResponseInfo.allHeaders[CONTENT_ENCODING_HEADER_NAME]
-            ?: emptyList())
-            .flatMap { it.split(',').map(String::trim).filter(String::isNotEmpty) }
-
-        val keepEncodingAffectedHeaders = contentEncodingItems.isEmpty() ||
-            !ENCODINGS_HANDLED_BY_CRONET.containsAll(contentEncodingItems)
-
-        if (keepEncodingAffectedHeaders) {
-            contentLengthString = getLastHeaderValue(CONTENT_LENGTH_HEADER_NAME, cronetResponseInfo)
+        val contentLengthString = if (keepEncodingAffectedHeaders) {
+            getLastHeaderValue(CONTENT_LENGTH_HEADER_NAME, cronetResponseInfo)
+        } else {
+            null
         }
 
         responseBuilder
@@ -103,6 +100,10 @@ internal class ResponseConverter {
             )
         }
 
+        // allHeadersAsList, not allHeaders: the map groups a name's values together, so a
+        // response like "A: 1, B: 2, A: 3" would come back re-ordered and OkHttp's header order
+        // (observable through Headers.toMultimap) would change. The list is built per response by
+        // Cronet, which is the allocation this trades for exact wire order.
         for (header in cronetResponseInfo.allHeadersAsList) {
             val copyHeader = keepEncodingAffectedHeaders || (
                 !header.key.equals(CONTENT_LENGTH_HEADER_NAME, ignoreCase = true) &&
@@ -159,6 +160,29 @@ internal class ResponseConverter {
     /** Returns the last header value for the given name, or null if the header isn't present. */
     private fun getLastHeaderValue(name: String, responseInfo: UrlResponseInfo): String? =
         responseInfo.allHeaders[name]?.lastOrNull()
+
+    /**
+     * Whether Content-Encoding and Content-Length must survive into the OkHttp response.
+     *
+     * True when Cronet did not decode the body itself: no Content-Encoding at all, a coding it
+     * does not implement, or a header that carries no coding (so there is nothing it could have
+     * decoded). Content encodings can be scattered across multiple comma-separated
+     * Content-Encoding headers, so every value is split in turn; the common no-header case
+     * returns without splitting or listing anything.
+     */
+    private fun keepsEncodingAffectedHeaders(headerValues: List<String>?): Boolean {
+        if (headerValues == null) return true
+        var sawCoding = false
+        for (value in headerValues) {
+            for (coding in value.split(',')) {
+                val name = coding.trim()
+                if (name.isEmpty()) continue
+                sawCoding = true
+                if (name !in ENCODINGS_HANDLED_BY_CRONET) return true
+            }
+        }
+        return !sawCoding
+    }
 
     private fun <T> getFutureValue(future: CompletableFuture<T>): T = try {
         future.get()

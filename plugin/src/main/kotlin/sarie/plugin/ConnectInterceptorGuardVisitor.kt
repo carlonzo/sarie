@@ -47,7 +47,8 @@ internal fun isTargetClass(className: String): Boolean = InstrumentationTargets.
 /**
  * Verifies the pinned stock shape of each registered target BEFORE rewriting it.
  * ConnectInterceptor becomes a full trampoline. CallServerInterceptor keeps its body behind
- * the callServer prefix. Each cache target replaces one `isHttps` invoke.
+ * the callServer prefix. Each cache target replaces one `isHttps` invoke. RealCall keeps its
+ * stock body and gains one appended `notifyCanceled` hook call.
  * `<clinit>`, constructors that are not a cache site, and every other method pass through.
  * A shape mismatch throws with a javap-style dump (fail closed).
  */
@@ -98,6 +99,7 @@ internal class ConnectInterceptorGuardVisitor(
             InstrumentTarget.CACHE_ENTRY,
             InstrumentTarget.CACHE_STRATEGY_FACTORY,
             -> substituteVisitor(target, delegate)
+            InstrumentTarget.REAL_CALL -> RealCallAppendVisitor(delegate)
         }
     }
 
@@ -121,6 +123,8 @@ internal class ConnectInterceptorGuardVisitor(
             InstrumentTarget.CACHE_ENTRY,
             InstrumentTarget.CACHE_STRATEGY_FACTORY,
             -> isCacheSite(target, name, descriptor)
+            InstrumentTarget.REAL_CALL ->
+                name == InstrumentationTargets.CANCEL_NAME && descriptor == InstrumentationTargets.CANCEL_DESC
         }
 
     private fun expectedMethod(target: InstrumentTarget): String = when (target) {
@@ -131,6 +135,8 @@ internal class ConnectInterceptorGuardVisitor(
             "${InstrumentationTargets.CACHE_ENTRY_INIT}${InstrumentationTargets.CACHE_ENTRY_INIT_DESC}"
         InstrumentTarget.CACHE_STRATEGY_FACTORY ->
             "${InstrumentationTargets.COMPUTE_CANDIDATE}${InstrumentationTargets.COMPUTE_CANDIDATE_DESC}"
+        InstrumentTarget.REAL_CALL ->
+            "${InstrumentationTargets.CANCEL_NAME}${InstrumentationTargets.CANCEL_DESC}"
     }
 }
 

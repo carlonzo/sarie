@@ -329,4 +329,162 @@ class RequestConverterTest {
         assertEquals(200, response.code)
         assertEquals("OK", response.message)
     }
+
+    /** A body that records how often the converter measures it. */
+    private class CountingBody(
+        private val contentLength: Long,
+        private val contentType: String? = "text/plain",
+    ) : RequestBody() {
+        var contentLengthCalls = 0
+            private set
+
+        override fun contentType() = contentType?.toMediaType()
+
+        override fun contentLength(): Long {
+            contentLengthCalls++
+            return contentLength
+        }
+
+        override fun writeTo(sink: BufferedSink) {
+            sink.writeUtf8("hello")
+        }
+    }
+
+    @Test
+    fun `body contentLength is measured exactly once per convert`() {
+        for (length in listOf(5L, 0L, -1L)) {
+            val body = CountingBody(length)
+            val request = Request.Builder().url("https://example.com/a").post(body).build()
+
+            converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+            assertEquals("body length $length", 1, body.contentLengthCalls)
+        }
+    }
+
+    @Test
+    fun `body contentLength is measured once even with an explicit Content-Length header`() {
+        val body = CountingBody(5)
+        val request = Request.Builder()
+            .url("https://example.com/a")
+            .header("Content-Length", "7")
+            .post(body)
+            .build()
+
+        converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+        assertEquals(1, body.contentLengthCalls)
+        val contentLengths = engine.builders.single().headers
+            .filter { it.first.equals("Content-Length", ignoreCase = true) }
+        assertEquals(listOf("Content-Length" to "7"), contentLengths)
+    }
+
+    @Test
+    fun `a request without a body emits no Content-Length header`() {
+        converter().convert(get(), readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+        val builder = engine.builders.single()
+        assertNull(builder.uploadDataProvider)
+        assertFalse(builder.headers.any { it.first.equals("Content-Length", ignoreCase = true) })
+    }
+
+    @Test
+    fun `Content-Length is emitted only for a fixed-length body`() {
+        val fixed = Request.Builder()
+            .url("https://example.com/a")
+            .post(CountingBody(5))
+            .build()
+        converter().convert(fixed, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+        assertTrue("Content-Length" to "5" in engine.builders.last().headers)
+
+        val zero = Request.Builder()
+            .url("https://example.com/a")
+            .post(CountingBody(0))
+            .build()
+        converter().convert(zero, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+        val zeroBuilder = engine.builders.last()
+        assertNull(zeroBuilder.uploadDataProvider)
+        assertEquals(
+            listOf("Content-Length" to "0"),
+            zeroBuilder.headers.filter { it.first.equals("Content-Length", ignoreCase = true) },
+        )
+
+        val unknown = Request.Builder()
+            .url("https://example.com/a")
+            .post(CountingBody(-1))
+            .build()
+        converter().convert(unknown, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+        val unknownBuilder = engine.builders.last()
+        assertNotNull(unknownBuilder.uploadDataProvider)
+        assertFalse(
+            unknownBuilder.headers.any { it.first.equals("Content-Length", ignoreCase = true) },
+        )
+    }
+
+    @Test
+    fun `unique header names are emitted one per name in request order`() {
+        val request = get(
+            "X-B" to "2",
+            "X-A" to "1",
+            "Accept" to "text/plain",
+            "X-C" to "3",
+        )
+
+        converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+        assertEquals(
+            listOf(
+                "X-B" to "2",
+                "X-A" to "1",
+                "Accept" to "text/plain",
+                "X-C" to "3",
+            ),
+            engine.builders.single().headers,
+        )
+    }
+
+    @Test
+    fun `more unique headers than the fast-path capacity still emit in order`() {
+        val entries = (1..20).map { "X-H$it" to "v$it" }
+        val request = get(*entries.toTypedArray())
+
+        converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+        assertEquals(entries, engine.builders.single().headers)
+    }
+
+    @Test
+    fun `names differing only in case join into the first spelling`() {
+        val request = get("X-Foo" to "1", "X-Single" to "s", "x-FOO" to "2")
+
+        converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+        assertEquals(
+            listOf("X-Foo" to "1, 2", "X-Single" to "s"),
+            engine.builders.single().headers,
+        )
+    }
+
+    @Test
+    fun `octet-stream override replaces the user Content-Type in place`() {
+        val request = Request.Builder()
+            .url("https://example.com/a")
+            .header("X-First", "1")
+            .header("Content-Type", "   ")
+            .header("X-Last", "2")
+            .method("POST", body(contentType = null, contentLength = 5))
+            .build()
+
+        converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
+
+        assertEquals(
+            listOf(
+                "X-First" to "1",
+                "Content-Type" to "application/octet-stream",
+                "X-Last" to "2",
+                "Content-Length" to "5",
+            ),
+            engine.builders.single().headers,
+        )
+    }
 }
