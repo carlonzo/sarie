@@ -7,10 +7,13 @@ import org.chromium.net.CronetEngine
 import org.chromium.net.DnsOptions
 
 /**
- * Order: overridable defaults, then [configure], then bridge-owned settings. [configure] cannot
- * leave brotli, cache mode, storage path, or pin bypass at its own values. Migration options and
- * stale DNS (with a persisted host cache) are overridable; a provider that rejects either does
- * not fail setup.
+ * Order: overridable defaults, then the host's [SarieConfig.configure] hook, then bridge-owned
+ * settings. The hook cannot leave brotli, cache mode, storage path, or pin bypass at its own
+ * values, and it still overrides every overridable default. Migration options, stale DNS (with a
+ * persisted host cache) are overridable; a provider that rejects any of them does not fail setup.
+ *
+ * [configure] is also how a host reaches every other Cronet-only knob (QUIC options, network
+ * quality estimator, user agent, thread priority): Sarie does not mirror that surface.
  */
 internal fun applyEngineConfiguration(
     builder: CronetEngine.Builder,
@@ -23,7 +26,9 @@ internal fun applyEngineConfiguration(
     applyBridgeOwned(builder, storagePath, groups)
 }
 
-@OptIn(markerClass = [ConnectionMigrationOptions.Experimental::class, DnsOptions.Experimental::class])
+@OptIn(
+    markerClass = [ConnectionMigrationOptions.Experimental::class, DnsOptions.Experimental::class],
+)
 private fun applyOverridableDefaults(builder: CronetEngine.Builder) {
     runCatching {
         builder.setConnectionMigrationOptions(

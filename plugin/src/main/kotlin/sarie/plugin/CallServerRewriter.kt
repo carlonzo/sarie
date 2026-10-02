@@ -220,7 +220,7 @@ internal class CallServerPrefixVisitor(
         var instructions = 0
         var injected = false
         for (event in events) {
-            event.replay(target)
+            event.replay(target, maxStackDelta = 2)
             if (event is MethodEvent.Instruction) {
                 instructions++
                 if (!injected && instructions == CallServerGuard.PREAMBLE_INSNS) {
@@ -236,7 +236,8 @@ internal class CallServerPrefixVisitor(
     }
 }
 
-private sealed class MethodEvent {
+/** Instruction/label/frame events for one buffered method, replayed verbatim into a rewriter. */
+internal sealed class MethodEvent {
     interface Instruction
 
     data class Insn(val opcode: Int) : MethodEvent(), Instruction
@@ -280,7 +281,7 @@ private sealed class MethodEvent {
     ) : MethodEvent()
     data class Maxs(val maxStack: Int, val maxLocals: Int) : MethodEvent()
 
-    fun replay(target: MethodVisitor) {
+    fun replay(target: MethodVisitor, maxStackDelta: Int) {
         when (this) {
             is Insn -> target.visitInsn(opcode)
             is IntInsn -> target.visitIntInsn(opcode, operand)
@@ -299,7 +300,7 @@ private sealed class MethodEvent {
             is TryCatch -> target.visitTryCatchBlock(start, end, handler, type)
             is LineNumber -> target.visitLineNumber(line, start)
             is LocalVariable -> target.visitLocalVariable(name, descriptor, signature, start, end, index)
-            is Maxs -> target.visitMaxs(maxStack + 2, maxLocals)
+            is Maxs -> target.visitMaxs(maxStack + maxStackDelta, maxLocals)
         }
     }
 }

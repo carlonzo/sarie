@@ -15,7 +15,7 @@ import org.objectweb.asm.Opcodes
 
 /**
  * Exercises the fingerprint task's per-variant extraction (android AAR classes.jar nesting,
- * jvm flat jar) against synthetic artifacts built from the committed goldens, plus the
+ * jvm flat jar) against synthetic artifacts built from the resolved stock bytecode, plus the
  * mismatch-vs-warning decision.
  */
 class OkHttpGuardTasksTest {

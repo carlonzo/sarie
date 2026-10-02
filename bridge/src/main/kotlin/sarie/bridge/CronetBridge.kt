@@ -6,6 +6,7 @@ import sarie.bridge.mapping.OkHttpBridgeCallback
 import sarie.bridge.mapping.RequestBodyEvents
 import sarie.bridge.mapping.SarieTimingsMapper
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.ProtocolException
 import java.net.SocketTimeoutException
 import javax.net.ssl.SSLPeerUnverifiedException
@@ -18,16 +19,11 @@ import android.util.Log
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.Interceptor
-import okhttp3.MediaType
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.ResponseBody
 import okhttp3.internal.closeQuietly
 import okhttp3.internal.connection.RealCall
 import okhttp3.internal.http.RealInterceptorChain
-import okio.BufferedSource
-import okio.ForwardingSource
-import okio.buffer
 import org.chromium.net.CronetException
 import org.chromium.net.NetworkException
 import org.chromium.net.UrlRequest
@@ -51,9 +47,11 @@ import org.chromium.net.UrlRequest
  * - Header events are emitted from the terminal hop (handoff/delivery by Cronet, not on-wire).
  *   Connect, DNS, secure-connect and response-body events are not emitted. Response-body events
  *   would land after callEnd.
- * - callTimeout is evaluated inside callDone, so it bounds the pre-return (header) phase only;
- *   body streaming happens after callDone and is bounded by readTimeout (header wait and every
- *   body read). A network interceptor's withReadTimeout is the chain timeout the hop uses.
+ * - callTimeout is read from the call and bounds the whole hop - the header wait and, through
+ *   the body source, every body read - matching stock, where it spans the entire call. It fires
+ *   with OkHttp's own shape (InterruptedIOException("timeout")) so it stays distinguishable
+ *   from the read timeout. A network interceptor's withReadTimeout is the chain read timeout
+ *   the hop uses; whichever of the two bounds is tighter wins.
  * - chain.connection() stays null. No fabricated metadata: handshake and networkResponse stay
  *   unset; the sent/received timestamps come from bridge-owned clocks
  *   (RequestConverter start / onResponseStarted).
@@ -75,9 +73,11 @@ import org.chromium.net.UrlRequest
  * to stock after Cronet has started. Bodyless methods have no request body, so re-running the
  * converter has no replay hazard.
  *
- * Cancellation: 5-step ordered protocol (Metis B3) — pre-start checks plus a per-call
- * EventListener (public Call.addEventListener) that delivers exactly one engine cancel;
- * post-terminal the listener is a no-op and drops its references.
+ * Cancellation: 5-step ordered protocol (Metis B3) — pre-start checks plus [notifyCanceled],
+ * which the bytecode rewrite appends to `RealCall.cancel()` and which delivers exactly one
+ * engine cancel per registration. OkHttp's EventListener is not used for this: the per-call
+ * `Call.addEventListener` it would take rebuilds an aggregate listener inside a CAS retry
+ * loop. Post-terminal the registry entry is gone, so [notifyCanceled] is a no-op.
  */
 @SarieInternalApi
 public object CronetBridge {
@@ -89,6 +89,9 @@ public object CronetBridge {
     private const val CANCELED_MESSAGE = "Canceled"
     private const val PROXY_AUTH_MESSAGE =
         "Received HTTP_PROXY_AUTH (407) code while not using proxy"
+
+    /** OkHttp's `AsyncTimeout` message for an expired call timeout. */
+    private const val CALL_TIMEOUT_MESSAGE = "timeout"
 
     /** Chromium `ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN`. */
     private const val ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN = -150
@@ -126,10 +129,10 @@ public object CronetBridge {
         val call = realChain.call
         notifyRouted(call, null)
         // No exchange: OkHttp runs network interceptors and lands in callServer.
-        RoutedCycle.open(call, realChain.request.url)
+        val cycle = RoutedCycle.open(call, realChain.request.url)
         return try {
             val response = realChain.proceed(realChain.request)
-            if (!RoutedCycle.reached(call)) {
+            if (!cycle.reachedTerminal()) {
                 throw IllegalStateException(exactlyOnceMessage(call))
             }
             response
@@ -165,7 +168,7 @@ public object CronetBridge {
         if (url.scheme != cycle.scheme || url.host != cycle.host || url.port != cycle.port) {
             throw IllegalStateException(sameAddressMessage(call))
         }
-        if (!RoutedCycle.arrive(call)) {
+        if (!cycle.claimTerminal()) {
             throw IllegalStateException(exactlyOnceMessage(call))
         }
         val snapshot = SarieBridge.snapshot()
@@ -203,6 +206,11 @@ public object CronetBridge {
         val request = realChain.request
         val readTimeoutMillis = realChain.readTimeoutMillis().toLong()
         val writeTimeoutMillis = realChain.writeTimeoutMillis().toLong()
+        // OkHttp's own callTimeout is still running during the header phase and, now that cancel()
+        // reaches Cronet, it already aborts the engine request. It only stops covering the call
+        // once the response is returned, which is why the body side needs this value and the
+        // header phase does not.
+        val callTimeoutMillis = call.timeout().timeoutNanos() / 1_000_000L
         // Distinct executors live inside the snapshot converter: Cronet posts
         // UploadDataProvider callbacks onto the upload executor while the provider submits
         // its body work to the reader executor. One shared single thread would self-deadlock
@@ -227,6 +235,7 @@ public object CronetBridge {
                     onResponseHeadersStart = { events.responseHeadersStart() },
                     call = call,
                     attempt = attempt,
+                    callTimeoutMillis = callTimeoutMillis,
                 )
             } catch (e: IOException) {
                 events.requestFailed(e)
@@ -240,11 +249,12 @@ public object CronetBridge {
                 events.requestFailed(canceled)
                 throw canceled
             } // (i)
-            val handle = CallRegistry.register(call, AtomicReference(urlRequest)) // (ii)
+            val registration = CallRegistry.register(call, AtomicReference(urlRequest)) // (ii)
+            converted.callback.attach(registration)
             try {
                 try {
                     if (call.isCanceled()) { // (iii)
-                        handle.cancelUrlRequestOnce()
+                        registration.cancelUrlRequestOnce()
                         throw IOException(CANCELED_MESSAGE)
                     }
                     // Before start(): Cronet may call the upload provider or onResponseStarted on
@@ -252,17 +262,17 @@ public object CronetBridge {
                     events.requestHeadersEnd(request)
                     urlRequest.start() // (iv)
                     if (call.isCanceled()) { // (v)
-                        handle.cancelUrlRequestOnce()
+                        registration.cancelUrlRequestOnce()
                         throw IOException(CANCELED_MESSAGE)
                     }
 
-                    awaitHeaders(converted.callback, handle, readTimeoutMillis)
+                    awaitHeaders(converted.callback, registration, readTimeoutMillis)
                 } catch (e: IOException) {
                     // Pre-headers transport failure: the single idempotent retry (see KDoc).
                     if (converted.callback.responseHeadersDelivered) events.responseFailed(e)
                     else events.requestFailed(e)
                     reportedOutcome = true
-                    CallRegistry.unregister(call)
+                    registration.unregister()
 
                     // Bounded await + deliver attempt before retry or throw
                     converted.callback.awaitAndDeliver()
@@ -285,17 +295,35 @@ public object CronetBridge {
                     response.body.closeQuietly()
                     throw ProtocolException(PROXY_AUTH_MESSAGE)
                 }
-                val body = response.body
-                return response.newBuilder().body(UnregisteringResponseBody(body, call)).build()
+                // A redirect carries an empty Buffer rather than the callback's body source, so
+                // closing it never reaches the body source's teardown. Cronet has already
+                // canceled the engine request at header time, so the registration ends here -
+                // otherwise a later cancel would deliver a second, redundant engine cancel.
+                if (converted.callback.isRedirect) {
+                    registration.unregister()
+                }
+                // The body is returned as ResponseConverter built it: OkHttpBridgeCallback's
+                // body source owns the registration teardown (close, terminal callbacks), so
+                // nothing wraps it and no response byte is copied an extra time.
+                return response
             } catch (e: Throwable) {
                 if (e is IOException && !reportedOutcome) {
                     if (converted.callback.responseHeadersDelivered) events.responseFailed(e)
                     else events.requestFailed(e)
                 }
-                CallRegistry.unregister(call)
+                registration.unregister()
                 throw e
             }
         }
+    }
+
+    /**
+     * The cancel hook the bytecode rewrite appends to `RealCall.cancel()`. Safe for every call
+     * in the process: a call Sarie never routed, or one that already unregistered, is a no-op.
+     */
+    @JvmStatic
+    public fun notifyCanceled(call: RealCall) {
+        CallRegistry.notifyCanceled(call)
     }
 
     /** Stock's message prefix. Mapped before [isRetryable], and excluded there if it leaks through. */
@@ -339,17 +367,23 @@ public object CronetBridge {
             call.client.retryOnConnectionFailure
     }
 
-    /** Waits for headers within the read-timeout budget; on stall the request is canceled. */
+    /**
+     * Waits for headers within the read-timeout budget; on stall the request is canceled.
+     *
+     * The call's own `callTimeout` is deliberately not applied here: OkHttp's `AsyncTimeout` is
+     * still running while this blocks, and it cancels the call itself, which now reaches Cronet
+     * through [notifyCanceled]. Re-implementing it could only fire later than OkHttp's own.
+     */
     private fun awaitHeaders(
         callback: OkHttpBridgeCallback,
-        handle: CallRegistry.ListenerHandle,
+        registration: CallRegistry.Registration,
         readTimeoutMillis: Long,
     ) {
         try {
             if (readTimeoutMillis == 0L) callback.headersFuture.get()
             else callback.headersFuture.get(readTimeoutMillis, TimeUnit.MILLISECONDS)
         } catch (e: TimeoutException) {
-            handle.cancelUrlRequestOnce()
+            registration.cancelUrlRequestOnce()
             throw SocketTimeoutException("Timed out waiting for response headers")
         } catch (e: ExecutionException) {
             // Unwrap so "Canceled"/CronetException surfaces with its own message.
@@ -358,39 +392,27 @@ public object CronetBridge {
             throw mapPinningFailure(cause)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
-            handle.cancelUrlRequestOnce()
+            registration.cancelUrlRequestOnce()
             throw IOException(e)
         }
     }
 
-    /** Belt over the terminal unregister paths: closing the body or its source tears the
-     * registration down (ResponseBody.close() routes through source() as well). */
-    private class UnregisteringResponseBody(
-        private val delegate: ResponseBody,
-        private val call: RealCall,
-    ) : ResponseBody() {
-        override fun contentType(): MediaType? = delegate.contentType()
-        override fun contentLength(): Long = delegate.contentLength()
-
-        override fun source(): BufferedSource = object : ForwardingSource(delegate.source()) {
-            override fun close() {
-                CallRegistry.unregister(call)
-                super.close()
-            }
-        }.buffer()
-    }
-
     private fun notifyRouted(call: Call, reason: FallbackReason?) {
-        val request = call.request()
-        SarieBridge.logger?.log(
-            Log.DEBUG,
-            if (reason == null) {
-                "${request.method} ${request.url} -> cronet"
-            } else {
-                "${request.method} ${request.url} -> okhttp (reason=$reason)"
-            },
-            null,
-        )
+        val logger = SarieBridge.logger
+        // The routing line calls HttpUrl.toString() on the caller thread on every hop. A host
+        // that filters DEBUG out never wants it, so ask before building it.
+        if (logger != null && logger.isLoggable(Log.DEBUG)) {
+            val request = call.request()
+            logger.log(
+                Log.DEBUG,
+                if (reason == null) {
+                    "${request.method} ${request.url} -> cronet"
+                } else {
+                    "${request.method} ${request.url} -> okhttp (reason=$reason)"
+                },
+                null,
+            )
+        }
         val listener = SarieBridge.listener ?: return
         try {
             listener.onRouted(call, reason)

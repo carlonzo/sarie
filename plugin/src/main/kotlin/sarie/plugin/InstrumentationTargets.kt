@@ -3,7 +3,8 @@ package sarie.plugin
 /**
  * One OkHttp class the plugin may rewrite. ConnectInterceptor is a full replace.
  * CallServerInterceptor keeps its stock body behind a prefix. The two cache classes
- * each replace a single `isHttps` invoke.
+ * each replace a single `isHttps` invoke. RealCall keeps its stock body and gains one
+ * appended bridge hook call.
  */
 enum class InstrumentTarget(
     val dotName: String,
@@ -35,6 +36,12 @@ enum class InstrumentTarget(
         classEntry = "okhttp3/internal/cache/CacheStrategy\$Factory.class",
         fileName = "CacheStrategy\$Factory.class",
     ),
+    REAL_CALL(
+        dotName = "okhttp3.internal.connection.RealCall",
+        internalName = "okhttp3/internal/connection/RealCall",
+        classEntry = "okhttp3/internal/connection/RealCall.class",
+        fileName = "RealCall.class",
+    ),
 }
 
 /** Registered rewrite sites. [isTarget] is the exclusive instrumentation filter. */
@@ -52,6 +59,12 @@ internal object InstrumentationTargets {
     const val COMPUTE_CANDIDATE_DESC: String = "()Lokhttp3/internal/cache/CacheStrategy;"
     const val REQUIRE_HANDSHAKE: String = "requireHandshake"
     const val REQUIRE_HANDSHAKE_DESC: String = "(Lokhttp3/Request;)Z"
+    const val CANCEL_NAME: String = "cancel"
+    const val CANCEL_DESC: String = "()V"
+    /** `RealCall.cancel()`'s `eventListener` load; the hook is spliced in front of it. */
+    const val EVENT_LISTENER_FIELD: String = "eventListener"
+    const val NOTIFY_CANCELED_METHOD: String = "notifyCanceled"
+    const val NOTIFY_CANCELED_DESC: String = "(Lokhttp3/internal/connection/RealCall;)V"
     /** `Okio.buffer` result in `Cache.Entry.<init>(Source)`, confirmed by javap on 5.4.0 and 5.5.0. */
     const val CACHE_SOURCE_LOCAL: Int = 6
 
@@ -60,6 +73,9 @@ internal object InstrumentationTargets {
 
     fun byInternalName(className: String): InstrumentTarget? =
         InstrumentTarget.entries.firstOrNull { it.internalName == className }
+
+    fun byFileName(fileName: String): InstrumentTarget? =
+        InstrumentTarget.entries.firstOrNull { it.fileName == fileName }
 
     fun isTarget(className: String): Boolean = byDotName(className) != null
 }

@@ -130,10 +130,23 @@ public final class sarie/bridge/SarieListener$DefaultImpls {
 public abstract interface class sarie/bridge/SarieLogger {
 	public static final field Companion Lsarie/bridge/SarieLogger$Companion;
 	public static final field Logcat Lsarie/bridge/SarieLogger;
+	public fun isLoggable (I)Z
 	public abstract fun log (ILjava/lang/String;Ljava/lang/Throwable;)V
 }
 
 public final class sarie/bridge/SarieLogger$Companion {
+}
+
+public final class sarie/bridge/SarieLogger$DefaultImpls {
+	public static fun isLoggable (Lsarie/bridge/SarieLogger;I)Z
+}
+
+public final class sarie/bridge/SarieNetLog {
+	public static final field INSTANCE Lsarie/bridge/SarieNetLog;
+	public final fun isCapturing ()Z
+	public final fun start (Ljava/lang/String;)Z
+	public final fun start (Ljava/lang/String;I)Z
+	public final fun stop ()V
 }
 
 public final class sarie/bridge/SarieProtocol : java/lang/Enum {

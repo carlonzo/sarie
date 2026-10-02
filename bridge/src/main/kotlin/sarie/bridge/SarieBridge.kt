@@ -415,4 +415,22 @@ private class SwallowingLogger(private val delegate: SarieLogger) : SarieLogger 
         } catch (_: Throwable) {
         }
     }
+
+    /**
+     * A [fun interface](https://kotlinlang.org/docs/sam-conversions.html) gets a default
+     * [isLoggable] implementation, so without this override every installed logger would report
+     * every priority as loggable and the per-call message strings the gate exists to avoid
+     * would be built anyway.
+     *
+     * Guarded like [log]: this runs on the caller thread, on Cronet network threads and on
+     * executor threads, and a throw from host code must not fail a request or kill a thread.
+     * Failing closed here (reporting "not loggable") keeps the message from being built, which
+     * is the cheaper and safer of the two outcomes.
+     */
+    override fun isLoggable(priority: Int): Boolean =
+        try {
+            delegate.isLoggable(priority)
+        } catch (_: Throwable) {
+            false
+        }
 }

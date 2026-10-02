@@ -102,9 +102,7 @@ jobs:
           git add \
             plugin/src/main/kotlin/sarie/plugin/RecipeRegistry.kt \
             plugin/src/main/kotlin/sarie/plugin/GoldenFingerprints.kt \
-            plugin/src/test/resources/stock/"${{ steps.detect.outputs.new }}" \
             plugin/scripts/generate-fingerprints.sh \
-            plugin/recipe-verification-report.md \
             plugin/build.gradle.kts \
             bridge/src/main/kotlin/sarie/bridge/VerifiedOkHttpVersions.kt \
             gradle/libs.versions.toml \

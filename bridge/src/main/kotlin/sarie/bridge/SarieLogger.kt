@@ -24,6 +24,21 @@ public fun interface SarieLogger {
      */
     public fun log(priority: Int, message: String, throwable: Throwable?): Unit
 
+    /**
+     * Whether a message logged at [priority] is wanted at all.
+     *
+     * The bridge asks before building a message, so a host that filters by priority (or by
+     * build type) never pays for the string it would discard - including strings that touch
+     * per-response state such as the request URL. The default accepts every priority, which
+     * makes an existing [SarieLogger] behave exactly as before.
+     *
+     * Called on whichever thread is doing the logging, including Cronet network threads, and
+     * inside the bridge's swallow-guard: throwing is tolerated but treated as "not loggable".
+     *
+     * @param priority An `android.util.Log` constant.
+     */
+    public fun isLoggable(priority: Int): Boolean = true
+
     public companion object {
         /**
          * A ready-made [SarieLogger] implementation that forwards messages to Android Logcat

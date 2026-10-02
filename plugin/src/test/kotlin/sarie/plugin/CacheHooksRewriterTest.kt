@@ -325,23 +325,6 @@ private fun cacheEntryStock(version: String, variant: Variant): ByteArray =
 private fun cacheStrategyStock(version: String, variant: Variant): ByteArray =
     stock(version, variant, InstrumentTarget.CACHE_STRATEGY_FACTORY.fileName)
 
-private fun methodInsns(classBytes: ByteArray, methodName: String, methodDesc: String): List<String> {
-    var captured: List<String> = emptyList()
-    ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9) {
-        override fun visitMethod(
-            access: Int,
-            name: String,
-            descriptor: String,
-            signature: String?,
-            exceptions: Array<out String>?,
-        ): MethodVisitor? {
-            if (name != methodName || descriptor != methodDesc) return null
-            return RecordingMethodVisitor(object : MethodVisitor(Opcodes.ASM9) {}) { captured = it }
-        }
-    }, 0)
-    return captured
-}
-
 private fun methodNamed(classBytes: ByteArray, methodName: String): Pair<String, String> {
     var found: Pair<String, String>? = null
     ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9) {
@@ -404,24 +387,3 @@ private fun assertSubstitution(
     assertEquals("$label tail", stockInsns.drop(at + 1), rewrittenInsns.drop(at + replacement.size))
 }
 
-private fun tamperMethod(
-    classBytes: ByteArray,
-    methodName: String,
-    methodDesc: String,
-    mutate: (MethodVisitor) -> MethodVisitor,
-): ByteArray {
-    val writer = ClassWriter(0)
-    ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9, writer) {
-        override fun visitMethod(
-            access: Int,
-            name: String,
-            descriptor: String,
-            signature: String?,
-            exceptions: Array<out String>?,
-        ): MethodVisitor {
-            val passthrough = super.visitMethod(access, name, descriptor, signature, exceptions)
-            return if (name == methodName && descriptor == methodDesc) mutate(passthrough) else passthrough
-        }
-    }, 0)
-    return writer.toByteArray()
-}

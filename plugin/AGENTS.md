@@ -49,6 +49,10 @@ rewritten; `<clinit>` and every other method pass through untouched, including
    `INVOKESTATIC sarie/bridge/CacheHooks.expectTlsBlock (Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`.
 4. `CacheStrategy$Factory.computeCandidate` — the one `Request.isHttps` becomes
    `INVOKESTATIC sarie/bridge/CacheHooks.requireHandshake (Lokhttp3/Request;)Z`.
+5. `RealCall.cancel() ()V` — the stock instruction stream is pinned whole by `RealCallGuard`
+   (37 instructions for the current recipes) and replayed unchanged with one appended
+   `INVOKESTATIC sarie/bridge/CronetBridge.notifyCanceled (Lokhttp3/internal/connection/RealCall;)V`.
+   Cancellation delivery; the bridge does not use `Call.addEventListener`.
 
 Fail: `IllegalStateException` with the problem list. `visitEnd` also fails if the target
 method was never seen. Each target has its own structural guard.
@@ -83,9 +87,9 @@ later versions do). In that case one plain `HTTP_3 -> 6` store is inserted befor
 ## Recipe registry
 
 Adding a future OkHttp 5.x version: run
-`plugin/scripts/generate-fingerprints.sh <version>` (downloads the artifacts, writes
-goldens under `src/test/resources/stock/<version>/`, regenerates
-`GoldenFingerprints.kt`, `bridge/.../VerifiedOkHttpVersions.kt`, and the report),
+`plugin/scripts/generate-fingerprints.sh <version>` (downloads the artifacts, regenerates
+`GoldenFingerprints.kt` and `bridge/.../VerifiedOkHttpVersions.kt`, and prints the
+verification table plus per-version exclusion reasons to stdout),
 then add one `Recipe` line to `RecipeRegistry.recipes`.
 Tests parameterize over the recipes automatically. The structural guard is the safety net:
 never weaken it to admit a version.
@@ -103,13 +107,23 @@ TestKit forks must use temurin-21 (see the JDK note in that file).
 
 ## Invariants
 
-- Instrument exactly the registered targets, and only the four methods in the rewrite pipeline.
+- Instrument exactly the registered targets, and only the five methods in the rewrite pipeline.
   The one exception is the Ktor patch on `OkUtilsKt$WhenMappings.<clinit>`.
 - Descriptors stay `CronetBridge.intercept` and `CronetBridge.callServer`
   `(Lokhttp3/Interceptor$Chain;)Lokhttp3/Response;`, `CacheHooks.expectTlsBlock`
-  `(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`, and `CacheHooks.requireHandshake`
-  `(Lokhttp3/Request;)Z`. `ConnectInterceptor` stays a full replace. `CallServerInterceptor`
-  stays a prefix. The two cache sites each replace one `isHttps`.
+  `(Lokhttp3/HttpUrl;Lokio/BufferedSource;)Z`, `CacheHooks.requireHandshake`
+  `(Lokhttp3/Request;)Z`, and `CronetBridge.notifyCanceled`
+  `(Lokhttp3/internal/connection/RealCall;)V`. `ConnectInterceptor` stays a full replace.
+  `CallServerInterceptor` stays a prefix. The two cache sites each replace one `isHttps`.
+  `RealCall.cancel()` stays an append; its stock body is never rewritten.
+- `notifyCanceled` must remain `@JvmStatic` on `CronetBridge` (an `internal` Kotlin object
+  member would be name-mangled and is not a static method, so `INVOKESTATIC` would not resolve),
+  and must stay a no-op for calls the bridge never registered — the rewrite fires for every
+  `cancel()` in the process.
 - Never touch `<clinit>`, `INSTANCE`, or a constructor other than the one
   `Cache$Entry.<init>(Source)` site. The Ktor patch's `<clinit>` is not an OkHttp class.
-- Goldens under `plugin/src/test/resources/stock/` and `ktor/` are script-generated; never hand-edit them.
+- The Kotlin goldens (`GoldenFingerprints.kt`, `VerifiedOkHttpVersions.kt`) and the Ktor
+  fixtures under `plugin/src/test/resources/ktor/` are script-generated; never hand-edit them.
+  Stock OkHttp bytecode is **not** checked in: the rewriter tests read it at test time from the
+  jars resolved by the `stockOkhttpMin` / `stockOkhttpNewest` configurations, so it cannot drift
+  from the dependency.

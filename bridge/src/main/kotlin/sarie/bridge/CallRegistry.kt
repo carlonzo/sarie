@@ -5,27 +5,31 @@ package sarie.bridge
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import okhttp3.Call
-import okhttp3.EventListener
 import okhttp3.internal.connection.RealCall
 import org.chromium.net.UrlRequest
 
 /**
  * Tracks in-flight Cronet-path calls so a cancel from any thread reaches the engine request
- * exactly once. The listener is attached through the public [Call.addEventListener]; after
- * [unregister] (terminal) it is a no-op and holds no references.
+ * exactly once.
+ *
+ * Delivery comes from [notifyCanceled], which the bytecode rewrite appends to
+ * `RealCall.cancel()` ([CronetBridge.notifyCanceled]). OkHttp's own `EventListener` is not used:
+ * `RealCall.addEventListener` rebuilds an aggregate listener inside a CAS retry loop, which is
+ * per-call garbage the bridge can avoid now that the cancel path is a direct static call.
+ *
+ * [notifyCanceled] runs for EVERY cancel in the process, including calls Sarie never routed and
+ * calls that already reached a terminal path, so it must stay a cheap no-op when [requests] holds
+ * no entry for the call. After [unregister] (terminal) the entry is gone, which is what makes a
+ * late cancel inert.
  */
 internal object CallRegistry {
 
     private val requests = ConcurrentHashMap<RealCall, RegisteredRequest>()
 
     class RegisteredRequest internal constructor(
-        internal val call: RealCall,
         val urlRequestRef: AtomicReference<UrlRequest?>,
     ) {
         private val cancelDelivered = AtomicBoolean(false)
-
-        internal val listener = Listener(this)
 
         /** Delivers at most one [UrlRequest.cancel]; no-op while the ref is empty. */
         fun cancelUrlRequestOnce() {
@@ -35,38 +39,42 @@ internal object CallRegistry {
         }
     }
 
-    internal class Listener(target: RegisteredRequest) : EventListener() {
-        @Volatile
-        private var target: RegisteredRequest? = target
-
-        override fun canceled(call: Call) {
-            val current = target ?: return // post-terminal: no-op
-            current.cancelUrlRequestOnce()
-            unregister(current.call)
-        }
-
-        /** Post-terminal: drop the reference so the listener keeps nothing alive. */
-        fun deactivate() {
-            target = null
-        }
-    }
-
-    class ListenerHandle internal constructor(private val registered: RegisteredRequest) {
+    class Registration internal constructor(
+        private val call: RealCall,
+        private val registered: RegisteredRequest,
+    ) {
         /** Used by the ordered protocol re-checks; shares the single-delivery guard. */
         fun cancelUrlRequestOnce() = registered.cancelUrlRequestOnce()
+
+        /**
+         * Post-terminal teardown, scoped to *this* attempt.
+         *
+         * A value-aware remove matters: an earlier attempt that closes late (a transport-failure
+         * retry, a body closed after the follow-up already started) must not tear down the newer
+         * attempt's registration, which would leave a live engine request uncancellable.
+         */
+        fun unregister() {
+            requests.remove(call, registered)
+        }
     }
 
-    fun register(call: RealCall, urlRequestRef: AtomicReference<UrlRequest?>): ListenerHandle {
-        val registered = RegisteredRequest(call, urlRequestRef)
-        // Map first, listener second: a cancel landing in between is caught by the protocol's
-        // re-checks instead of racing an unattached listener delivery.
+    /**
+     * Publishes [call] as cancellable. Re-registering the same call (the transport-failure retry)
+     * replaces the entry: the previous attempt's guard is spent, so the fresh attempt gets its own
+     * single cancel.
+     */
+    fun register(call: RealCall, urlRequestRef: AtomicReference<UrlRequest?>): Registration {
+        val registered = RegisteredRequest(urlRequestRef)
         requests[call] = registered
-        call.addEventListener(registered.listener)
-        return ListenerHandle(registered)
+        return Registration(call, registered)
     }
 
-    /** Post-terminal teardown: entry dropped, listener inert. Idempotent. */
-    fun unregister(call: RealCall) {
-        requests.remove(call)?.listener?.deactivate()
+    /**
+     * The cancel delivery the rewritten `RealCall.cancel()` hands us: at most one engine cancel,
+     * then the entry is dropped. A no-op for a call Sarie never routed, or one that already
+     * unregistered; the single [ConcurrentHashMap] removal covers both.
+     */
+    fun notifyCanceled(call: RealCall) {
+        requests.remove(call)?.cancelUrlRequestOnce()
     }
 }

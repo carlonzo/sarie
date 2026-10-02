@@ -333,6 +333,16 @@ class CronetBridgeTest {
         return error
     }
 
+    /**
+     * Cancels the way the instrumented OkHttp does: `RealCall.cancel()` followed by the appended
+     * `CronetBridge.notifyCanceled` static call. The JVM test classpath carries an unrewritten
+     * OkHttp, so the hook is invoked explicitly wherever the engine cancel must be delivered.
+     */
+    private fun cancelAsRewritten(call: RealCall) {
+        call.cancel()
+        CronetBridge.notifyCanceled(call)
+    }
+
     // --- bytecode shape of the exact-stock fallback ---
 
     /**
@@ -419,7 +429,7 @@ class CronetBridgeTest {
         assertEquals(0, fake.cancelCalls)
 
         source.close()
-        call.cancel()
+        cancelAsRewritten(call)
         assertEquals(0, fake.cancelCalls)
     }
 
@@ -435,7 +445,7 @@ class CronetBridgeTest {
 
         val error = interceptAsync(chain)
         assertTrue(gate.awaitEntered())
-        call.cancel()
+        cancelAsRewritten(call) // no registration yet: the hook is a no-op
         gate.releaseNow()
 
         val thrown = error.get(5, TimeUnit.SECONDS)
@@ -456,7 +466,7 @@ class CronetBridgeTest {
 
         val error = interceptAsync(chain)
         assertTrue(gate.awaitEntered()) // start() parked: register already happened
-        call.cancel() // delivered by the attached EventListener, exactly once
+        cancelAsRewritten(call) // delivered by the rewritten cancel(), exactly once
         gate.releaseNow()
 
         val thrown = error.get(5, TimeUnit.SECONDS)
@@ -496,7 +506,7 @@ class CronetBridgeTest {
             }
         }.start()
         assertTrue(gate.awaitEntered())
-        call.cancel() // listener delivers the single engine cancel and unregisters
+        cancelAsRewritten(call) // the single engine cancel, delivered by the rewritten cancel()
         gate.releaseNow()
 
         val thrown = readError.get(5, TimeUnit.SECONDS)
@@ -528,7 +538,7 @@ class CronetBridgeTest {
         // Closing the body quietly cancels the still-unfinished engine request.
         assertEquals(1, engine.builtRequests.single().cancelCalls)
         // Unregistered: a later cancel does not reach the engine again.
-        call.cancel()
+        cancelAsRewritten(call)
         assertEquals(1, engine.builtRequests.single().cancelCalls)
     }
 
@@ -555,7 +565,7 @@ class CronetBridgeTest {
         engine.builtRequests.forEach { assertEquals(1, it.startCalls) }
         // Closing the unread body cancels attempt 2 and unregisters.
         response.body.close()
-        call.cancel()
+        cancelAsRewritten(call)
         assertEquals(1, engine.builtRequests[1].cancelCalls)
     }
 
@@ -573,7 +583,7 @@ class CronetBridgeTest {
         assertTrue("expected the CronetException to surface", thrown is FakeCronetException)
         assertEquals(2, engine.builtRequests.size)
         // Unregistered: a cancel after the failure does not reach either engine request.
-        call.cancel()
+        cancelAsRewritten(call)
         engine.builtRequests.forEach { assertEquals(0, it.cancelCalls) }
     }
 
@@ -624,7 +634,7 @@ class CronetBridgeTest {
 
         val error = interceptAsync(chain)
         assertTrue(gate.awaitEntered()) // start() parked: request attached
-        call.cancel() // listener delivers exactly one engine cancel
+        cancelAsRewritten(call) // the rewritten cancel() delivers exactly one engine cancel
         gate.releaseNow()
 
         val thrown = error.get(5, TimeUnit.SECONDS)

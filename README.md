@@ -17,7 +17,7 @@ Why bother: Reddit moved Android feed traffic to HTTP/3 and saw feed failure rat
 
 ## How it works
 
-1. **Build-time bytecode rewriting**: the Gradle plugin rewrites four internal OkHttp call sites at packaging time: `ConnectInterceptor` (the bridge trampoline), `CallServerInterceptor` (a prefix), and two cache `isHttps` checks.
+1. **Build-time bytecode rewriting**: the Gradle plugin rewrites five internal OkHttp call sites at packaging time: `ConnectInterceptor` (the bridge trampoline), `CallServerInterceptor` (a prefix), two cache `isHttps` checks, and `RealCall.cancel()` (an appended cancel hook).
 2. **Pre-send routing**: allowed HTTPS requests go to Cronet, with the OkHttp cache, network interceptors, and authenticator still in the path. Everything else (cleartext, WebSockets, custom trust, proxies, opt-outs) stays on stock OkHttp.
 3. **Transparent to application interceptors**: the swap happens at `ConnectInterceptor`, so logging, tracing, auth, and header interceptors run normally above it.
 
@@ -123,7 +123,7 @@ Google's [`cronet-transport-for-okhttp`](https://github.com/google/cronet-transp
 | **Unsupported client config** (proxy, unbridged pins, custom trust, …) | Sent to Cronet anyway; OkHttp config silently bypassed | Falls back to stock OkHttp pre-send; `SarieListener.onRouted` gets the reason |
 | **OkHttp cache** | Cronet responses never cached | Cached by OkHttp (a hit has `handshake == null`); Cronet caches no responses |
 | **WebSocket** | Fails | Routed to stock OkHttp |
-| **Cancellation** | ~500 ms poll loop | Immediate, via `Call.addEventListener` |
+| **Cancellation** | ~500 ms poll loop | Immediate, via the rewritten `RealCall.cancel()` |
 | **Request tags** | Dropped; `CronetCallFactory` throws | Preserved |
 | **Transport failure** | Terminal | Idempotent calls retried once before headers |
 | **HTTP 407 (proxy auth)** | Can crash follow-up logic | Clean `IOException`; proxy clients denied pre-send |
