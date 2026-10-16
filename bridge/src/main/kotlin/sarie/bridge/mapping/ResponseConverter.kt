@@ -20,6 +20,7 @@ import java.io.IOException
 import java.net.ProtocolException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
+import okhttp3.Headers
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Protocol
 import okhttp3.Request
@@ -104,17 +105,19 @@ internal class ResponseConverter {
         // response like "A: 1, B: 2, A: 3" would come back re-ordered and OkHttp's header order
         // (observable through Headers.toMultimap) would change. The list is built per response by
         // Cronet, which is the allocation this trades for exact wire order.
+        val headers = Headers.Builder()
         for (header in cronetResponseInfo.allHeadersAsList) {
             val copyHeader = keepEncodingAffectedHeaders || (
                 !header.key.equals(CONTENT_LENGTH_HEADER_NAME, ignoreCase = true) &&
                     !header.key.equals(CONTENT_ENCODING_HEADER_NAME, ignoreCase = true)
                 )
             if (copyHeader) {
-                responseBuilder.addHeader(header.key, header.value)
+                // Server values are kept as received, non-ASCII included, as stock OkHttp keeps them.
+                headers.addUnsafeNonAscii(header.key, header.value)
             }
         }
 
-        return responseBuilder
+        return responseBuilder.headers(headers.build())
     }
 
     /** Creates an OkHttp ResponseBody from the bridging callback's body source. */

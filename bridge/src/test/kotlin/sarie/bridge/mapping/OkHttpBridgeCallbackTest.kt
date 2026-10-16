@@ -10,6 +10,7 @@ import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okio.Buffer
+import okio.buffer
 import org.chromium.net.RequestFinishedInfo
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
@@ -92,6 +93,22 @@ class OkHttpBridgeCallbackTest {
         val thrown = error.get(5, TimeUnit.SECONDS)
         assertTrue("expected IOException but was $thrown", thrown is java.io.IOException)
         assertEquals(1, request.cancelCalls)
+    }
+
+    @Test
+    fun `a read after a timed-out read fails without a second engine read`() {
+        val cb = OkHttpBridgeCallback(readTimeoutMillis = 100)
+        val request = newRequest(cb)
+        cb.onResponseStarted(request, info)
+        val body = cb.bodySourceFuture.get(1, TimeUnit.SECONDS).buffer()
+        // Cronet rejects a read while the previous one is still pending.
+        request.readHandler = { check(request.readCalls == 1) { "Unexpected read attempt." } }
+
+        // An interceptor peeks the body for logging and swallows the failure, then the caller
+        // reads the same body.
+        org.junit.Assert.assertThrows(java.io.IOException::class.java) { body.peek().request(1) }
+        org.junit.Assert.assertThrows(java.io.IOException::class.java) { body.readByteArray() }
+        assertEquals(1, request.readCalls)
     }
 
     @Test
