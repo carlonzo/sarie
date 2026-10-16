@@ -86,6 +86,22 @@ class ResponseConverterTest {
     }
 
     @Test
+    fun `a non-ASCII response header value is kept as stock OkHttp keeps it`() {
+        // A filename whose UTF-8 was mis-decoded upstream ("×" arriving as "Ã—").
+        val disposition = "inline; filename=\"1200 Ã— 600 cover.png\""
+
+        val response = convert(
+            FakeUrlResponseInfo(
+                headersAsList = listOf(
+                    FakeUrlResponseInfo.headerEntry("Content-Disposition", disposition),
+                ),
+            ),
+        )
+
+        assertEquals(disposition, response.header("Content-Disposition"))
+    }
+
+    @Test
     fun `all-Cronet-handled Content-Encoding strips encoding and length headers`() {
         val handled = listOf("gzip", "br", "deflate", "x-gzip", "zstd", "gzip, x-gzip")
         for (encoding in handled) {
