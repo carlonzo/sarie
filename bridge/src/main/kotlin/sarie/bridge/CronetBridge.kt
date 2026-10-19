@@ -260,7 +260,14 @@ public object CronetBridge {
                     // Before start(): Cronet may call the upload provider or onResponseStarted on
                     // its own threads before start() returns, and those emit later events.
                     events.requestHeadersEnd(request)
-                    urlRequest.start() // (iv)
+                    try {
+                        urlRequest.start() // (iv)
+                    } catch (e: IllegalArgumentException) {
+                        // Cronet rejects a header value with CR, LF or NUL, or a name that is not
+                        // a token, which Headers.Builder.addUnsafeNonAscii lets through. Unchecked,
+                        // it would escape to the caller and kill OkHttp's dispatcher thread.
+                        throw IOException(e.message, e)
+                    }
                     if (call.isCanceled()) { // (v)
                         registration.cancelUrlRequestOnce()
                         throw IOException(CANCELED_MESSAGE)
