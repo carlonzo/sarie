@@ -505,6 +505,8 @@ internal class OkHttpBridgeCallback(
                 }
 
                 if (result == null) {
+                    // Cronet still holds this read, so every later read must fail here instead.
+                    canceled.set(true)
                     currentRequest.cancel()
                     if (callBudgetMillis == 0L || remainingCallMillis() == 0L) {
                         // The overall call deadline is what ran out, not the read timeout.

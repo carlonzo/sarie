@@ -92,6 +92,7 @@ class CronetBridgeTest {
          * transport-level CronetException, mirroring onFailed before onResponseStarted.
          */
         var preHeaderFailures = 0
+        var startFailure: RuntimeException? = null
         var preHeaderFailure: CronetException = FakeCronetException("net err")
 
         override fun newUrlRequestBuilder(
@@ -171,6 +172,7 @@ class CronetBridgeTest {
 
         override fun start() {
             startCalls++
+            engine.startFailure?.let { throw it }
             startEntered = true
             engine.startGate?.block()
             // A cancel that landed while start() was parked replaces the header delivery,
@@ -621,6 +623,20 @@ class CronetBridgeTest {
 
         assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
 
+        assertEquals(1, engine.builtRequests.size)
+    }
+
+    @Test
+    fun `a header Cronet rejects at start fails the call with IOException - no retry`() {
+        val engine = ScriptedCronetEngine()
+        // Cronet's own message for a header that fails its native validation.
+        engine.startFailure = IllegalArgumentException("Invalid header with headername: X-Bad")
+        install(engine, "example.com")
+        val (_, chain) = cronetChain(OkHttpClient(), "https://example.com/")
+
+        val thrown = assertThrows(IOException::class.java) { CronetBridge.intercept(chain) }
+
+        assertTrue(thrown.cause is IllegalArgumentException)
         assertEquals(1, engine.builtRequests.size)
     }
 
