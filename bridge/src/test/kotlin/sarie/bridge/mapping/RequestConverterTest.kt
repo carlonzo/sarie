@@ -157,7 +157,7 @@ class RequestConverterTest {
         assertTrue(builder.directExecutorAllowed)
         assertEquals(
             listOf<Pair<String, String>>(
-                "X-Dup" to "one, two",
+                "X-Dup" to "two",
                 "X-Single" to "s",
             ),
             builder.headers,
@@ -168,7 +168,7 @@ class RequestConverterTest {
     }
 
     @Test
-    fun `repeated headers join with comma except Cookie with semicolon`() {
+    fun `a repeated header keeps the last value except Cookie, which joins with semicolon`() {
         val request = get(
             "X-Dup" to "one",
             "X-Dup" to "two",
@@ -180,7 +180,7 @@ class RequestConverterTest {
 
         assertEquals(
             listOf(
-                "X-Dup" to "one, two",
+                "X-Dup" to "two",
                 "Cookie" to "a=1; b=2",
             ),
             engine.builders.single().headers,
@@ -209,7 +209,8 @@ class RequestConverterTest {
         converter().convert(different, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
         val folded = engine.builders.last().headers
             .filter { it.first.equals("Content-Type", ignoreCase = true) }
-        assertEquals(listOf("Content-Type" to "application/json, text/plain"), folded)
+        // The body's type wins, as stock's BridgeInterceptor sets it with header().
+        assertEquals(listOf("Content-Type" to "text/plain"), folded)
     }
 
     @Test
@@ -454,13 +455,13 @@ class RequestConverterTest {
     }
 
     @Test
-    fun `names differing only in case join into the first spelling`() {
+    fun `names differing only in case keep the first spelling and the last value`() {
         val request = get("X-Foo" to "1", "X-Single" to "s", "x-FOO" to "2")
 
         converter().convert(request, readTimeoutMillis = 5_000, writeTimeoutMillis = 5_000)
 
         assertEquals(
-            listOf("X-Foo" to "1, 2", "X-Single" to "s"),
+            listOf("X-Foo" to "2", "X-Single" to "s"),
             engine.builders.single().headers,
         )
     }
