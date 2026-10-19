@@ -555,14 +555,14 @@ class CronetSuite {
             assertEquals(200, response.code)
             val echoed = response.body.string()
             println("HEADER-ECHO-BEGIN\n$echoed\nHEADER-ECHO-END")
-            // Repeated names are one field: ", "-joined. The server sees "one, two".
+            // A repeated name is one field carrying the last value. The server sees "two".
             assertTrue(
-                "expected joined duplicate values on the wire, got:\n$echoed",
-                echoed.contains("X-Dup: [one, two]"),
+                "expected the last duplicate value on the wire, got:\n$echoed",
+                echoed.contains("X-Dup: [two]"),
             )
             assertFalse(
-                "duplicates must not collapse to the last value, got:\n$echoed",
-                echoed.contains("X-Dup: [two]"),
+                "duplicates must not be joined, got:\n$echoed",
+                echoed.contains("X-Dup: [one"),
             )
             // Host is derived from the URL by the engine stack.
             assertTrue(

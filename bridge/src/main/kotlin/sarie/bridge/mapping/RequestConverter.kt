@@ -19,7 +19,6 @@ package sarie.bridge.mapping
 import sarie.bridge.RuntimeSnapshot
 import sarie.bridge.SarieBridge
 import java.io.IOException
-import java.util.Locale
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicBoolean
@@ -83,7 +82,7 @@ internal class RequestConverter(
 
         builder.setHttpMethod(okHttpRequest.method)
 
-        // One addHeader per name. Repeated request values join with ", " ("; " for Cookie).
+        // One addHeader per name. A repeated name keeps its last value ("; "-joined for Cookie).
         // Content-Type and Content-Length the converter adds are folded into that same set.
         val requestHeaders = RequestHeaders(builder)
 
@@ -97,7 +96,7 @@ internal class RequestConverter(
             // If provided by the user, set the RequestBody.contentType(). This matches OkHttp.
             val contentType = body.contentType()
             if (contentType != null) {
-                requestHeaders.addDistinct(CONTENT_TYPE_HEADER_NAME, contentType.toString())
+                requestHeaders.add(CONTENT_TYPE_HEADER_NAME, contentType.toString())
             }
 
             // Measured exactly once: a MultipartBody re-sums every part per call, and a custom
@@ -124,10 +123,7 @@ internal class RequestConverter(
                             "\"$CONTENT_TYPE_HEADER_DEFAULT_VALUE\"",
                         null,
                     )
-                    requestHeaders.replace(
-                        CONTENT_TYPE_HEADER_NAME,
-                        CONTENT_TYPE_HEADER_DEFAULT_VALUE,
-                    )
+                    requestHeaders.add(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE)
                 }
 
                 builder.setUploadDataProvider(
@@ -195,31 +191,15 @@ internal class RequestConverter(
         fun getResponse(): Response = responseConverter.toResponse(request, callback)
     }
 
-    private class JoinedHeader(val name: String, val values: MutableList<String>)
-
-    /** How [RequestHeaders.merge] combines a value with a name it already holds. */
-    private enum class Merge {
-        /** Append the value to whatever is already held for the name. */
-        ADD,
-
-        /** Append the value unless an equal one is already held, ignoring case. */
-        DISTINCT,
-
-        /** Drop whatever is held for the name and keep only the new value. */
-        REPLACE,
-    }
-
     /**
      * Collects the request headers of a single conversion and emits one
      * [UrlRequest.Builder.addHeader] call per name, in first-appearance order.
      *
-     * Fast path: while no name repeats case-insensitively - the common case - entries sit in two
-     * flat arrays and are emitted as collected, without a lowercased key, a list or a joined
-     * string per header. Duplicate detection compares the incoming name against the names already
-     * held; the header count is small, so the quadratic scan without allocation wins.
-     *
-     * The first repeated name promotes everything collected so far into a joining map, which
-     * preserves the published contract: the values of one name join with ", ", or "; " for Cookie.
+     * A repeated name (compared ignoring case) keeps its first position and spelling, and the
+     * last value wins: most fields allow one value, and joining two of them with ", " sends a
+     * value no server parses. Cookie is the exception: its values join with "; ", the form
+     * HTTP/2 itself reassembles cookie crumbs into. The header count is small, so the quadratic
+     * name scan without allocation wins over a map.
      */
     private class RequestHeaders(private val builder: UrlRequest.Builder) {
 
@@ -227,34 +207,8 @@ internal class RequestConverter(
         private var values = arrayOfNulls<String>(INITIAL_CAPACITY)
         private var count = 0
 
-        /** Non-null once a repeated name forced the joining path. */
-        private var joined: LinkedHashMap<String, JoinedHeader>? = null
-
-        fun add(name: String, value: String) = merge(name, value, Merge.ADD)
-
-        fun addDistinct(name: String, value: String) = merge(name, value, Merge.DISTINCT)
-
-        fun replace(name: String, value: String) = merge(name, value, Merge.REPLACE)
-
-        /** Hands the collected headers to the builder, one call per name. */
-        fun emit() {
-            val joined = joined
-            if (joined == null) {
-                for (i in 0 until count) builder.addHeader(names[i]!!, values[i]!!)
-                return
-            }
-            for ((key, group) in joined) {
-                val separator = if (key == "cookie") "; " else ", "
-                builder.addHeader(group.name, group.values.joinToString(separator))
-            }
-        }
-
-        private fun merge(name: String, value: String, merge: Merge) {
-            val joined = joined
-            if (joined != null) {
-                mergeJoined(joined, name, value, merge)
-                return
-            }
+        /** Adds [value], replacing a value already held for [name] (joining, for Cookie). */
+        fun add(name: String, value: String) {
             val index = indexOf(name)
             if (index < 0) {
                 if (count == names.size) {
@@ -264,42 +218,16 @@ internal class RequestConverter(
                 names[count] = name
                 values[count] = value
                 count++
-                return
-            }
-            val existingName = names[index]!!
-            val existingValue = values[index]!!
-            if (merge == Merge.REPLACE) {
-                names[index] = name
+            } else if (name.equals(COOKIE_HEADER_NAME, ignoreCase = true)) {
+                values[index] = values[index] + "; " + value
+            } else {
                 values[index] = value
-                return
             }
-            // A single held value that already equals the incoming one needs no joining.
-            if (merge == Merge.DISTINCT && existingValue.equals(value, ignoreCase = true)) return
-            // Promotion seeds one group per collected entry, so the joined path sees both.
-            mergeJoined(promote(), existingName, value, merge)
         }
 
-        private fun mergeJoined(
-            joined: LinkedHashMap<String, JoinedHeader>,
-            name: String,
-            value: String,
-            merge: Merge,
-        ) {
-            val key = name.lowercase(Locale.US)
-            val group = joined[key]
-            when (merge) {
-                Merge.ADD -> {
-                    val target = group ?: JoinedHeader(name, mutableListOf()).also { joined[key] = it }
-                    target.values.add(value)
-                }
-                Merge.DISTINCT ->
-                    if (group == null) {
-                        joined[key] = JoinedHeader(name, mutableListOf(value))
-                    } else if (group.values.none { it.equals(value, ignoreCase = true) }) {
-                        group.values.add(value)
-                    }
-                Merge.REPLACE -> joined[key] = JoinedHeader(name, mutableListOf(value))
-            }
+        /** Hands the collected headers to the builder, one call per name. */
+        fun emit() {
+            for (i in 0 until count) builder.addHeader(names[i]!!, values[i]!!)
         }
 
         /** Index of the first held name equal to [name] ignoring case, or -1. */
@@ -309,25 +237,12 @@ internal class RequestConverter(
             }
             return -1
         }
-
-        private fun promote(): LinkedHashMap<String, JoinedHeader> {
-            val existing = joined
-            if (existing != null) return existing
-            val groups = LinkedHashMap<String, JoinedHeader>()
-            for (i in 0 until count) {
-                val name = names[i]!!
-                groups[name.lowercase(Locale.US)] = JoinedHeader(name, mutableListOf(values[i]!!))
-            }
-            joined = groups
-            // The arrays are dead from here on; the map owns the headers.
-            count = 0
-            return groups
-        }
     }
 
     private companion object {
         private const val CONTENT_LENGTH_HEADER_NAME = "Content-Length"
         private const val CONTENT_TYPE_HEADER_NAME = "Content-Type"
+        private const val COOKIE_HEADER_NAME = "Cookie"
         private const val CONTENT_TYPE_HEADER_DEFAULT_VALUE = "application/octet-stream"
         private const val INITIAL_CAPACITY = 8
         private val DIRECT_EXECUTOR = Executor { it.run() }
