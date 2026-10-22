@@ -166,14 +166,14 @@ class OkHttpGuardTasksTest {
 
     @Test
     fun `pinDecision warns on newer untested versions`() {
-        val decision = pinDecision(setOf("5.5.1"))
+        val decision = pinDecision(setOf(newerThanNewestVerified()))
         assertTrue(decision is PinDecision.Warn)
         assertTrue((decision as PinDecision.Warn).message.contains("UNTESTED"))
     }
 
     @Test
     fun `failOnUntested promotes an untested warning to a failure`() {
-        val warned = pinDecision(setOf("5.5.1"))
+        val warned = pinDecision(setOf(newerThanNewestVerified()))
         val failed = applyFailOnUntested(warned, failOnUntested = true)
         assertTrue(failed is PinDecision.Fail)
         assertTrue((failed as PinDecision.Fail).message.contains("UNTESTED"))

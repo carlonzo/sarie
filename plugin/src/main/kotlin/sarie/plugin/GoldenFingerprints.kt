@@ -41,6 +41,16 @@ object GoldenFingerprints {
     val CACHE_STRATEGY_FACTORY_JVM_5_5_0 = "0b7197f51d2dc4a400121d774097515ef81ab3022add67e4605d7e5e21c9d6bc"
     val REAL_CALL_ANDROID_5_5_0 = "8e072744d9c2ae4193d987dcd0eb9975deb951823df9a9a160565e1f995c250a"
     val REAL_CALL_JVM_5_5_0 = "8e072744d9c2ae4193d987dcd0eb9975deb951823df9a9a160565e1f995c250a"
+    val CONNECT_INTERCEPTOR_ANDROID_5_5_1 = "bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527"
+    val CONNECT_INTERCEPTOR_JVM_5_5_1 = "bd324e22d23fd4a71896d116a745d37bdaa36a14e4a162cb808ac7b524c5e527"
+    val CALL_SERVER_INTERCEPTOR_ANDROID_5_5_1 = "5ac4bd374d3cc4149d270c7d908d7af89fe958e653cf21921ac9f8c3504b4026"
+    val CALL_SERVER_INTERCEPTOR_JVM_5_5_1 = "5ac4bd374d3cc4149d270c7d908d7af89fe958e653cf21921ac9f8c3504b4026"
+    val CACHE_ENTRY_ANDROID_5_5_1 = "2bc8910eee670c348bbe88a03415b26b32fe0c9f41478e9e031b8b5722830355"
+    val CACHE_ENTRY_JVM_5_5_1 = "2bc8910eee670c348bbe88a03415b26b32fe0c9f41478e9e031b8b5722830355"
+    val CACHE_STRATEGY_FACTORY_ANDROID_5_5_1 = "0b7197f51d2dc4a400121d774097515ef81ab3022add67e4605d7e5e21c9d6bc"
+    val CACHE_STRATEGY_FACTORY_JVM_5_5_1 = "0b7197f51d2dc4a400121d774097515ef81ab3022add67e4605d7e5e21c9d6bc"
+    val REAL_CALL_ANDROID_5_5_1 = "8e072744d9c2ae4193d987dcd0eb9975deb951823df9a9a160565e1f995c250a"
+    val REAL_CALL_JVM_5_5_1 = "8e072744d9c2ae4193d987dcd0eb9975deb951823df9a9a160565e1f995c250a"
 
     fun fingerprintsFor(version: String): Map<InstrumentTarget, Map<Variant, String>>? = when (version) {
         "5.0.0" -> mapOf(
@@ -139,6 +149,28 @@ object GoldenFingerprints {
             InstrumentTarget.REAL_CALL to mapOf(
                 Variant.ANDROID to REAL_CALL_ANDROID_5_5_0,
                 Variant.JVM to REAL_CALL_JVM_5_5_0,
+            ),
+        )
+        "5.5.1" -> mapOf(
+            InstrumentTarget.CONNECT_INTERCEPTOR to mapOf(
+                Variant.ANDROID to CONNECT_INTERCEPTOR_ANDROID_5_5_1,
+                Variant.JVM to CONNECT_INTERCEPTOR_JVM_5_5_1,
+            ),
+            InstrumentTarget.CALL_SERVER_INTERCEPTOR to mapOf(
+                Variant.ANDROID to CALL_SERVER_INTERCEPTOR_ANDROID_5_5_1,
+                Variant.JVM to CALL_SERVER_INTERCEPTOR_JVM_5_5_1,
+            ),
+            InstrumentTarget.CACHE_ENTRY to mapOf(
+                Variant.ANDROID to CACHE_ENTRY_ANDROID_5_5_1,
+                Variant.JVM to CACHE_ENTRY_JVM_5_5_1,
+            ),
+            InstrumentTarget.CACHE_STRATEGY_FACTORY to mapOf(
+                Variant.ANDROID to CACHE_STRATEGY_FACTORY_ANDROID_5_5_1,
+                Variant.JVM to CACHE_STRATEGY_FACTORY_JVM_5_5_1,
+            ),
+            InstrumentTarget.REAL_CALL to mapOf(
+                Variant.ANDROID to REAL_CALL_ANDROID_5_5_1,
+                Variant.JVM to REAL_CALL_JVM_5_5_1,
             ),
         )
         else -> null

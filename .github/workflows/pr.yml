@@ -1,4 +1,4 @@
-# PR checks. Matrix cells must match RecipeRegistry pins (currently 5.4.0, 5.5.0).
+# PR checks. Matrix cells must match RecipeRegistry pins (currently 5.4.0, 5.5.0, 5.5.1).
 # Catalog-version (no -PokhttpVersion) runs in catalog.yml when libs.versions.toml changes.
 name: PR
 
@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        okhttp: ["5.4.0", "5.5.0"]
+        okhttp: ["5.4.0", "5.5.0", "5.5.1"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -72,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        okhttp: ["5.4.0", "5.5.0"]
+        okhttp: ["5.4.0", "5.5.0", "5.5.1"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
@@ -95,6 +95,25 @@ jobs:
           ./scripts/download-caddy.sh
           ./scripts/download-curl-http3.sh
           ./scripts/gen-certs.sh
+      # Three matrix jobs download this image at once. sdkmanager has no retry, and a
+      # truncated zip ("Premature EOF") fails the emulator step before any test runs.
+      - name: Install API 30 system image
+        run: |
+          set -euo pipefail
+          command -v sdkmanager
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+          pkg='system-images;android-30;google_apis;x86_64'
+          for attempt in 1 2 3 4 5; do
+            if sdkmanager --install "$pkg"; then
+              exit 0
+            fi
+            echo "sdkmanager attempt ${attempt} failed for ${pkg}"
+            sleep $((attempt * 10))
+          done
+          echo "failed to install ${pkg}" >&2
+          exit 1
       - name: Instrumented suites
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:

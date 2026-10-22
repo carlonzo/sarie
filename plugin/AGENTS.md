@@ -73,7 +73,7 @@ later versions do). In that case one plain `HTTP_3 -> 6` store is inserted befor
 
 - `VerifyOkHttpPinTask` (`verifyOkHttpPin`): resolves the okhttp version from the runtime
   classpaths and applies `RecipeRegistry.decide`. Current behavior: verified versions in
-  `RecipeRegistry.recipes` (today 5.4.0 and 5.5.0) pass; versions newer than the oldest
+  `RecipeRegistry.recipes` (today 5.4.0, 5.5.0, and 5.5.1) pass; versions newer than the oldest
   supported one are UNTESTED and only warn (structural guard still applies, fingerprint check
   skipped); anything older, including okhttp 4, plus missing or mixed versions fail the build.
 - `VerifyOkHttpFingerprintTask` (`verifyOkHttpFingerprint`): SHA-256-checks each registered

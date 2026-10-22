@@ -55,6 +55,7 @@ object RecipeRegistry {
     val recipes: Map<String, Recipe> = mapOf(
         "5.4.0" to recipe("5.4.0"),
         "5.5.0" to recipe("5.5.0"),
+        "5.5.1" to recipe("5.5.1"),
     )
 
     fun isVerified(v: String): Boolean = v in recipes
