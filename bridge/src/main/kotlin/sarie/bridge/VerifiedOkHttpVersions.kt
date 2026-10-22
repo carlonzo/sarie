@@ -6,4 +6,5 @@ package sarie.bridge
 internal val VerifiedOkHttpVersions: Set<String> = setOf(
     "5.4.0",
     "5.5.0",
+    "5.5.1",
 )

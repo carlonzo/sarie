@@ -26,7 +26,7 @@ Why bother: Reddit moved Android feed traffic to HTTP/3 and saw feed failure rat
 ## Requirements
 
 - **Android application module** (the rewrite happens when packaging the APK)
-- **OkHttp 5.4.0** or **5.5.0** (older versions, including OkHttp 4, fail the build; newer versions warn)
+- **OkHttp 5.4.0**, **5.5.0**, or **5.5.1** (older versions, including OkHttp 4, fail the build; newer versions warn)
 - **minSdk 24+**
 - A Cronet provider on the classpath (embedded/bundled, platform HttpEngine, or Play Services)
 

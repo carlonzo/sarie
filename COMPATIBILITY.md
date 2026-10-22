@@ -8,7 +8,7 @@ set at build time (`RecipeRegistry`). Hosts keep their own `implementation("okht
 
 | This library line | OkHttp | Notes |
 | --- | --- | --- |
-| unpublished (this repo) | 5.4.0, 5.5.0 | 5.4.0 is the compile floor; 5.5.0 is the instrumentation-tests/default |
+| unpublished (this repo) | 5.4.0, 5.5.0, 5.5.1 | 5.4.0 is the compile floor; 5.5.1 is the instrumentation-tests/default |
 
 When a new OkHttp **shares** internals with this family, add it to `RecipeRegistry`, the
 CI matrix in `.github/workflows/pr.yml`, and this table (a **minor** of this library).

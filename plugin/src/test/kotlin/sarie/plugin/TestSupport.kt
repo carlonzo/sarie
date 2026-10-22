@@ -18,6 +18,17 @@ internal fun allRecipeVariants(): List<Pair<String, Variant>> =
     RecipeRegistry.recipes.keys.sorted().flatMap { version -> Variant.entries.map { version to it } }
 
 /**
+ * One patch past the newest pinned recipe. Stays UNTESTED for as long as the pin script only
+ * adds versions it has structurally verified, so these tests do not have to name a release
+ * that the next catalog bump is about to pin.
+ */
+internal fun newerThanNewestVerified(): String {
+    val newest = RecipeRegistry.recipes.keys.mapNotNull { parseOkHttpVersion(it) }.maxOrNull()
+        ?: error("RecipeRegistry has no parseable versions")
+    return "${newest.major}.${newest.minor}.${newest.patch + 1}"
+}
+
+/**
  * Stock bytecode of one registered target, read at test time out of the resolved OkHttp jar for
  * [version] rather than from a checked-in copy, so it can never drift from the dependency.
  *

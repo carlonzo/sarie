@@ -29,7 +29,7 @@ REGISTRY_KT="$PLUGIN_DIR/src/main/kotlin/sarie/plugin/RecipeRegistry.kt"
 
 # Released stable okhttp 5.x versions on Maven Central (re-verified against
 # .../com/squareup/okhttp3/okhttp/maven-metadata.xml). Pre-releases are NOT auto-pinned.
-STABLE_5X=(5.0.0 5.1.0 5.2.0 5.2.1 5.2.2 5.2.3 5.3.0 5.3.1 5.3.2 5.4.0 5.5.0)
+STABLE_5X=(5.0.0 5.1.0 5.2.0 5.2.1 5.2.2 5.2.3 5.3.0 5.3.1 5.3.2 5.4.0 5.5.0 5.5.1)
 
 # Versions pinned in RecipeRegistry.kt (lines shaped like `        "5.0.0" to ...,`).
 mapfile -t PINNED < <(grep -E '^[[:space:]]*"[0-9.]+" to ' "$REGISTRY_KT" | sed -E 's/.*"([^"]+)".*/\1/' | sort -u)

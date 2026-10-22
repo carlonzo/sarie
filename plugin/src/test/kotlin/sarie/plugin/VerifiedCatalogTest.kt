@@ -31,6 +31,25 @@ class VerifiedCatalogTest {
     }
 
     @Test
+    fun `pr workflow matrix lists exactly the verified recipes`() {
+        val workflow = repoFile(".github/workflows/pr.yml").readText()
+        val matrices = Regex("""okhttp:\s*\[([^\]]+)]""")
+            .findAll(workflow)
+            .map { match ->
+                Regex(""""([^"]+)"""")
+                    .findAll(match.groupValues[1])
+                    .map { it.groupValues[1] }
+                    .toList()
+            }
+            .toList()
+        assertEquals("bridge job and device job", 2, matrices.size)
+        val expected = RecipeRegistry.recipes.keys.sorted()
+        for (matrix in matrices) {
+            assertEquals(expected, matrix)
+        }
+    }
+
+    @Test
     fun `plugin compileOnly okhttp is the catalog min pin`() {
         val build = File("build.gradle.kts").readText()
         assertTrue(

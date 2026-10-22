@@ -2,7 +2,6 @@ package sarie.plugin
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,43 +9,33 @@ import org.junit.Test
 class RecipeRegistryTest {
 
     @Test
-    fun `pinned 5_5_0 recipe is registered with both variant fingerprints`() {
-        val recipe = RecipeRegistry.recipes["5.5.0"]
-        assertNotNull(recipe)
-        assertEquals("com.squareup.okhttp3:okhttp-android:5.5.0", recipe!!.fingerprintArtifacts.getValue(Variant.ANDROID))
-        assertEquals("com.squareup.okhttp3:okhttp-jvm:5.5.0", recipe.fingerprintArtifacts.getValue(Variant.JVM))
-        val connect = recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR)
-        val callServer = recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR)
-        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_ANDROID_5_5_0, connect.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_JVM_5_5_0, connect.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_ANDROID_5_5_0, callServer.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_JVM_5_5_0, callServer.getValue(Variant.JVM))
-        val entry = recipe.fingerprints.getValue(InstrumentTarget.CACHE_ENTRY)
-        val strategy = recipe.fingerprints.getValue(InstrumentTarget.CACHE_STRATEGY_FACTORY)
-        assertEquals(GoldenFingerprints.CACHE_ENTRY_ANDROID_5_5_0, entry.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CACHE_ENTRY_JVM_5_5_0, entry.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_ANDROID_5_5_0, strategy.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_JVM_5_5_0, strategy.getValue(Variant.JVM))
-    }
-
-    @Test
-    fun `verified 5_4_0 recipe is registered with both variant fingerprints`() {
-        val recipe = RecipeRegistry.recipes["5.4.0"]
-        assertNotNull(recipe)
-        assertEquals("com.squareup.okhttp3:okhttp-android:5.4.0", recipe!!.fingerprintArtifacts.getValue(Variant.ANDROID))
-        assertEquals("com.squareup.okhttp3:okhttp-jvm:5.4.0", recipe.fingerprintArtifacts.getValue(Variant.JVM))
-        val connect = recipe.fingerprints.getValue(InstrumentTarget.CONNECT_INTERCEPTOR)
-        val callServer = recipe.fingerprints.getValue(InstrumentTarget.CALL_SERVER_INTERCEPTOR)
-        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_ANDROID_5_4_0, connect.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CONNECT_INTERCEPTOR_JVM_5_4_0, connect.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_ANDROID_5_4_0, callServer.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CALL_SERVER_INTERCEPTOR_JVM_5_4_0, callServer.getValue(Variant.JVM))
-        val entry = recipe.fingerprints.getValue(InstrumentTarget.CACHE_ENTRY)
-        val strategy = recipe.fingerprints.getValue(InstrumentTarget.CACHE_STRATEGY_FACTORY)
-        assertEquals(GoldenFingerprints.CACHE_ENTRY_ANDROID_5_4_0, entry.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CACHE_ENTRY_JVM_5_4_0, entry.getValue(Variant.JVM))
-        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_ANDROID_5_4_0, strategy.getValue(Variant.ANDROID))
-        assertEquals(GoldenFingerprints.CACHE_STRATEGY_FACTORY_JVM_5_4_0, strategy.getValue(Variant.JVM))
+    fun `every pinned recipe is registered with both variant fingerprints`() {
+        assertTrue(RecipeRegistry.recipes.isNotEmpty())
+        for ((version, recipe) in RecipeRegistry.recipes) {
+            assertEquals(
+                "com.squareup.okhttp3:okhttp-android:$version",
+                recipe.fingerprintArtifacts.getValue(Variant.ANDROID),
+            )
+            assertEquals(
+                "com.squareup.okhttp3:okhttp-jvm:$version",
+                recipe.fingerprintArtifacts.getValue(Variant.JVM),
+            )
+            val verId = version.replace('.', '_')
+            for (target in InstrumentTarget.entries) {
+                for (variant in Variant.entries) {
+                    val field = "${target.name}_${variant.name}_$verId"
+                    val golden = GoldenFingerprints::class.java
+                        .getMethod("get$field")
+                        .invoke(GoldenFingerprints) as String
+                    assertEquals(
+                        "$version $field",
+                        golden,
+                        recipe.fingerprints.getValue(target).getValue(variant),
+                    )
+                    assertEquals(64, golden.length)
+                }
+            }
+        }
     }
 
     @Test
@@ -60,16 +49,17 @@ class RecipeRegistryTest {
 
     @Test
     fun `isVerified is true exactly for registry versions`() {
-        assertTrue(RecipeRegistry.isVerified("5.4.0"))
-        assertTrue(RecipeRegistry.isVerified("5.5.0"))
-        for (v in listOf("5.0.0", "5.3.2", "5.5.1", "4.12.0")) {
+        for (v in RecipeRegistry.recipes.keys) {
+            assertTrue(v, RecipeRegistry.isVerified(v))
+        }
+        for (v in listOf("5.0.0", "5.3.2", "4.12.0", newerThanNewestVerified())) {
             assertFalse(v, RecipeRegistry.isVerified(v))
         }
     }
 
     @Test
     fun `decide sends verified versions to their exact recipe`() {
-        for (v in listOf("5.4.0", "5.5.0")) {
+        for (v in RecipeRegistry.recipes.keys) {
             val decision = RecipeRegistry.decide(v)
             assertTrue(v, decision is VersionDecision.Verified)
             assertEquals(v, (decision as VersionDecision.Verified).recipe.okhttpVersion)
@@ -78,7 +68,7 @@ class RecipeRegistryTest {
 
     @Test
     fun `decide sends newer than oldest supported to the family guard`() {
-        for (v in listOf("5.4.1", "5.5.1", "6.0.0", "9.9.9")) {
+        for (v in listOf("5.4.1", newerThanNewestVerified(), "6.0.0", "9.9.9")) {
             val decision = RecipeRegistry.decide(v)
             assertTrue(v, decision is VersionDecision.Untested)
             decision as VersionDecision.Untested
@@ -109,9 +99,10 @@ class RecipeRegistryTest {
 
     @Test
     fun `guardFor returns the recipe guard for verified versions and the family guard otherwise`() {
-        assertEquals(RecipeRegistry.forVersion("5.5.0").guard, RecipeRegistry.guardFor("5.5.0"))
-        assertEquals(RecipeRegistry.forVersion("5.4.0").guard, RecipeRegistry.guardFor("5.4.0"))
-        assertEquals(RecipeRegistry.familyGuard, RecipeRegistry.guardFor("5.5.1"))
+        for (v in RecipeRegistry.recipes.keys) {
+            assertEquals(RecipeRegistry.forVersion(v).guard, RecipeRegistry.guardFor(v))
+        }
+        assertEquals(RecipeRegistry.familyGuard, RecipeRegistry.guardFor(newerThanNewestVerified()))
     }
 
     @Test
@@ -123,8 +114,9 @@ class RecipeRegistryTest {
 
     @Test
     fun `untested warning names the version, the verified set and the skipped check`() {
-        val warning = RecipeRegistry.untestedWarning("5.5.1")
-        assertTrue(warning, warning.contains("sarie: okhttp 5.5.1 is UNTESTED"))
+        val version = newerThanNewestVerified()
+        val warning = RecipeRegistry.untestedWarning(version)
+        assertTrue(warning, warning.contains("sarie: okhttp $version is UNTESTED"))
         assertTrue(warning, warning.contains("verified: ${RecipeRegistry.recipes.keys.sorted()}"))
         assertTrue(warning, warning.contains("structural guard"))
         assertTrue(warning, warning.contains("fingerprint identity check is skipped"))

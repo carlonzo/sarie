@@ -1,5 +1,6 @@
 package sarie.bridge
 
+import java.io.File
 import java.net.URL
 import java.net.URLConnection
 import java.net.URLStreamHandlerFactory
@@ -70,10 +71,12 @@ class SarieBridgeTest {
 
     @Test
     fun `verified set is exactly the supported okhttp versions`() {
-        assertEquals(setOf("5.4.0", "5.5.0"), VerifiedOkHttpVersions)
-        warnIfUnverified("5.5.0")
-        warnIfUnverified("5.4.0")
-        warnIfUnverified("5.5.1")
+        val pinned = pinnedRecipeVersions()
+        assertEquals(pinned, VerifiedOkHttpVersions)
+        for (version in pinned) {
+            warnIfUnverified(version)
+        }
+        warnIfUnverified(nextPatch(pinned))
         warnIfUnverified("4.12.0")
     }
 
@@ -322,5 +325,29 @@ class SarieBridgeTest {
         assertSame(fromBuilder.certificatePinner, fromDsl.certificatePinner)
         assertSame(fromBuilder.debugLogger, fromDsl.debugLogger)
     }
+}
+
+/** Versions pinned in RecipeRegistry (`"<version>" to recipe(...)`). */
+private fun pinnedRecipeVersions(): Set<String> {
+    val registry = generateSequence(File(".").canonicalFile) { it.parentFile }
+        .map { File(it, "plugin/src/main/kotlin/sarie/plugin/RecipeRegistry.kt") }
+        .firstOrNull { it.isFile }
+        ?: error("RecipeRegistry.kt not found from ${File(".").canonicalFile}")
+    return Regex("""^\s*"([0-9.]+)" to recipe\(""", RegexOption.MULTILINE)
+        .findAll(registry.readText())
+        .map { it.groupValues[1] }
+        .toSet()
+        .also { check(it.isNotEmpty()) { "no recipe pins in ${registry.path}" } }
+}
+
+/** One patch past the newest pin, so the unverified warning still has a version to fire on. */
+private fun nextPatch(versions: Set<String>): String {
+    val newest = versions.maxWith(compareBy({ it.substringBefore('.').toInt() }, {
+        it.substringAfter('.').substringBefore('.').toInt()
+    }, {
+        it.substringAfterLast('.').toInt()
+    }))
+    val patch = newest.substringAfterLast('.').toInt() + 1
+    return newest.substringBeforeLast('.') + ".$patch"
 }
 
