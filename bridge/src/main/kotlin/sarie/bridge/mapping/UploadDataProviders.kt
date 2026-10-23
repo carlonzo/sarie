@@ -20,15 +20,17 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
+import java.util.concurrent.Callable
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Future
+import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.Callable
 import okhttp3.RequestBody
 import okio.Buffer
 import okio.Sink
@@ -116,6 +118,8 @@ internal object UploadDataProviders {
         private val writeTimeoutMillis: Long =
             if (writeTimeoutMillis == 0L) Long.MAX_VALUE else writeTimeoutMillis
 
+        private val isClosed = AtomicBoolean(false)
+        private val taskRef = AtomicReference<FutureTask<ByteArray>?>()
         private var materialized: ByteArray? = null
         private var offset = 0
 
@@ -123,6 +127,9 @@ internal object UploadDataProviders {
 
         @Synchronized
         override fun read(sink: UploadDataSink, buffer: ByteBuffer) {
+            if (isClosed.get()) {
+                throw IOException("closed")
+            }
             val data = materialized ?: run {
                 requestBodyEvents?.start()
                 materialize().also {
@@ -142,28 +149,61 @@ internal object UploadDataProviders {
 
         @Synchronized
         override fun rewind(sink: UploadDataSink) {
+            if (isClosed.get()) {
+                sink.onRewindError(IOException("closed"))
+                return
+            }
             offset = 0
             sink.onRewindSucceeded()
         }
 
+        override fun close() {
+            if (!isClosed.compareAndSet(false, true)) return
+            taskRef.get()?.cancel(true)
+        }
+
         private fun materialize(): ByteArray {
-            val future = bodyReaderExecutor.submit(
+            if (isClosed.get()) throw IOException("closed")
+            val task = FutureTask<ByteArray>(
                 Callable {
+                    if (isClosed.get()) throw IOException("closed")
                     val sink = Buffer()
                     body.writeTo(sink)
                     sink.readByteArray()
                 },
             )
+            if (!taskRef.compareAndSet(null, task)) {
+                throw IOException("closed")
+            }
+            if (isClosed.get()) {
+                task.cancel(true)
+                throw IOException("closed")
+            }
+            try {
+                bodyReaderExecutor.execute(task)
+            } catch (t: Throwable) {
+                task.cancel(true)
+                throw if (t is IOException) t else IOException(t)
+            }
             return try {
-                future.get(writeTimeoutMillis, TimeUnit.MILLISECONDS)
+                task.get(writeTimeoutMillis, TimeUnit.MILLISECONDS)
             } catch (e: TimeoutException) {
-                future.cancel(true)
+                task.cancel(true)
                 throw IOException("Timed out writing the request body", e)
+            } catch (e: CancellationException) {
+                throw IOException("Upload was canceled", e)
             } catch (e: ExecutionException) {
+                task.cancel(true)
+                val cause = e.cause
+                if (cause is IOException) throw cause
                 throw IOException(e)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
+                task.cancel(true)
                 throw IOException(e)
+            } catch (t: Throwable) {
+                task.cancel(true)
+                throw if (t is IOException) t else IOException(t)
             }
         }
     }
@@ -184,13 +224,27 @@ internal object UploadDataProviders {
             if (writeTimeoutMillis == 0L) Long.MAX_VALUE else writeTimeoutMillis
 
         private val broker = UploadBodyDataBroker(writeTimeoutMillis)
-        private var readTask: Future<*>? = null
+        private val isClosed = AtomicBoolean(false)
+        private val readTaskRef = AtomicReference<FutureTask<Unit>?>()
         private var totalBytesReadFromOkHttp = 0L
 
         override fun getLength(): Long = contentLength
 
         override fun read(sink: UploadDataSink, buffer: ByteBuffer) {
-            ensureReadTaskStarted()
+            if (isClosed.get()) {
+                sink.onReadError(IOException("closed"))
+                return
+            }
+            try {
+                ensureReadTaskStarted()
+            } catch (e: Exception) {
+                sink.onReadError(if (e is IOException) e else IOException(e))
+                return
+            }
+            if (isClosed.get()) {
+                sink.onReadError(IOException("closed"))
+                return
+            }
 
             try {
                 if (contentLength == -1L) {
@@ -203,11 +257,15 @@ internal object UploadDataProviders {
                     readKnownBodyLength(sink, buffer)
                 }
             } catch (e: TimeoutException) {
-                readTask?.cancel(true)
+                close()
                 sink.onReadError(IOException(e))
             } catch (e: ExecutionException) {
-                readTask?.cancel(true)
-                sink.onReadError(IOException(e))
+                close()
+                val cause = e.cause
+                sink.onReadError(if (cause is IOException) cause else IOException(e))
+            } catch (e: IOException) {
+                close()
+                sink.onReadError(e)
             }
         }
 
@@ -263,24 +321,42 @@ internal object UploadDataProviders {
          * called at least once or Cronet would wait for data that never arrives.
          */
         private fun ensureReadTaskStarted() {
-            // No concurrent calls expected, so a simple flag suffices.
-            if (readTask == null) {
+            if (isClosed.get()) throw IOException("closed")
+            if (readTaskRef.get() != null) return
+
+            val task = FutureTask<Unit>(
+                Callable {
+                    if (isClosed.get()) {
+                        broker.abort(IOException("closed"))
+                        return@Callable
+                    }
+                    try {
+                        val sink = broker.buffer()
+                        body.writeTo(sink)
+                        // Close() flushes remaining bytes and signals end-of-body to Cronet;
+                        // without it Cronet would time out waiting for more data.
+                        sink.close()
+                    } catch (t: Throwable) {
+                        broker.setBackgroundReadError(t)
+                        throw t
+                    }
+                },
+            )
+
+            if (readTaskRef.compareAndSet(null, task)) {
+                if (isClosed.get()) {
+                    task.cancel(true)
+                    broker.abort(IOException("closed"))
+                    throw IOException("closed")
+                }
                 requestBodyEvents?.start()
-                readTask = readExecutor.submit(
-                    Callable {
-                        try {
-                            val sink = broker.buffer()
-                            body.writeTo(sink)
-                            // Close() flushes remaining bytes and signals end-of-body to Cronet;
-                            // without it Cronet would time out waiting for more data.
-                            sink.close()
-                        } catch (t: Throwable) {
-                            broker.setBackgroundReadError(t)
-                            throw t
-                        }
-                        null
-                    },
-                )
+                try {
+                    readExecutor.execute(task)
+                } catch (t: Throwable) {
+                    task.cancel(true)
+                    broker.abort(t)
+                    throw if (t is IOException) t else IOException(t)
+                }
             }
         }
 
@@ -290,6 +366,7 @@ internal object UploadDataProviders {
                 broker.enqueueBodyRead(buffer).get(writeTimeoutMillis, TimeUnit.MILLISECONDS)
             } catch (e: InterruptedException) {
                 Thread.currentThread().interrupt()
+                close()
                 throw IOException(e)
             }
             totalBytesReadFromOkHttp += buffer.position() - positionBeforeRead
@@ -299,6 +376,12 @@ internal object UploadDataProviders {
         override fun rewind(sink: UploadDataSink) {
             // One-shot bodies cannot replay.
             sink.onRewindError(UnsupportedOperationException("Rewind is not supported!"))
+        }
+
+        override fun close() {
+            if (!isClosed.compareAndSet(false, true)) return
+            broker.abort(IOException("closed"))
+            readTaskRef.get()?.cancel(true)
         }
     }
 
@@ -322,20 +405,24 @@ internal object UploadDataProviders {
         private val pendingRead = ArrayBlockingQueue<PendingRead>(1)
         private val isClosed = AtomicBoolean()
         private val backgroundReadError = AtomicReference<Throwable?>(null)
+        private val aborted = AtomicReference<Throwable?>(null)
+        private val transferLock = Any()
 
         /** Called by the upload provider when Cronet is ready for another body part. */
         fun enqueueBodyRead(readBuffer: ByteBuffer): Future<ReadResult> {
-            var backgroundThrowable = backgroundReadError.get()
-            if (backgroundThrowable != null) {
-                return failedFuture(backgroundThrowable)
+            val err = aborted.get() ?: backgroundReadError.get()
+            if (err != null) {
+                return failedFuture(err)
             }
             val future = CompletableFuture<ReadResult>()
-            pendingRead.add(PendingRead(readBuffer, future))
-
-            // Properly handle interleaving setBackgroundReadError / enqueueBodyRead calls.
-            backgroundThrowable = backgroundReadError.get()
-            if (backgroundThrowable != null) {
-                future.completeExceptionally(backgroundThrowable)
+            val entry = PendingRead(readBuffer, future)
+            synchronized(transferLock) {
+                val currentErr = aborted.get() ?: backgroundReadError.get()
+                if (currentErr != null) {
+                    future.completeExceptionally(currentErr)
+                    return future
+                }
+                pendingRead.add(entry)
             }
             return future
         }
@@ -343,30 +430,58 @@ internal object UploadDataProviders {
         /** Signals that reading the OkHttp body failed on the background thread. */
         fun setBackgroundReadError(t: Throwable) {
             backgroundReadError.set(t)
-            pendingRead.poll()?.let { it.future.completeExceptionally(t) }
+            synchronized(transferLock) {
+                pendingRead.poll()?.future?.completeExceptionally(t)
+            }
+        }
+
+        /** Signals that the upload was canceled or aborted. */
+        fun abort(t: Throwable) {
+            if (!aborted.compareAndSet(null, t)) return
+            synchronized(transferLock) {
+                pendingRead.poll()?.future?.completeExceptionally(t)
+            }
         }
 
         override fun write(source: Buffer, byteCount: Long) {
-            // Safeguard: close() is a no-op if the body length contract is honored.
+            val abortErr = aborted.get()
+            if (abortErr != null) {
+                throw IOException("closed", abortErr)
+            }
             check(!isClosed.get()) { "closed" }
 
             var bytesRemaining = byteCount
             while (bytesRemaining != 0L) {
                 val (readBuffer, future) = getPendingCronetRead()
-                val originalBufferLimit = readBuffer.limit()
-                readBuffer.limit(minOf(originalBufferLimit.toLong(), bytesRemaining).toInt())
-
-                try {
-                    val bytesRead = source.read(readBuffer)
-                    if (bytesRead == -1) {
-                        throw IOException("The source has been exhausted but we expected more!")
+                synchronized(transferLock) {
+                    val err = aborted.get()
+                    if (err != null) {
+                        future.completeExceptionally(err)
+                        throw IOException("closed", err)
                     }
-                    bytesRemaining -= bytesRead
-                    readBuffer.limit(originalBufferLimit)
-                    future.complete(ReadResult.SUCCESS)
-                } catch (e: IOException) {
-                    future.completeExceptionally(e)
-                    throw e
+                    val originalBufferLimit = readBuffer.limit()
+                    readBuffer.limit(minOf(originalBufferLimit.toLong(), bytesRemaining).toInt())
+
+                    val readError: Throwable? = try {
+                        val bytesRead = source.read(readBuffer)
+                        if (bytesRead == -1) {
+                            throw IOException("The source has been exhausted but we expected more!")
+                        }
+                        bytesRemaining -= bytesRead
+                        null
+                    } catch (t: Throwable) {
+                        t
+                    } finally {
+                        readBuffer.limit(originalBufferLimit)
+                    }
+
+                    if (readError == null) {
+                        future.complete(ReadResult.SUCCESS)
+                    } else {
+                        future.completeExceptionally(readError)
+                        if (readError is Error) throw readError
+                        throw if (readError is IOException) readError else IOException(readError)
+                    }
                 }
             }
         }
@@ -378,15 +493,27 @@ internal object UploadDataProviders {
          * pump task, which reports it as the background read error (unwinding any racing
          * provider-side future) and releases the executor thread.
          */
-        private fun getPendingCronetRead(): PendingRead = try {
-            pendingRead.poll(writeTimeoutMillis, TimeUnit.MILLISECONDS)
-                ?: throw IOException(
-                    "Timed out writing the request body",
-                    TimeoutException("Cronet stopped reading the request body"),
-                )
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw IOException("Interrupted while waiting for a read to finish!")
+        private fun getPendingCronetRead(): PendingRead {
+            val abortErr = aborted.get()
+            if (abortErr != null) {
+                throw IOException("closed", abortErr)
+            }
+            return try {
+                pendingRead.poll(writeTimeoutMillis, TimeUnit.MILLISECONDS)
+                    ?: run {
+                        val err = aborted.get()
+                        if (err != null) throw IOException("closed", err)
+                        throw IOException(
+                            "Timed out writing the request body",
+                            TimeoutException("Cronet stopped reading the request body"),
+                        )
+                    }
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                val err = aborted.get()
+                if (err != null) throw IOException("closed", err)
+                throw IOException("Interrupted while waiting for a read to finish!")
+            }
         }
 
         /**
@@ -394,8 +521,17 @@ internal object UploadDataProviders {
          * Cronet would wait for more data forever (resulting in a timeout).
          */
         override fun close() {
+            if (aborted.get() != null) return
             if (!isClosed.getAndSet(true)) {
-                getPendingCronetRead().future.complete(ReadResult.END_OF_BODY)
+                val pending = getPendingCronetRead()
+                synchronized(transferLock) {
+                    val err = aborted.get()
+                    if (err != null) {
+                        pending.future.completeExceptionally(err)
+                        return
+                    }
+                    pending.future.complete(ReadResult.END_OF_BODY)
+                }
             }
         }
 

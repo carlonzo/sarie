@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import sarie.bridge.CallRegistry
 import sarie.bridge.RequestFinishedExecutor
 import sarie.bridge.SarieBridge
@@ -40,6 +41,7 @@ import okio.Source
 import okio.Timeout
 import org.chromium.net.CronetException
 import org.chromium.net.RequestFinishedInfo
+import org.chromium.net.UploadDataProvider
 import org.chromium.net.UrlRequest
 import org.chromium.net.UrlResponseInfo
 
@@ -265,6 +267,16 @@ internal class OkHttpBridgeCallback(
     @Volatile
     private var request: UrlRequest? = null
 
+    private val uploadDataProvider = AtomicReference<UploadDataProvider?>(null)
+
+    fun attachUploadDataProvider(provider: UploadDataProvider) {
+        this.uploadDataProvider.set(provider)
+    }
+
+    fun closeUpload() {
+        uploadDataProvider.getAndSet(null)?.close()
+    }
+
     override fun onRedirectReceived(
         urlRequest: UrlRequest,
         urlResponseInfo: UrlResponseInfo,
@@ -275,10 +287,17 @@ internal class OkHttpBridgeCallback(
         // provide an empty one.
         isRedirect = true
         receivedHeadersAtMillis = System.currentTimeMillis()
-        deliverResponseHeaders(urlResponseInfo)
-        check(headersFuture.complete(urlResponseInfo))
-        check(bodySourceFuture.complete(Buffer()))
-        urlRequest.cancel()
+        try {
+            deliverResponseHeaders(urlResponseInfo)
+            check(headersFuture.complete(urlResponseInfo))
+            check(bodySourceFuture.complete(Buffer()))
+        } finally {
+            try {
+                urlRequest.cancel()
+            } finally {
+                closeUpload()
+            }
+        }
     }
 
     override fun onResponseStarted(urlRequest: UrlRequest, urlResponseInfo: UrlResponseInfo) {
@@ -298,6 +317,7 @@ internal class OkHttpBridgeCallback(
     }
 
     override fun onSucceeded(urlRequest: UrlRequest, urlResponseInfo: UrlResponseInfo) {
+        closeUpload()
         terminalCallbackSeen = true
         callbackResults.add(CallbackResult(CallbackStep.ON_SUCCESS, null))
     }
@@ -310,6 +330,7 @@ internal class OkHttpBridgeCallback(
         urlResponseInfo: UrlResponseInfo?,
         e: CronetException,
     ) {
+        closeUpload()
         terminalCallbackSeen = true
         // If this was called before we start reading the body, the exception will propagate in
         // the futures providing headers and the body wrapper.
@@ -323,6 +344,7 @@ internal class OkHttpBridgeCallback(
     }
 
     override fun onCanceled(urlRequest: UrlRequest, responseInfo: UrlResponseInfo?) {
+        closeUpload()
         terminalCallbackSeen = true
         canceled.set(true)
         callbackResults.add(CallbackResult(CallbackStep.ON_CANCELED, null))
@@ -465,7 +487,11 @@ internal class OkHttpBridgeCallback(
          * what ran out, so the two remain distinguishable to the caller.
          */
         private fun failCallTimeout(currentRequest: UrlRequest): Nothing {
-            currentRequest.cancel()
+            try {
+                currentRequest.cancel()
+            } finally {
+                closeUpload()
+            }
             throw InterruptedIOException(CALL_TIMEOUT_MESSAGE)
         }
 
@@ -507,7 +533,11 @@ internal class OkHttpBridgeCallback(
                 if (result == null) {
                     // Cronet still holds this read, so every later read must fail here instead.
                     canceled.set(true)
-                    currentRequest.cancel()
+                    try {
+                        currentRequest.cancel()
+                    } finally {
+                        closeUpload()
+                    }
                     if (callBudgetMillis == 0L || remainingCallMillis() == 0L) {
                         // The overall call deadline is what ran out, not the read timeout.
                         throw InterruptedIOException(CALL_TIMEOUT_MESSAGE)
@@ -581,7 +611,11 @@ internal class OkHttpBridgeCallback(
             closed = true
             try {
                 if (!finished.get()) {
-                    request?.cancel()
+                    try {
+                        request?.cancel()
+                    } finally {
+                        closeUpload()
+                    }
                     awaitAndDeliver()
                 }
             } finally {

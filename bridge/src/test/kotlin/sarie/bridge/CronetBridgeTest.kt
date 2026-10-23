@@ -3,6 +3,7 @@
 package sarie.bridge
 
 import sarie.bridge.mapping.FakeCronetException
+import sarie.bridge.mapping.FakeUploadDataSink
 import sarie.bridge.mapping.FakeUrlResponseInfo
 import sarie.bridge.mapping.OkHttpBridgeCallback
 import java.io.IOException
@@ -15,6 +16,7 @@ import java.net.URLStreamHandlerFactory
 import java.nio.ByteBuffer
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import okhttp3.Call
@@ -32,6 +34,7 @@ import okhttp3.internal.connection.RealCall
 import okhttp3.internal.http.CallServerInterceptor
 import okhttp3.internal.http.RealInterceptorChain
 import okio.Buffer
+import okio.BufferedSink
 import org.chromium.net.CronetEngine
 import org.chromium.net.CronetException
 import org.chromium.net.NetworkException
@@ -86,6 +89,7 @@ class CronetBridgeTest {
         var responseInfo: UrlResponseInfo = FakeUrlResponseInfo()
         var isRedirect = false
         var rejectFinishedListener = false
+        var suppressCancellationCallback = false
 
         /**
          * Number of requests (in build order) whose start() fails pre-headers with a
@@ -132,12 +136,20 @@ class CronetBridgeTest {
         var finishedListener: RequestFinishedInfo.Listener? = null
             private set
         var rejectFinishedListener = false
+        var uploadDataProvider: UploadDataProvider? = null
+            private set
+        var uploadExecutor: Executor? = null
+            private set
 
         override fun setHttpMethod(method: String): UrlRequest.Builder = this
         override fun addHeader(name: String, value: String): UrlRequest.Builder = this
         override fun disableCache(): UrlRequest.Builder = this
         override fun setPriority(priority: Int): UrlRequest.Builder = this
-        override fun setUploadDataProvider(provider: UploadDataProvider, executor: Executor): UrlRequest.Builder = this
+        override fun setUploadDataProvider(provider: UploadDataProvider, executor: Executor): UrlRequest.Builder {
+            uploadDataProvider = provider
+            uploadExecutor = executor
+            return this
+        }
         override fun allowDirectExecutor(): UrlRequest.Builder = this
         override fun setRequestFinishedListener(
             listener: RequestFinishedInfo.Listener,
@@ -202,7 +214,7 @@ class CronetBridgeTest {
         override fun cancel() {
             cancelCalls++
             // Real engines deliver onCanceled for started requests; the bridge must cope.
-            if (startEntered) {
+            if (startEntered && !engine.suppressCancellationCallback) {
                 if (!engine.isRedirect) {
                     callback.onCanceled(this, engine.responseInfo)
                 }
@@ -515,6 +527,97 @@ class CronetBridgeTest {
         assertTrue("expected IOException but was $thrown", thrown is IOException)
         assertEquals("Canceled", thrown.message)
         assertEquals(1, fake.cancelCalls)
+    }
+
+    @Test(timeout = 10_000L)
+    fun `direct bridge cancellation without engine callbacks releases upload writer and completes read`() {
+        val engine = ScriptedCronetEngine().apply {
+            responseInfo = FakeUrlResponseInfo(statusCode = 200)
+            suppressCancellationCallback = true
+        }
+        val gate = Gate()
+        engine.startGate = gate
+        install(engine, "example.com")
+
+        val writerEntered = CountDownLatch(1)
+        val blockLatch = CountDownLatch(1)
+        val writerExited = CountDownLatch(1)
+        val body = object : RequestBody() {
+            override fun contentType() = "text/plain".toMediaType()
+            override fun contentLength() = -1L
+            override fun writeTo(sink: BufferedSink) {
+                writerEntered.countDown()
+                try {
+                    blockLatch.await()
+                } finally {
+                    writerExited.countDown()
+                }
+            }
+        }
+
+        val (call, chain) = cronetChain(
+            OkHttpClient.Builder().writeTimeout(0, TimeUnit.MILLISECONDS).build(),
+            "https://example.com/upload",
+            method = "POST",
+            body = body,
+        )
+
+        val responseFuture = CompletableFuture<Response>()
+        Thread {
+            try {
+                responseFuture.complete(CronetBridge.intercept(chain))
+            } catch (t: Throwable) {
+                responseFuture.completeExceptionally(t)
+            }
+        }.start()
+
+        val readFuture = CompletableFuture<Unit>()
+        val sink = FakeUploadDataSink()
+
+        try {
+            assertTrue("start() must be reached and parked", gate.awaitEntered())
+            val builder = engine.builders.single()
+            val provider = builder.uploadDataProvider
+                ?: throw AssertionError("uploadDataProvider should be retained on builder")
+            val uploadExecutor = builder.uploadExecutor
+                ?: throw AssertionError("uploadExecutor should be retained on builder")
+
+            uploadExecutor.execute {
+                try {
+                    provider.read(sink, ByteBuffer.allocate(64))
+                    readFuture.complete(Unit)
+                } catch (t: Throwable) {
+                    readFuture.completeExceptionally(t)
+                }
+            }
+
+            assertTrue("writer must enter writeTo", writerEntered.await(5, TimeUnit.SECONDS))
+
+            // Unblock start() to deliver headers
+            gate.releaseNow()
+            val response = responseFuture.get(5, TimeUnit.SECONDS)
+            assertEquals(200, response.code)
+
+            // Direct cancellation via rewritten hook without any engine callback
+            cancelAsRewritten(call)
+
+            assertTrue(
+                "writer must exit promptly on direct cancel without engine callbacks",
+                writerExited.await(5, TimeUnit.SECONDS),
+            )
+
+            try {
+                readFuture.get(5, TimeUnit.SECONDS)
+                assertTrue("read must report error to sink", sink.readErrors.isNotEmpty())
+            } catch (e: ExecutionException) {
+                assertTrue("read error cause must be IOException", e.cause is IOException)
+            }
+
+            assertEquals(1, engine.builtRequests.single().cancelCalls)
+        } finally {
+            blockLatch.countDown()
+            gate.releaseNow()
+        }
     }
 
     // --- 407 guard ---

@@ -12,11 +12,11 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 /**
- * Regression for the F2 blocking finding: when a streaming upload is abandoned mid-flight
- * (call cancel / redirect / header-wait timeout - Cronet never invokes the provider again, the
- * cronet-api UploadDataProvider has no cancellation notification), the pump task must fail its
- * transfer and RETURN instead of blocking forever in the broker's pending-read wait, wedging
- * single-thread executors or leaking workers on [sarie.bridge.CronetExecutor].
+ * Regression for the F2 blocking finding: when an un-canceled streaming upload is abandoned mid-flight
+ * without engine cancellation callbacks, the pump task must fail its transfer on finite write timeout
+ * and RETURN instead of blocking forever in the broker's pending-read wait, wedging single-thread
+ * executors or leaking workers on [sarie.bridge.CronetExecutor]. (Explicit bridge cancellation and
+ * provider cleanup handle normal cancellation and terminal events without waiting for timeout.)
  */
 class UploadPumpWedgeTest {
 
