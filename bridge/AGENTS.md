@@ -75,10 +75,12 @@ Two cache call sites are separate from this flow: `CacheHooks.expectTlsBlock` an
   engine is canceled exactly once. Delivery comes from the rewritten `RealCall.cancel()`
   (`CronetBridge.notifyCanceled`), not from `Call.addEventListener`, whose per-call aggregate
   listener is pure garbage on this path.
-- `CronetExecutor.kt` (`CronetExecutor`, `CronetUploadExecutor`): two DISTINCT single-thread
-  executors on purpose. Cronet posts `UploadDataProvider.read()` onto the upload executor
-  while the provider submits body work to the reader executor; one shared thread
-  self-deadlocks until write timeout.
+- `CronetExecutor.kt` (`CronetExecutor`, `CronetUploadExecutor`): two DISTINCT executors
+  on purpose. `CronetExecutor` is a cached thread pool so blocking body writers get one worker
+  per active upload without starving when a pump waits for Cronet's next callback. Cronet posts
+  `UploadDataProvider.read()` onto the separate single-thread `CronetUploadExecutor` while
+  the provider submits body work to `CronetExecutor`; sharing one thread would self-deadlock
+  until write timeout.
 - `FallbackReason.kt`: the pre-send deny enum delivered to `SarieListener.onRouted`.
 - `SarieListener.kt`, `SarieResponseInfo.kt`, `SarieTimings.kt`, `SarieProtocol.kt`:
   observer hooks and public metrics types (no Cronet types leak). `onRouted` and `onResponseStarted`

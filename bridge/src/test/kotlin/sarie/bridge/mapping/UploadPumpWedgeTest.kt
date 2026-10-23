@@ -16,13 +16,13 @@ import org.junit.Test
  * (call cancel / redirect / header-wait timeout - Cronet never invokes the provider again, the
  * cronet-api UploadDataProvider has no cancellation notification), the pump task must fail its
  * transfer and RETURN instead of blocking forever in the broker's pending-read wait, wedging
- * the process-wide single-thread [sarie.bridge.CronetExecutor].
+ * single-thread executors or leaking workers on [sarie.bridge.CronetExecutor].
  */
 class UploadPumpWedgeTest {
 
     @Test(timeout = 10_000L)
     fun `abandoned streaming upload releases the executor and fails the transfer`() {
-        // Stand-in for the process-wide single-thread CronetExecutor that runs the pump.
+        // Local single-thread executor: deliberately pins abandonment thread-release behavior.
         val cronetExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "fake-cronet-executor").apply { isDaemon = true }
         }
