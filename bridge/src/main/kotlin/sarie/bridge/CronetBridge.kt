@@ -245,11 +245,16 @@ public object CronetBridge {
 
             // 5-step ordered cancellation protocol (Metis B3).
             if (call.isCanceled()) {
+                converted.callback.closeUpload()
                 val canceled = IOException(CANCELED_MESSAGE)
                 events.requestFailed(canceled)
                 throw canceled
             } // (i)
-            val registration = CallRegistry.register(call, AtomicReference(urlRequest)) // (ii)
+            val registration = CallRegistry.register(
+                call,
+                AtomicReference(urlRequest),
+                onCancel = converted.callback::closeUpload,
+            ) // (ii)
             converted.callback.attach(registration)
             try {
                 try {
@@ -275,6 +280,7 @@ public object CronetBridge {
 
                     awaitHeaders(converted.callback, registration, readTimeoutMillis)
                 } catch (e: IOException) {
+                    converted.callback.closeUpload()
                     // Pre-headers transport failure: the single idempotent retry (see KDoc).
                     if (converted.callback.responseHeadersDelivered) events.responseFailed(e)
                     else events.requestFailed(e)
@@ -314,6 +320,7 @@ public object CronetBridge {
                 // nothing wraps it and no response byte is copied an extra time.
                 return response
             } catch (e: Throwable) {
+                converted.callback.closeUpload()
                 if (e is IOException && !reportedOutcome) {
                     if (converted.callback.responseHeadersDelivered) events.responseFailed(e)
                     else events.requestFailed(e)

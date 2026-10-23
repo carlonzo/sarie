@@ -28,13 +28,18 @@ internal object CallRegistry {
 
     class RegisteredRequest internal constructor(
         val urlRequestRef: AtomicReference<UrlRequest?>,
+        private val onCancel: (() -> Unit)? = null,
     ) {
         private val cancelDelivered = AtomicBoolean(false)
 
-        /** Delivers at most one [UrlRequest.cancel]; no-op while the ref is empty. */
+        /** Delivers at most one [UrlRequest.cancel] and upload close; no-op while the ref is empty. */
         fun cancelUrlRequestOnce() {
             if (cancelDelivered.compareAndSet(false, true)) {
-                urlRequestRef.get()?.cancel()
+                try {
+                    urlRequestRef.get()?.cancel()
+                } finally {
+                    onCancel?.invoke()
+                }
             }
         }
     }
@@ -63,8 +68,12 @@ internal object CallRegistry {
      * replaces the entry: the previous attempt's guard is spent, so the fresh attempt gets its own
      * single cancel.
      */
-    fun register(call: RealCall, urlRequestRef: AtomicReference<UrlRequest?>): Registration {
-        val registered = RegisteredRequest(urlRequestRef)
+    fun register(
+        call: RealCall,
+        urlRequestRef: AtomicReference<UrlRequest?>,
+        onCancel: (() -> Unit)? = null,
+    ): Registration {
+        val registered = RegisteredRequest(urlRequestRef, onCancel)
         requests[call] = registered
         return Registration(call, registered)
     }

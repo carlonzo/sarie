@@ -126,27 +126,36 @@ internal class RequestConverter(
                     requestHeaders.add(CONTENT_TYPE_HEADER_NAME, CONTENT_TYPE_HEADER_DEFAULT_VALUE)
                 }
 
-                builder.setUploadDataProvider(
-                    UploadDataProviders.create(
-                        body,
-                        bodyReaderExecutor,
-                        writeTimeoutMillis,
-                        requestBodyEvents,
-                        contentLength = contentLength,
-                    ),
-                    uploadDataProviderExecutor,
+                val provider = UploadDataProviders.create(
+                    body,
+                    bodyReaderExecutor,
+                    writeTimeoutMillis,
+                    requestBodyEvents,
+                    contentLength = contentLength,
                 )
+                callback.attachUploadDataProvider(provider)
+                try {
+                    builder.setUploadDataProvider(provider, uploadDataProviderExecutor)
+                } catch (t: Throwable) {
+                    callback.closeUpload()
+                    throw t
+                }
             }
         }
 
-        requestHeaders.emit()
+        try {
+            requestHeaders.emit()
 
-        val snapshot = SarieBridge.snapshot()
-        snapshot?.mapper?.map(okHttpRequest, builder)
-        attachFinishedListener(builder, snapshot, call, callback)
-        builder.disableCache()
+            val snapshot = SarieBridge.snapshot()
+            snapshot?.mapper?.map(okHttpRequest, builder)
+            attachFinishedListener(builder, snapshot, call, callback)
+            builder.disableCache()
 
-        return ConvertedRequest(builder.build(), callback, okHttpRequest, responseConverter)
+            return ConvertedRequest(builder.build(), callback, okHttpRequest, responseConverter)
+        } catch (t: Throwable) {
+            callback.closeUpload()
+            throw t
+        }
     }
 
     private fun attachFinishedListener(
