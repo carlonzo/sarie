@@ -9,11 +9,13 @@ private val DAEMON_THREAD_FACTORY = ThreadFactory { runnable ->
 }
 
 /**
- * Bridge-owned single-thread daemon executor for the mapping layer's upload-provider and
- * body-reader work. Never the calling OkHttp thread (Metis B5): upload pumps must not run on
- * the thread blocked in intercept().
+ * Bridge-owned cached daemon executor for the mapping layer's upload-provider and body-reader
+ * work. Never the calling OkHttp thread (Metis B5): upload pumps must not run on the thread
+ * blocked in intercept(). Blocking body writers need one worker per active upload so a pump
+ * waiting for Cronet's next callback cannot starve another writer. Idle workers expire.
+ * Distinct callback executor remains necessary.
  */
-internal object CronetExecutor : ExecutorService by Executors.newSingleThreadExecutor(DAEMON_THREAD_FACTORY)
+internal object CronetExecutor : ExecutorService by Executors.newCachedThreadPool(DAEMON_THREAD_FACTORY)
 
 /**
  * Separate single-thread daemon executor driving Cronet's UploadDataProvider callbacks.

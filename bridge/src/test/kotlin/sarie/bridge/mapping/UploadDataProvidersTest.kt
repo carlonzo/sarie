@@ -183,9 +183,8 @@ class UploadDataProvidersTest {
 
     @Test(timeout = 10_000)
     fun `cancel mid streaming upload unwinds the pump and frees the executor`() {
-        // Real single-thread executor: mirrors the process-wide CronetExecutor where a wedged
-        // pump starves every subsequent upload. DaemonExecutorService would just spawn another
-        // thread per task and hide the wedge.
+        // Local single-thread executor: deliberately pins abandonment thread-release behavior
+        // so a wedged pump is caught immediately instead of hidden by spawning another thread.
         val processExecutor = Executors.newSingleThreadExecutor { runnable ->
             Thread(runnable).apply { isDaemon = true }
         }
