@@ -7,12 +7,15 @@ import sarie.bridge.mapping.FakeUploadDataSink
 import sarie.bridge.mapping.FakeUrlResponseInfo
 import sarie.bridge.mapping.OkHttpBridgeCallback
 import java.io.IOException
+import java.net.InetSocketAddress
 import java.net.ProtocolException
+import java.net.Proxy
 import java.net.ServerSocket
 import javax.net.ssl.SSLPeerUnverifiedException
 import java.net.URL
 import java.net.URLConnection
 import java.net.URLStreamHandlerFactory
+import java.net.UnknownHostException
 import java.nio.ByteBuffer
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
@@ -396,6 +399,20 @@ class CronetBridgeTest {
             "fallback must never touch the Cronet engine",
             engine.builders.isEmpty(),
         )
+    }
+
+    @Test
+    fun `fallback maps a malformed proxy hostname to UnknownHostException`() {
+        install(ScriptedCronetEngine(), "example.com")
+        val client = OkHttpClient.Builder()
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved("DU ", 8080)))
+            .build()
+        val chain = fallbackChain(client, "https://example.com/")
+
+        val error = assertThrows(UnknownHostException::class.java) { CronetBridge.intercept(chain) }
+
+        assertEquals(FallbackReason.proxy, routes.lastReason())
+        assertTrue(error.cause is IllegalArgumentException)
     }
 
     // --- Cronet path happy ---

@@ -9,6 +9,7 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.ProtocolException
 import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import javax.net.ssl.SSLPeerUnverifiedException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -196,7 +197,13 @@ public object CronetBridge {
      * stock itself compiles to (`copy$okhttp$default`) and preserves chain-effective settings.
      */
     private fun stockFallback(realChain: RealInterceptorChain): Response {
-        val exchange = realChain.call.initExchange(realChain)
+        val exchange = try {
+            realChain.call.initExchange(realChain)
+        } catch (e: IllegalArgumentException) {
+            // OkHttp 5.5.1 throws on malformed proxy hosts; remove once square/okhttp#9775 ships.
+            if (e.message?.startsWith("unexpected hostname") != true) throw e
+            throw UnknownHostException(e.message).apply { initCause(e) }
+        }
         val connectedChain = realChain.copy(exchange = exchange)
         return connectedChain.proceed(realChain.request)
     }
