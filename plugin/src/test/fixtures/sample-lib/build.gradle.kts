@@ -7,7 +7,12 @@ plugins {
 
 android {
     namespace = "sarie.sample.fixture.lib"
-    compileSdk = libs.versions.compileSdk.get().toInt()
+    compileSdk {
+        val spec = libs.versions.compileSdk.get().split('.')
+        version = release(spec[0].toInt()) {
+            minorApiLevel = spec.getOrElse(1) { "0" }.toInt()
+        }
+    }
 
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()

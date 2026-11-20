@@ -28,6 +28,8 @@ jobs:
           java-version: "25"
       - uses: gradle/actions/setup-gradle@v6
       - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-37.1'
       - name: Unpin machine-local JDK path
         run: |
           sed -i '/^org.gradle.java.home=/d' gradle.properties
