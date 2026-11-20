@@ -6,11 +6,25 @@ plugins {
 
 android {
     namespace = "sarie.bridge"
-    compileSdk = libs.versions.compileSdk.get().toInt()
+    compileSdk {
+        val spec = libs.versions.compileSdk.get().split('.')
+        version = release(spec[0].toInt()) {
+            minorApiLevel = spec.getOrElse(1) { "0" }.toInt()
+        }
+    }
 
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
         consumerProguardFiles("consumer-rules.pro")
+        // AGP copies compileSdk, minor included, into aar-metadata. The bridge does not
+        // reference 37.1 APIs, so consumers stay on the major platform (0.2.2 was 37.0).
+        aarMetadata {
+            minCompileSdk {
+                version = release(libs.versions.compileSdk.get().substringBefore('.').toInt()) {
+                    minorApiLevel = 0
+                }
+            }
+        }
     }
 
     compileOptions {

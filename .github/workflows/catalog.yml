@@ -71,6 +71,8 @@ jobs:
 
       - uses: android-actions/setup-android@v4
         if: steps.detect.outputs.changed == 'true'
+        with:
+          packages: 'platform-tools platforms;android-37.1'
 
       - name: Unpin machine-local JDK path
         if: steps.detect.outputs.changed == 'true'
